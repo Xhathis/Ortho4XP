@@ -9,7 +9,6 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import E, N, S, W, filedialog, messagebox
 
-import O4_Cfg_Vars as CFG
 import O4_DEM_Utils as DEM
 import O4_File_Names as FNAMES
 import O4_Imagery_Utils as IMG
@@ -17,7 +16,10 @@ import O4_OSM_Utils as OSM
 import O4_Overlay_Utils as OVL
 import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
-import O4_Vector_Map as VMAP
+# Modules whose variables are set via exec() from cfg_vars[...]["module"]
+# (e.g. "IMG.http_timeout=..."); referenced here so that these imports
+# are not removed as unused.
+_EXEC_TARGETS = (IMG, OSM, OVL, TILE, UI)
 from O4_Cfg_Vars import (
     cfg_app_vars,
     cfg_global_tile_vars,
@@ -1182,7 +1184,7 @@ class Ortho4XP_Config(tk.Toplevel):
                     self.v_[var].set(value)
                 # Apply changes to update global variables
                 self.apply_changes("tile")
-                UI.vprint(0, f"Backup configuration loaded for global tile settings.")
+                UI.vprint(0, "Backup configuration loaded for global tile settings.")
         except FileNotFoundError:
             messagebox.showinfo("Not found", "No backup global configuration found.")
             return
@@ -1244,7 +1246,7 @@ class Ortho4XP_Config(tk.Toplevel):
                     self.v_[var].set(value)
                 # Apply changes to update global variables
                 self.apply_changes("tile")
-                UI.vprint(0, f"Backup configuration loaded for application settings.")
+                UI.vprint(0, "Backup configuration loaded for application settings.")
         except FileNotFoundError:
             messagebox.showinfo("Not found", "No backup application configuration found.")
             return
@@ -1537,7 +1539,7 @@ class Ortho4XP_Config(tk.Toplevel):
                 message = f"{', '.join(keys[:-1])} and {keys[-1]} Config tabs have unsaved changes.\n"
             elif count == 3:
                 message = (
-                    f"Tile, Global, and Application Config tabs have unsaved changes.\n"
+                    "Tile, Global, and Application Config tabs have unsaved changes.\n"
                 )
             # Appears to be an issue with macOS and using "Cancel" as sometimes it will present
             # the messagebox twice. Also happens rarely with "Yes/No".

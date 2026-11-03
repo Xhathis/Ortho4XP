@@ -629,7 +629,7 @@ def initialize_combined_providers_dict():
 def initialize_local_combined_providers_dict(tile):
     # This function will select from list of providers the only
     # ones whose coverage intersect the given tile.
-    global local_combined_providers_dict, extents_dict
+    global local_combined_providers_dict
     UI.vprint(1, "-> Initializing providers with potential data on this tile.")
     local_combined_providers_dict = {}
     test_set = set([tile.default_website])
