@@ -12,7 +12,7 @@ try:
     from osgeo import gdal
     has_gdal = True
     gdal.UseExceptions()
-except:
+except ImportError:
     has_gdal = False
 from PIL import Image
 import O4_UI_Utils as UI
@@ -485,11 +485,14 @@ def read_elevation_from_file(
                 alt_dem = numpy.asarray(alt, dtype=numpy.float32).reshape(
                     (nxdem, nydem)
                 )[::-1]
-        except:
+        except (OSError, EOFError, ValueError) as e:
+            # Missing/short .raw file (EOFError from array.fromfile) or a
+            # size that doesn't make a square grid (reshape ValueError).
             UI.lvprint(
                 1,
                 "    ERROR: in reading elevation from",
                 file_name,
+                f"({type(e).__name__}: {e})",
                 "-> replaced with zero altitude.",
             )
             nxdem = nydem = base_if_error
@@ -526,7 +529,7 @@ def read_elevation_from_file(
                 nodata = -32768
             try:
                 epsg = int(ds.GetProjection().split('"')[-2])
-            except:
+            except (IndexError, ValueError):
                 UI.vprint(
                     1,
                     "    WARNING: raster DEM does not advertise its EPSG ",
@@ -552,11 +555,14 @@ def read_elevation_from_file(
             y1 = geo[3] + 0.5 * geo[5] - lat
             x1 = x0 + (nxdem - 1) * geo[1]
             y0 = y1 + (nydem - 1) * geo[5]
-        except:
+        except Exception as e:
+            # GDAL raises RuntimeError (UseExceptions), plus file and value
+            # errors from the code around it.
             UI.lvprint(
                 1,
                 "   ERROR: in reading ",
                 file_name,
+                f"({type(e).__name__}: {e})",
                 "-> replaced with zero altitude.",
             )
             nxdem = nydem = base_if_error
@@ -682,7 +688,7 @@ def ensure_elevation(source, lat, lon, verbose=True):
                 try:
                     lat0 = int(fname[1:3])
                     lon0 = int(fname[4:7])
-                except:
+                except ValueError:
                     UI.vprint(
                         2,
                         "      Archive contains the unknown file name",
@@ -753,7 +759,7 @@ def ensure_elevation(source, lat, lon, verbose=True):
         with open(FNAMES.elevation_data(source, lat, lon), "wb") as out:
             try:
                 out.write(r.content)
-            except:
+            except OSError:
                 return 0
     elif source in ("NED1", "NED1/3"):
         if os.path.exists(FNAMES.elevation_data(source, lat, lon)):
@@ -793,7 +799,7 @@ def ensure_elevation(source, lat, lon, verbose=True):
         with open(FNAMES.elevation_data(source, lat, lon), "wb") as out:
             try:
                 out.write(r.content)
-            except:
+            except OSError:
                 return 0
     else:
         UI.vprint(1, "   ERROR: Unknown elevation source.")
