@@ -780,7 +780,7 @@ def ensure_elevation(source, lat, lon, verbose=True):
         )
         tid = "n" if lat >= 0 else "s"
         tid = tid + str(abs(lat + 1)).zfill(2)
-        tid = tid + "w" if lon < 0 else "e"
+        tid = tid + ("w" if lon < 0 else "e")
         tid = tid + str(abs(lon)).zfill(3)
         url_base = url_base + tid + "/"
         usgs_name = (
