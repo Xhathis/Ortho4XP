@@ -94,6 +94,9 @@ def build_masks(tile, for_imagery=False):
             "absent.",
         )
         UI.exit_message_and_bottom_line("")
+        # Stop the build (CLI, build_all, batch): step 3 without masks
+        # would give a tile with hard water edges and no warning.
+        UI.red_flag = True
         return 0
     
     # Check or create dest dir 
@@ -136,6 +139,7 @@ def build_masks(tile, for_imagery=False):
                 f"({type(e).__name__}: {e}).",
                 " Please check your custom_dem entry."
             )
+            UI.red_flag = True
             return 0
 
     #################################
