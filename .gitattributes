@@ -1,0 +1,23 @@
+# Normalize text files to LF in the repository and in the working tree, so
+# that core.autocrlf on Windows checkouts does not produce whole-file diffs.
+* text=auto eol=lf
+
+# Windows batch files must keep CRLF to run reliably under cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: never convert or diff as text.
+*.7z binary
+*.bz2 binary
+*.dds binary
+*.dll binary
+*.exe binary
+*.gif binary
+*.jpg binary
+*.png binary
+*.so.* binary
+*.whl binary
+
+# Bundled Linux/macOS tools have no file extension; don't rely on detection.
+Utils/lin/** binary
+Utils/mac/** binary
