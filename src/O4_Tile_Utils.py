@@ -21,6 +21,20 @@ skip_downloads = False
 skip_converts = False
 
 ################################################################################
+def remove_if_exists(path):
+    """Delete a file during cleanup; a missing file is not an error.
+
+    Other failures (file locked, e.g. by X-Plane, or no permission) are
+    reported but don't stop the build: cleanup is not essential.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        UI.lvprint(1, "WARNING: could not delete", path, f"({e.strerror}).")
+
+################################################################################
 def download_textures(
     tile,
     download_queue,
@@ -170,15 +184,19 @@ def build_tile(tile):
             for f in os.listdir(os.path.join(tile.build_dir, "textures")):
                 if f[-4:] != ".png":
                     continue
-                try:
-                    os.remove(os.path.join(tile.build_dir, "textures", f))
-                except:
-                    pass
+                remove_if_exists(os.path.join(tile.build_dir, "textures", f))
         if not tile.grouped:
             try:
                 shutil.rmtree(os.path.join(tile.build_dir, "terrain"))
-            except:
+            except FileNotFoundError:
                 pass
+            except OSError as e:
+                # Stale .ter files may remain; worth knowing when a tile
+                # later shows wrong textures.
+                UI.lvprint(
+                    1, "WARNING: could not empty the terrain folder",
+                    f"({e.strerror}: {e.filename}).",
+                )
         if not os.path.isdir(os.path.join(tile.build_dir, "terrain")):
             os.makedirs(os.path.join(tile.build_dir, "terrain"))
     except Exception as e:
@@ -248,33 +266,21 @@ def build_tile(tile):
     )
     try:
         os.replace(dsf_file_name + ".tmp", dsf_file_name)
-    except:
-        UI.vprint(0, "ERROR : could not rename DSF file, tile is not active.")
+    except OSError as e:
+        UI.lvprint(
+            0, "ERROR : could not rename DSF file, tile is not active",
+            f"({e.strerror}).",
+        )
     if UI.red_flag:
         UI.exit_message_and_bottom_line()
         return 0
     if UI.cleaning_level > 1:
-        try:
-            os.remove(FNAMES.alt_file(tile))
-        except:
-            pass
-        try:
-            os.remove(FNAMES.input_node_file(tile))
-        except:
-            pass
-        try:
-            os.remove(FNAMES.input_poly_file(tile))
-        except:
-            pass
+        remove_if_exists(FNAMES.alt_file(tile))
+        remove_if_exists(FNAMES.input_node_file(tile))
+        remove_if_exists(FNAMES.input_poly_file(tile))
     if UI.cleaning_level > 2:
-        try:
-            os.remove(FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon))
-        except:
-            pass
-        try:
-            os.remove(FNAMES.apt_file(tile))
-        except:
-            pass
+        remove_if_exists(FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon))
+        remove_if_exists(FNAMES.apt_file(tile))
     if UI.cleaning_level > 1 and not tile.grouped:
         remove_unwanted_textures(tile)
     UI.timings_and_bottom_line(timer)
@@ -392,7 +398,9 @@ def build_tile_list(
                 UI.gui.earth_window.dico_tiles_todo[(lat, lon)]
             )
             UI.gui.earth_window.dico_tiles_todo.pop((lat, lon), None)
-        except:
+        except Exception:
+            # Cosmetic only: no GUI (AttributeError), tile not on the map
+            # (KeyError) or Earth window closed (tkinter.TclError).
             pass
     UI.lvprint(
         0, "Batch process completed in", UI.nicer_timer(time.time() - timer)
@@ -422,10 +430,7 @@ def remove_unwanted_textures(tile):
             continue
         if f not in texture_list:
             print("Removing obsolete texture", f)
-            try:
-                os.remove(os.path.join(tile.build_dir, "textures", f))
-            except:
-                pass
+            remove_if_exists(os.path.join(tile.build_dir, "textures", f))
 
 def delete_incomplete_imgs(tile):
     """Delete orthophoto jpegs and dds that have white squares."""
