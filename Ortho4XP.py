@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import traceback
 
 Ortho4XP_dir = '..' if getattr(sys, 'frozen', False) else '.'
 
@@ -25,6 +26,7 @@ import O4_Mesh_Utils as MESH
 import O4_Mask_Utils as MASK
 import O4_Tile_Utils as TILE
 import O4_GUI_Utils as GUI
+import O4_UI_Utils as UI
 import O4_Config_Utils as CFG  # CFG imported last because it can modify other modules variables
 
 cmd_line = "USAGE: Ortho4XP.py lat lon imagery zl (won't read a tile config)\n  OR:  Ortho4XP.py lat lon (with existing tile config file)"
@@ -75,10 +77,17 @@ if __name__ == '__main__':
             except:
                 print(cmd_line); sys.exit()
         try:
-            VMAP.build_poly_file(tile)
-            MESH.build_mesh(tile)
-            MASK.build_masks(tile)
-            TILE.build_tile(tile)
+            # Each step raises UI.red_flag when it fails or is interrupted;
+            # don't run the next step on top of missing or stale data, and
+            # exit non-zero so that scripts driving batch builds can tell.
+            for step in (VMAP.build_poly_file, MESH.build_mesh,
+                         MASK.build_masks, TILE.build_tile):
+                step(tile)
+                if UI.red_flag:
+                    print("Build stopped, see Ortho4XP.log.")
+                    sys.exit(1)
             print("Bon vol!")
-        except:
+        except Exception:
+            traceback.print_exc()
             print("Crash!")
+            sys.exit(1)
