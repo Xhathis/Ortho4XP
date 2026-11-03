@@ -549,7 +549,14 @@ def include_water(vector_map, tile):
             (idx_water, dico_water) = VECT.MultiPolygon_to_Indexed_Polygons(
                 water_area, merge_overlappings=tile.clean_bad_geometries
             )
-        except:
+        except Exception as e:
+            # Returning quietly here left the tile without any inland water
+            # (build_poly_file ignores the return value); stop instead.
+            UI.lvprint(
+                0, "   ERROR: could not clean the inland water geometry",
+                f"({type(e).__name__}: {e}), stopping.",
+            )
+            UI.red_flag = True
             return 0
         UI.vprint(
             2, "      Number of water Multipolygons : " + str(len(dico_water))
@@ -571,7 +578,13 @@ def include_water(vector_map, tile):
             (idx_water, dico_water) = VECT.MultiPolygon_to_Indexed_Polygons(
                 sea_equiv_area, merge_overlappings=tile.clean_bad_geometries
             )
-        except:
+        except Exception as e:
+            # Same as above, for the large water bodies treated like sea.
+            UI.lvprint(
+                0, "   ERROR: could not clean the large water geometry",
+                f"({type(e).__name__}: {e}), stopping.",
+            )
+            UI.red_flag = True
             return 0
         UI.vprint(
             2, "      Number of water Multipolygons : " + str(len(dico_water))
@@ -662,8 +675,12 @@ def include_patches(vector_map, tile):
                 input_tags=None,
                 target_tags=None,
             )
-        except:
-            UI.vprint(1, "     Error in treating", pfile_name, ", skipped.")
+        except Exception as e:
+            # User-made patch file: any parse error only skips this patch.
+            UI.vprint(
+                1, "     Error in treating", pfile_name,
+                f"({type(e).__name__}: {e}), skipped.",
+            )
         patches_list.append(pfile_name[:-10])
         dw = patch_layer.dicosmw
         dn = patch_layer.dicosmn
@@ -704,7 +721,7 @@ def include_patches(vector_map, tile):
                         alti_way = numpy.ones((len(way), 1)) * float(
                             wtags["altitude"]
                         )
-                    except:
+                    except ValueError:
                         alti_way = numpy.ones((len(way), 1)) * numpy.mean(
                             tile.dem.alt_vec(way)
                         )
@@ -722,20 +739,20 @@ def include_patches(vector_map, tile):
                     try:
                         altitude_high = float(wtags["altitude_high"])
                         altitude_low = float(wtags["altitude_low"])
-                    except:
+                    except (KeyError, ValueError):
                         altitude_high = tile.dem.alt_vec(short_high).mean()
                         altitude_low = tile.dem.alt_vec(short_low).mean()
                     try:
                         cell_size = float(wtags["cell_size"])
-                    except:
+                    except (KeyError, ValueError):
                         cell_size = 10
                     try:
                         rnw_profile = wtags["profile"]
-                    except:
+                    except KeyError:
                         rnw_profile = "plane"
                     try:
                         alpha = float(wtags["steepness"])
-                    except:
+                    except (KeyError, ValueError):
                         alpha = 2
                     if "tanh" in rnw_profile:
                         rnw_profile = lambda x: tanh_profile(alpha, x)
@@ -824,8 +841,12 @@ def include_patches(vector_map, tile):
                                 )
                     else:
                         UI.vprint(2, "     Skipping invalid patch polygon.")
-                except:
-                    UI.vprint(2, "     Skipping invalid patch polygon.")
+                except Exception as e:
+                    # Geometry from user patch data (shapely, vector map).
+                    UI.vprint(
+                        2, "     Skipping invalid patch polygon",
+                        f"({type(e).__name__}: {e}).",
+                    )
             else:
                 vector_map.insert_way(
                     numpy.hstack([way, alti_way]), "DUMMY", check=True
@@ -839,7 +860,7 @@ def include_patches(vector_map, tile):
             pfile_namelong = os.path.join(patch_dir, pdir_name, pfile_name)
             try:
                 pfile = open(pfile_namelong, "r")
-            except:
+            except OSError:
                 continue
             firstline = pfile.readline()
             if not "ANCHOR" in firstline:
@@ -855,7 +876,7 @@ def include_patches(vector_map, tile):
                 (lon_anchor, lat_anchor, alt_anchor, heading_anchor) = [
                     float(x) for x in firstline.split()[1:]
                 ]
-            except:
+            except ValueError:
                 try:
                     (lon_anchor, lat_anchor, heading_anchor) = [
                         float(x) for x in firstline.split()[1:]
@@ -863,7 +884,7 @@ def include_patches(vector_map, tile):
                     alt_anchor = tile.dem.alt(
                         (lon_anchor - tile.lon, lat_anchor - tile.lat)
                     )
-                except:
+                except ValueError:
                     UI.vprint(
                         1,
                         "     Anchor wrongly encode for : ",
@@ -962,7 +983,12 @@ def keep_obj8(
                         )
                     )
                 multipol = VECT.ensure_MultiPolygon(ops.unary_union(polist))
-            except:
-                pass
+            except Exception as e:
+                # Malformed OBJ8 indices or geometry: the object's footprint
+                # is then missing from the mesh, which used to go unnoticed.
+                UI.vprint(
+                    1, "     WARNING: could not use the triangles of",
+                    objfile_name, f"({type(e).__name__}: {e}).",
+                )
     f.close()
     return multipol
