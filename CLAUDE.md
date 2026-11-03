@@ -89,7 +89,9 @@ DEM for masks fails in step 2.5), `sim_batch.py error|stop` (batch
 of 3, steps 1-2.5, with an error or a Stop on tile 2) and
 `gui_smoke.py` (scripted run of the real GUI: Earth and config
 windows, tile selection; no downloads, no Custom Scenery links; back
-up .last_gui_params.txt around it).
+up .last_gui_params.txt around it) and `cache_roundtrip.py
+fresh|cached <dir>` (step 1 with the water layer downloaded into, then
+recycled from, a scratch cache; needs Overpass).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
 
 Test results:
@@ -180,6 +182,14 @@ Test results:
   same as dev's module; overlay extraction identical to master.
 - `test` @ 53c6742 (+ the four above), 2026-11-03: 4-arg and 2-arg CLI
   builds byte-identical, all five sims as designed, gui_smoke 7/7 ok.
+  → `dev` fast-forwarded to 9a2662d (with these notes) on 2026-11-03.
+- `fix/overlay-tmp-cleanup` @ f6e9ec8 (#18), `fix/validate-max-threads` @
+  c456e36 (#13), `fix/remove-swp-file` @ 32b3217 (#12), `fix/geotag-script`
+  @ ca530f3 (#11), `fix/osm-cache-order` @ 6070f6e (#9).
+- `test` @ 2571102 (+ the five above), 2026-11-03: builds byte-identical,
+  all sims and gui_smoke as before, providers unchanged, and
+  cache_roundtrip: fresh download and recycled cache now give identical
+  .poly/.node.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -217,8 +227,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    Narrow them module by module, to the specific exceptions
    (`OSError`, `ValueError`, `KeyError`, `requests` exceptions, ...), and log
    what was caught.
-4. **FIXED** for the GUI links (`f968a8c`, `make_dir_link()`);
-   `O4_Geotag.py` still open (see #11).
+4. **FIXED** (`f968a8c` GUI links, `ca530f3` O4_Geotag.py).
    **Shell commands built from strings:**
    `src/O4_GUI_Utils.py` ~lines 1618–1721 create links with
    `os.system('MKLINK /J "..." "..."')` (Windows) / `ln -s` (other), and
@@ -250,7 +259,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    prints a bare number (`11184952`) twice — a leftover debug print.
    (The doubled step 2.5 lines are FIXED by `fa7510c`; the debug print is
    open.)
-9. **Freshly downloaded and recycled OSM data give different meshes.** Same
+9. **FIXED** (`6070f6e`): write_to_file() wrote ways/relations in set
+   order, so a re-read cache got other ids than the download. Cache files
+   written before the fix keep their old order (the baseline relies on
+   them); re-downloaded caches now match fresh downloads.
+   **Freshly downloaded and recycled OSM data give different meshes.** Same
    code (master 3cff870), same config: building from a fresh Overpass
    download of the water layer gave 984,186 triangles; recycling the cached
    `+55+012_water.osm.bz2` gave 984,150 (18 fewer vertices, 1 mask and the
@@ -261,10 +274,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 10. **FIXED** (`8996e6d`, also selects Python 3.13 and stops on errors).
     **`install_windows.bat:13`** installs `gdal-3.11.1-cp313…whl`, but only
     `gdal-3.12.2` is bundled in `Utils/win/`, so the script fails there.
-11. **`src/O4_Geotag.py:5`** calls `Transformer.transform("epsg:4326",
+11. **FIXED** (`ca530f3`, GDAL API instead of os.system).
+    **`src/O4_Geotag.py:5`** calls `Transformer.transform("epsg:4326",
     "epsg:3857")`; should be `Transformer.from_crs(...)`. Standalone script,
     not imported by the app, crashes when run. Also uses `os.system` (#4).
-12. `Providers/Sweden/.SE.lay.swp` is a stray vim swap file committed
+12. **FIXED** (`32b3217`). `Providers/Sweden/.SE.lay.swp` is a stray vim swap file committed
     upstream.
 14. **FIXED** (`554ea16`): `keep_obj8()` returned an unassigned
     variable when an OBJ8 patch had no usable TRIS, crashing step 1
@@ -278,10 +292,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 17. **FIXED** (`ed16185`): `Ortho4XP.py lat lon` never read the tile
     config, built with an empty provider (exit 0) and saved that into
     the tile config; it now reads the tile config or exits 1.
-18. `build_overlay()` removes only the elevation and sea_level rasters
+18. **FIXED** (`f6e9ec8`). `build_overlay()` removed only the elevation and sea_level rasters
     from tmp; the 9 other XP12 rasters (seasons, soundscape) stay
     (also on master).
-13. **`max_threads` in a .lay file is not validated:** when `int()`
+13. **FIXED** (`c456e36`, also rejects 0 and negatives).
+    **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
     provider dict (found by the broken-config test, same on master).
 
