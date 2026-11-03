@@ -6,6 +6,7 @@ import random
 import requests
 import numpy
 from shapely import geometry, ops
+from shapely.errors import ShapelyError
 import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
 from O4_Version import version as O4XP_VERSION
@@ -82,7 +83,7 @@ class OSM_layer:
                     pfile = bz2.open(osm_file_name, "rt", encoding="utf-8")
                 else:
                     pfile = open(osm_file_name, "r", encoding="utf-8")
-            except:
+            except OSError:
                 UI.vprint(
                     1,
                     "    Could not open",
@@ -160,7 +161,7 @@ class OSM_layer:
                     continue
                 try:
                     wayid = dicosmw_id_map[items[3]]
-                except:
+                except KeyError:
                     continue
                 self.dicosmrorig[osmid][role].append(wayid)
                 endpt1 = self.dicosmw[wayid][0]
@@ -262,7 +263,7 @@ class OSM_layer:
                     ):
                         try:
                             self.dicosmfirst["w"].remove(wayid)
-                        except:
+                        except ValueError:
                             pass
                 if not self.dicosmr[osmid]["outer"]:
                     del self.dicosmr[osmid]
@@ -301,7 +302,7 @@ class OSM_layer:
                 fout = bz2.open(filename, "wt", encoding="utf-8")
             else:
                 fout = open(filename, "w", encoding="utf-8")
-        except:
+        except OSError:
             UI.vprint(1, "    Could not open", filename, "for writing.")
             return 0
         fout.write(
@@ -414,7 +415,7 @@ def OSM_queries_to_OSM_layer(
             try:
                 target_tags[osm_type].append((items[1], items[3]))
                 input_tags[osm_type].append((items[1], items[3]))
-            except:
+            except IndexError:
                 target_tags[osm_type].append((items[1], ""))
                 input_tags[osm_type].append((items[1], ""))
             for tag in tags_of_interest:
@@ -481,7 +482,7 @@ def OSM_query_to_OSM_layer(
         try:
             target_tags[osm_type].append((items[1], items[3]))
             input_tags[osm_type].append((items[1], items[3]))
-        except:
+        except IndexError:
             target_tags[osm_type].append((items[1], ""))
             input_tags[osm_type].append((items[1], ""))
         for tag in tags_of_interest:
@@ -630,14 +631,14 @@ def OSM_to_MultiLineString(osm_layer, lat, lon, tags_for_exclusion=set(), filter
         if filter and not filter(way, filtered_segs):
             try:
                 multiline_reject.append(geometry.LineString(way))
-            except:
+            except (ShapelyError, ValueError):
                 pass
             done += 1
             continue
         try:
             multiline.append(geometry.LineString(way))
             filtered_segs += len(way)
-        except:
+        except (ShapelyError, ValueError):
             pass
         done += 1
     UI.progress_bar(1, 100)
