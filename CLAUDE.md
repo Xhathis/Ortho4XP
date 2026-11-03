@@ -107,6 +107,24 @@ Test results:
   macOS/Linux os.symlink branch not run.
 - `test` @ 1fca344 (+ docs/claude-md, subprocess-links), 2026-11-03:
   DSF byte-identical, 17/17 masks identical, app log identical, exit 0.
+  → `dev` fast-forwarded to 9cf55ef (with this note) on 2026-11-03.
+- `fix/install-windows` @ 8996e6d (#10): dry run in a scratch copy
+  (`pip --dry-run`): picks Python 3.13; missing wheel / wrong Python stop
+  with FAILED. Real install not run.
+- `fix/debug-print` @ 4080812 (#8): build byte-identical, 216 stray
+  number lines gone from the console.
+- `fix/bare-excepts-tile-utils` @ 4cd0930 (#3): 10 sites; helper
+  `remove_if_exists()` unit-tested with locked files; build identical.
+  Cleanup deletions only run at cleaning_level > 1 (not in a build).
+- `fix/bare-excepts-imagery-utils` @ d426784 (#3): 34 sites; config
+  dicts identical to master, 13 broken config files give identical
+  results to master; build identical, also with one DDS forced through
+  convert_texture() (DDS identical).
+- `test` @ 2c11379 (+ the four branches above), 2026-11-03: DSF
+  byte-identical, 17/17 masks, app log identical, exit 0, console 171
+  lines; OSM failure simulation still stops with exit 1.
+  Merge note: install_windows.bat conflicted (line endings only,
+  renormalized on `test` by fix/gitattributes); took the fix branch.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -133,7 +151,13 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    silently does nothing. `delete_old_masks_in_tile(tile, dest_dir)` exists
    separately. Decide: remove the block, or pass `dest_dir` in. Check which
    caller is responsible for deleting old masks before changing it.
-3. **166 bare `except:` clauses** in live code. They also catch
+3. **In progress** — done: O4_Mask_Utils (#1/#2 only), O4_Tile_Utils,
+   O4_Imagery_Utils; 117 left on `test` (GUI 30, Config 15,
+   Vector_Map 14, Mesh 12, Airport 12, ...). Pattern: ignore only the
+   expected error (e.g. FileNotFoundError), report other OSErrors, let
+   coding errors raise; `except Exception` only at trust boundaries
+   (eval of config, user code, downloaded data) with a comment.
+   **166 bare `except:` clauses** in live code. They also catch
    `KeyboardInterrupt`/`SystemExit` and hide coding errors (see #2). Do NOT
    mass-replace: some are used as control flow ("file missing → continue").
    Narrow them module by module, to the specific exceptions
@@ -165,7 +189,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    (or retry) instead. Related: `get_overpass_data()` logs every exception
    as "server was too busy" without the actual error, and gives up after 8
    tries with waits up to 256 s (step 1 took 51 min).
-8. Log oddities seen in the baseline: step 2.5 prints "-> Deleting existing
+8. **FIXED** (`fa7510c` doubled lines, `4080812` debug print).
+   Log oddities seen in the baseline: step 2.5 prints "-> Deleting existing
    masks" / "-> Reading mesh data" twice (check against #2), and step 3
    prints a bare number (`11184952`) twice — a leftover debug print.
    (The doubled step 2.5 lines are FIXED by `fa7510c`; the debug print is
@@ -178,13 +203,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    `update_dicosm`) changes element order or drops data. Not yet analysed.
    Consequence: compare test builds only against a baseline built from the
    *same cached* OSM files.
-10. **`install_windows.bat:13`** installs `gdal-3.11.1-cp313…whl`, but only
+10. **FIXED** (`8996e6d`, also selects Python 3.13 and stops on errors).
+    **`install_windows.bat:13`** installs `gdal-3.11.1-cp313…whl`, but only
     `gdal-3.12.2` is bundled in `Utils/win/`, so the script fails there.
 11. **`src/O4_Geotag.py:5`** calls `Transformer.transform("epsg:4326",
     "epsg:3857")`; should be `Transformer.from_crs(...)`. Standalone script,
     not imported by the app, crashes when run. Also uses `os.system` (#4).
 12. `Providers/Sweden/.SE.lay.swp` is a stray vim swap file committed
     upstream.
+13. **`max_threads` in a .lay file is not validated:** when `int()`
+    fails (e.g. `max_threads=many`), the raw string stays in the
+    provider dict (found by the broken-config test, same on master).
 
 ## Planned order of work
 
@@ -196,6 +225,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    `masks_custom_extent` off and on.
 4b. ~~`fix/osm-layer-failure` (#7)~~ — on `dev`.
 5. ~~`fix/subprocess-links` (#4)~~ — merged to `test` @ 1fca344.
+5b. ~~#10, #8~~ — on `test`.
 6. Bare excepts (#3), one module per branch, starting with the modules on the
    batch-build path (`O4_Tile_Utils`, `O4_Imagery_Utils`, `O4_Mask_Utils`).
 
