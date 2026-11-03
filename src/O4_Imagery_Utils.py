@@ -49,6 +49,7 @@ check_tms_response = False
 max_connect_retries = 10
 max_baddata_retries = 10
 incomplete_imgs = {}
+failed_conversions = []  # DDS that could not be converted (see build_tile)
 
 
 user_agent_generic = (
@@ -2579,6 +2580,8 @@ def convert_texture(
                 os.path.join(tile.build_dir, "textures", out_file_name),
                 "(10 tries)",
             )
+            # build_tile() checks this list before activating the DSF.
+            failed_conversions.append(out_file_name)
             break
         UI.lvprint(
             1,
