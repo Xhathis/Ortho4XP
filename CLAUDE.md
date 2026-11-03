@@ -91,7 +91,10 @@ of 3, steps 1-2.5, with an error or a Stop on tile 2) and
 windows, tile selection; no downloads, no Custom Scenery links; back
 up .last_gui_params.txt around it) and `cache_roundtrip.py
 fresh|cached <dir>` (step 1 with the water layer downloaded into, then
-recycled from, a scratch cache; needs Overpass).
+recycled from, a scratch cache; needs Overpass), `sim_mesh_failure.py`
+(Triangle4XP fails), `sim_step3_failures.py download|convert|dsf <held>`
+(one texture fails, or build_dsf raises; restore the held DDS and the
+DSF .bak afterwards) and `time_convert.py <slots> <N> <scratch>`.
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
 
 Test results:
@@ -195,6 +198,12 @@ Test results:
   config still applied via exec; builds byte-identical; gui_smoke 7/7.
 - `test` @ df760d1 (+ #6), 2026-11-03: build byte-identical, all five
   sims as designed. All issues in this file are now fixed.
+  → `dev` fast-forwarded to cc6e1b1 (with these notes) on 2026-11-03.
+- Code review 2026-11-03: `fix/pipeline-step-results` @ 63d6ce7 (#19),
+  `fix/step3-integrity` @ f6d4b8b (#20), `fix/small-robustness` @ 7e49496
+  (#21, #22). `test` @ 5650123: builds byte-identical, all 8 failure sims
+  exit 1 (incl. sim_mesh_failure and sim_step3_failures download/convert/
+  dsf), batch sims and gui_smoke as before.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -304,10 +313,39 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 18. **FIXED** (`f6e9ec8`). `build_overlay()` removed only the elevation and sea_level rasters
     from tmp; the 9 other XP12 rasters (seasons, soundscape) stay
     (also on master).
+19. **FIXED** (`63d6ce7`): CLI, build_all and batch only stopped on
+    red_flag; build_mesh returns 0 without it when Triangle4XP gives up
+    (and on node file/DEM errors), so steps 2.5/3 ran on the previous
+    mesh and the build "succeeded". Pipelines now also check return
+    values; build_masks returns 1.
+20. **FIXED** (`f6d4b8b`): step 3 activated the DSF even when textures
+    failed to download (dropped silently after 3 tries) or convert, or
+    when build_dsf failed in its thread (a partial or stale .tmp could
+    be activated). Now the tile is only activated when complete.
+21. **FIXED** (`7e49496`): overlay 7z step unchecked (like #15).
+22. **FIXED** (`7e49496`): parallel_worker shared a mutable default.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
     provider dict (found by the broken-config test, same on master).
+
+## Performance notes (measured 2026-11-03, cached +55+012, 24 cores)
+
+- Cached build ~110 s: step 1 ~44 s (Vector_Utils insert_edge/rtree
+  ~30 s), step 2 ~14 s (Triangle4XP), step 2.5 ~13 s (numpy convolve in
+  blur_mask), step 3 ~28-38 s (build_dsf, single-threaded).
+- DDS conversion runs in parallel with build_dsf and finishes inside it:
+  96 conversions took the same step 3 time with 4, 12 or 20 convert
+  slots. Keep max_convert_slots=4.
+- max_download_slots=1 already means 16 parallel requests per texture
+  (provider max_threads); fresh tiles are bound by Overpass and imagery
+  download times, not CPU.
+- Ideas not done (need a new baseline or larger changes): one Overpass
+  request per layer instead of per query (fewer slow requests in step 1,
+  but changes element order); running several CLI processes in parallel
+  for different tiles of a batch (separate globals; needs a real
+  multi-tile test); algorithmic work in insert_edge, blur_mask,
+  build_dsf.
 
 ## Planned order of work
 
