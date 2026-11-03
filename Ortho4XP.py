@@ -86,10 +86,13 @@ if __name__ == '__main__':
             # Each step raises UI.red_flag when it fails or is interrupted;
             # don't run the next step on top of missing or stale data, and
             # exit non-zero so that scripts driving batch builds can tell.
+            # A step that returns 0 failed even when it did not raise the
+            # flag (e.g. Triangle4XP giving up): the next step would then run
+            # on the files of a previous build.
             for step in (VMAP.build_poly_file, MESH.build_mesh,
                          MASK.build_masks, TILE.build_tile):
-                step(tile)
-                if UI.red_flag:
+                ok = step(tile)
+                if UI.red_flag or not ok:
                     print("Build stopped, see Ortho4XP.log.")
                     sys.exit(1)
             print("Bon vol!")

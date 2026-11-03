@@ -290,19 +290,18 @@ def build_tile(tile):
 
 ################################################################################
 def build_all(tile):
-    VMAP.build_poly_file(tile)
-    if UI.red_flag:
+    # Each step returns 0 on failure; check that as well as red_flag, since
+    # not every error path raises the flag.
+    if not VMAP.build_poly_file(tile) or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
-    MESH.build_mesh(tile)
-    if UI.red_flag:
+    if not MESH.build_mesh(tile) or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
-    MASK.build_masks(tile)
-    if UI.red_flag:
+    if not MASK.build_masks(tile) or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
-    build_tile(tile)
+    ok = build_tile(tile)
     tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
     if tile_coords in IMG.incomplete_imgs:
         UI.lvprint(
@@ -311,8 +310,8 @@ def build_all(tile):
             f"{IMG.incomplete_imgs[tile_coords]}",
         )
         delete_incomplete_imgs(tile)
-        build_tile(tile)
-    if UI.red_flag:
+        ok = build_tile(tile)
+    if not ok or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
     UI.is_working = 0
@@ -362,20 +361,19 @@ def build_tile_list(
             tile.make_dirs()
         tile_coords = FNAMES.short_latlon(lat, lon)
         failed_step = None
+        # A step failed if it returned 0 or raised red_flag; not every error
+        # path raises the flag (e.g. Triangle4XP giving up in step 2).
         if do_osm:
-            VMAP.build_poly_file(tile)
-            if UI.red_flag:
+            if not VMAP.build_poly_file(tile) or UI.red_flag:
                 failed_step = "1 (vector data)"
         if do_mesh and not failed_step:
-            MESH.build_mesh(tile)
-            if UI.red_flag:
+            if not MESH.build_mesh(tile) or UI.red_flag:
                 failed_step = "2 (mesh)"
         if do_mask and not failed_step:
-            MASK.build_masks(tile)
-            if UI.red_flag:
+            if not MASK.build_masks(tile) or UI.red_flag:
                 failed_step = "2.5 (masks)"
         if do_dsf and not failed_step:
-            build_tile(tile)
+            ok = build_tile(tile)
             if tile_coords in IMG.incomplete_imgs:
                 UI.lvprint(
                     1,
@@ -383,12 +381,11 @@ def build_tile_list(
                     f"{IMG.incomplete_imgs[tile_coords]}",
                 )
                 delete_incomplete_imgs(tile)
-                build_tile(tile)
-            if UI.red_flag:
+                ok = build_tile(tile)
+            if not ok or UI.red_flag:
                 failed_step = "3 (DSF/imagery)"
         if do_ovl and not failed_step:
-            OVL.build_overlay(lat, lon)
-            if UI.red_flag:
+            if not OVL.build_overlay(lat, lon) or UI.red_flag:
                 failed_step = "overlay"
         if failed_step:
             if UI.stop_requested:
