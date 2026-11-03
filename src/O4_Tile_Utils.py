@@ -550,13 +550,53 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     settings are module globals, so tiles cannot share one process. Fresh
     tiles mostly wait on Overpass and imagery servers, which is what makes
     running a few at once worth it.
+
+    Two phases: steps 1-2 for every tile, then steps 2.5-3 (and overlays).
+    The masks of a tile also use the meshes of its neighbours
+    (MASK.select_neighbor_meshes); without the phase barrier they would
+    depend on which neighbour happened to finish its mesh first.
     """
+    (do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg) = flags
     nbr_slots = min(batch_parallel_tiles, len(list_lat_lon))
     timer = time.time()
     UI.lvprint(
         0, "Batch build launched for a number of", len(list_lat_lon),
         "tiles,", nbr_slots, "in parallel.",
     )
+    phases = [
+        (name, steps) for (name, steps) in (
+            ("steps 1-2", (do_osm, do_mesh, False, False, False)),
+            ("steps 2.5-3", (False, False, do_mask, do_dsf, do_ovl)),
+        ) if any(steps)
+    ]
+    todo = list(list_lat_lon)
+    failed_tiles = []
+    UI.is_working = 1
+    try:
+        for (k, (name, steps)) in enumerate(phases):
+            if len(phases) > 1:
+                UI.vprint(0, f"Batch phase {k + 1}/{len(phases)}: {name}")
+            result = _run_batch_phase(
+                tile, todo, steps + (override_cfg,), nbr_slots,
+                last_phase=(k == len(phases) - 1),
+            )
+            if result is None:  # Stop button
+                return 0
+            failed_tiles += result
+            failed = {coords for (coords, _) in result}
+            todo = [(lat, lon) for (lat, lon) in todo
+                    if FNAMES.short_latlon(lat, lon) not in failed]
+    finally:
+        UI.is_working = 0
+    _batch_summary(timer, len(list_lat_lon), failed_tiles)
+    return 0 if failed_tiles else 1
+
+
+def _run_batch_phase(tile, list_lat_lon, flags, nbr_slots, last_phase):
+    """Run one worker per tile, nbr_slots at a time.
+
+    Returns the list of (coords, failed step), or None after Stop.
+    """
     script = FNAMES.resource_path("Ortho4XP.py")
     # A frozen (PyInstaller) build is its own interpreter and script.
     launcher = [sys.executable] if getattr(sys, "frozen", False) else [
@@ -570,69 +610,64 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     running = {}  # proc -> (lat, lon, coords, log path, log file, start)
     failed_tiles = []
     started = 0
-    UI.is_working = 1
-    try:
-        while todo or running:
-            while todo and len(running) < nbr_slots and not UI.stop_requested:
-                (lat, lon) = todo.pop(0)
-                started += 1
-                coords = FNAMES.short_latlon(lat, lon)
-                log_path = os.path.join(FNAMES.Tmp_dir, f"batch_{coords}.log")
-                log_file = open(log_path, "w", encoding="utf-8")
-                proc = subprocess.Popen(
-                    launcher + ["--batch-worker", str(lat), str(lon),
-                                flag_string, tile.custom_build_dir or ""],
-                    stdout=log_file, stderr=subprocess.STDOUT,
-                    cwd=os.path.dirname(script), env=env,
-                    creationflags=creationflags,
-                )
-                running[proc] = (lat, lon, coords, log_path, log_file,
-                                 time.time())
+    while todo or running:
+        while todo and len(running) < nbr_slots and not UI.stop_requested:
+            (lat, lon) = todo.pop(0)
+            started += 1
+            coords = FNAMES.short_latlon(lat, lon)
+            log_path = os.path.join(FNAMES.Tmp_dir, f"batch_{coords}.log")
+            log_file = open(log_path, "w", encoding="utf-8")
+            proc = subprocess.Popen(
+                launcher + ["--batch-worker", str(lat), str(lon),
+                            flag_string, tile.custom_build_dir or ""],
+                stdout=log_file, stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(script), env=env,
+                creationflags=creationflags,
+            )
+            running[proc] = (lat, lon, coords, log_path, log_file, time.time())
+            UI.vprint(
+                0, f"Tile {coords} started ({started}/{len(list_lat_lon)},"
+                f" {len(running)} running), output in {log_path}",
+            )
+        if UI.stop_requested:
+            for (proc, info) in running.items():
+                _kill_process_tree(proc)
+                info[4].close()
+            UI.lvprint(
+                0, "Batch stopped:", len(running), "running tile(s)",
+                "interrupted,", len(todo), "not started in this phase.",
+            )
+            UI.exit_message_and_bottom_line()
+            return None
+        for proc in list(running):
+            code = proc.poll()
+            if code is None:
+                continue
+            (lat, lon, coords, log_path, log_file, start) = running.pop(proc)
+            log_file.close()
+            if code == 0:
                 UI.vprint(
-                    0, f"Tile {coords} started ({started}/{len(list_lat_lon)},"
-                    f" {len(running)} running), output in {log_path}",
+                    0, f"Tile {coords}", "built" if last_phase else "done",
+                    "in", UI.nicer_timer(time.time() - start),
                 )
-            if UI.stop_requested:
-                for proc, info in running.items():
-                    _kill_process_tree(proc)
-                    info[4].close()
-                UI.lvprint(
-                    0, "Batch stopped:", len(running), "running tile(s)",
-                    "interrupted,", len(todo), "not started.",
-                )
-                UI.exit_message_and_bottom_line()
-                return 0
-            for proc in list(running):
-                code = proc.poll()
-                if code is None:
-                    continue
-                (lat, lon, coords, log_path, log_file, start) = running.pop(proc)
-                log_file.close()
-                if code == 0:
-                    UI.vprint(
-                        0, f"Tile {coords} built in",
-                        UI.nicer_timer(time.time() - start),
-                    )
+                if last_phase:
                     _remove_from_todo_map(lat, lon)
-                    try:
-                        os.remove(log_path)  # keep tmp clean; errors keep it
-                    except OSError:
-                        pass
-                    continue
-                if 10 <= code < 10 + len(BATCH_STEPS):
-                    step = BATCH_STEPS[code - 10]
-                else:
-                    step = f"? (worker exit code {code})"
-                UI.lvprint(
-                    0, "ERROR: Tile", coords, "failed in step", step,
-                    "- skipped, see", log_path,
-                )
-                failed_tiles.append((coords, step))
-            time.sleep(0.5)
-    finally:
-        UI.is_working = 0
-    _batch_summary(timer, len(list_lat_lon), failed_tiles)
-    return 0 if failed_tiles else 1
+                try:
+                    os.remove(log_path)  # keep tmp clean; errors keep it
+                except OSError:
+                    pass
+                continue
+            if 10 <= code < 10 + len(BATCH_STEPS):
+                step = BATCH_STEPS[code - 10]
+            else:
+                step = f"? (worker exit code {code})"
+            UI.lvprint(
+                0, "ERROR: Tile", coords, "failed in step", step,
+                "- skipped, see", log_path,
+            )
+            failed_tiles.append((coords, step))
+        time.sleep(0.5)
+    return failed_tiles
 
 ################################################################################
 def remove_unwanted_textures(tile):
