@@ -421,7 +421,7 @@ class Vector_Map:
                         self.seeds[marker] = [
                             numpy.array(polygon.representative_point().coords[0])
                         ]
-                except Exception as e:
+                except Exception:
                     UI.lvprint(
                         2,
                         "Topologal inconsistency trying to tag a polygon ",

@@ -628,7 +628,7 @@ class Ortho4XP_GUI(tk.Tk):
                 tile.make_dirs()
             else:
                 return
-        except Exception as e:
+        except Exception:
             UI.vprint(1, "Process aborted.\n")
             _LOGGER.exception("Exception on build_mesh")
             return 0
@@ -644,7 +644,7 @@ class Ortho4XP_GUI(tk.Tk):
                 tile.make_dirs()
             else:
                 return
-        except Exception as e:
+        except Exception:
             UI.vprint(1, "Process aborted.\n")
             _LOGGER.exception("Exception on sort_mesh")
             return 0
@@ -660,7 +660,7 @@ class Ortho4XP_GUI(tk.Tk):
                 tile.make_dirs()
             else:
                 return
-        except Exception as e:
+        except Exception:
             UI.vprint(1, "Process aborted.\n")
             _LOGGER.exception("Exception on community_mesh")
             return 0

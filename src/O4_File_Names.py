@@ -2,7 +2,6 @@ import os
 import sys
 from math import floor
 
-import O4_UI_Utils as UI
 
 g2xpl_16_prefix = ""
 g2xpl_16_suffix = ""

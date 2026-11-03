@@ -1144,7 +1144,7 @@ def encode_runways_taxiways_and_aprons(
                         vector_map.insert_way(
                             numpy.hstack([trav, alti_trav]), "DUMMY", check=True
                         )
-                except Exception as e:
+                except Exception:
                     pass
         # Next runways as area
         for (runway_pol, runway_start, runway_end, runway_width) in (

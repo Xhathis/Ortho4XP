@@ -26,8 +26,6 @@ def mask_name_for_texture(tile, til_x_left, til_y_top, zl, *args):
     factor = 2 ** (zl - tile.mask_zl)
     m_til_x = (int(til_x_left / factor) // 16) * 16
     m_til_y = (int(til_y_top / factor) // 16) * 16
-    rx = int((til_x_left - factor * m_til_x) / 16)
-    ry = int((til_y_top - factor * m_til_y) / 16)
     return os.path.join(
         FNAMES.mask_dir(tile.lat, tile.lon),
         FNAMES.legacy_mask(m_til_x, m_til_y)
