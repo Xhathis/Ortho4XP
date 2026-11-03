@@ -399,9 +399,29 @@ def extract_elevation_and_bathymetry_data(lat, lon):
     f.close()
     if dsfid == "7z":
         UI.vprint(2, "     The original DSF is a 7z archive, uncompressing...")
-        os.replace(tmp_file, tmp_file + ".7z")
-        subprocess.run([OVL.unzip_cmd, "e", f"-o{FNAMES.Tmp_dir}", f"{tmp_file}.7z"], env=UI.subprocess_env())
-        os.remove(tmp_file + '.7z')
+        # Any failure here (tmp file locked, 7z failing) used to crash step 3
+        # a few lines later; report it like a failed copy instead.
+        try:
+            os.replace(tmp_file, tmp_file + ".7z")
+            result = subprocess.run(
+                [OVL.unzip_cmd, "e", "-y", f"-o{FNAMES.Tmp_dir}",
+                 f"{tmp_file}.7z"],
+                env=UI.subprocess_env(),
+            )
+            if result.returncode or not os.path.isfile(tmp_file):
+                raise OSError(f"7z exited with code {result.returncode}")
+        except OSError as e:
+            UI.exit_message_and_bottom_line(
+                "     ERROR: could not uncompress the Global Scenery DSF",
+                f"({e.strerror or e}).",
+            )
+            for leftover in (tmp_file, tmp_file + ".7z"):
+                try:
+                    os.remove(leftover)
+                except OSError:
+                    pass
+            return (b"", b"")
+        os.remove(tmp_file + ".7z")
     file_len = os.path.getsize(tmp_file)
     f = open(tmp_file, "rb")
     # read filetype cookie
