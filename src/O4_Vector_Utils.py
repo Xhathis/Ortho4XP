@@ -2,6 +2,7 @@ from math import ceil, sqrt, atan2
 import numpy
 from shapely import geometry, affinity
 from shapely import ops
+from shapely.errors import ShapelyError
 from rtree import index
 import O4_UI_Utils as UI
 import O4_Geo_Utils as GEO
@@ -394,7 +395,7 @@ class Vector_Map:
                     polygon = geometry.polygon.orient(
                         polygon
                     )  # important for certain pol_to_alt instances
-                except:
+                except (ShapelyError, ValueError):
                     continue
                 way = numpy.array(polygon.exterior.coords)
                 if refine:
@@ -945,7 +946,7 @@ def coastline_to_MultiPolygon(coastline, lat, lon, custom_source=False):
         for coord in remove_coords:
             try:
                 bdcoords.remove(coord)
-            except:
+            except ValueError:
                 (x, y) = bd_point(coord)
                 UI.lvprint(
                     1,

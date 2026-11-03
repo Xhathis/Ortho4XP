@@ -68,7 +68,7 @@ def build_overlay(lat, lon):
     UI.vprint(1, "-> Making a copy of the original overlay DSF in tmp dir")
     try:
         shutil.copy(file_to_sniff, file_to_sniff_loc)
-    except:
+    except OSError:
         UI.exit_message_and_bottom_line(
             "   ERROR: could not copy it. Disk full, write permissions, erased",
             " tmp dir ?"
@@ -207,7 +207,7 @@ def build_overlay(lat, lon):
     if not os.path.exists(dest_dir):
         try:
             os.makedirs(dest_dir)
-        except:
+        except OSError:
             UI.exit_message_and_bottom_line(
                 "   ERROR: could not create destination directory "
                 + str(dest_dir)
@@ -251,7 +251,7 @@ def build_overlay(lat, lon):
                 FNAMES.short_latlon(lat, lon) + "_tmp_dsf.txt.sea_level.raw",
             )
         )
-    except:
+    except OSError:
         pass
     UI.timings_and_bottom_line(timer)
     return 1

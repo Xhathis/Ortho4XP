@@ -16,7 +16,7 @@ class parallel_worker(threading.Thread):
             if isinstance(args, str) and args == "quit":
                 try:
                     UI.progress_bar(self._progress["bar"], 100)
-                except:
+                except Exception:  # cosmetic: no progress dict, GUI closed
                     pass
                 return 1
             self._success[0] = self._task(*args) and self._success[0]

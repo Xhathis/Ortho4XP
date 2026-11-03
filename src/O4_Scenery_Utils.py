@@ -6,12 +6,12 @@ def write_text_dsf(lat, lon, dsf_txt_filename, dico_polygons, dico_polygon_def):
     if not os.path.isdir(os.path.dirname(dsf_txt_filename)):
         try:
             os.makedirs(os.path.dirname(dsf_txt_filename))
-        except:
+        except OSError:
             UI.exit_message_and_bottom_line("   ERROR: could not create destination directory " + str(os.path.dirname(dsf_txt_filename)))
             return 0
     try:
         f=open(dsf_txt_filename, 'w')
-    except:
+    except OSError:
         UI.exit_message_and_bottom_line("   ERROR: could not open file", dsf_txt_filename, "for writing.")
         return 0
     f.write('PROPERTY sim/planet earth\n')

@@ -45,7 +45,7 @@ def logprint(*args):
             + "\n"
         )
         f.close()
-    except:
+    except (OSError, UnicodeError):  # logging must never crash
         pass
 
 
