@@ -129,9 +129,11 @@ def build_masks(tile, for_imagery=False):
             tile.dem = DEM.DEM(
                 tile.lat, tile.lon, source, fill_nodata, info_only=False
             )
-        except:
+        except Exception as e:
+            # DEM loading can fail in GDAL, file access or value parsing.
             UI.exit_message_and_bottom_line(
-                "\nERROR: Could not determine the appropriate elevation source.",
+                "\nERROR: Could not determine the appropriate elevation source",
+                f"({type(e).__name__}: {e}).",
                 " Please check your custom_dem entry."
             )
             return 0
@@ -248,12 +250,17 @@ def delete_old_masks_in_tile(tile, dest_dir):
 
     for til_x in range(til_x_min, til_x_max + 1, 16):
         for til_y in range(til_y_min, til_y_max + 1, 16):
+            mask_file = os.path.join(dest_dir, FNAMES.legacy_mask(til_x, til_y))
             try:
-                os.remove(
-                    os.path.join(dest_dir, FNAMES.legacy_mask(til_x, til_y))
-                )
-            except:
+                os.remove(mask_file)
+            except FileNotFoundError:
                 pass
+            except OSError as e:
+                # An old mask that stays would be used as if it were new.
+                UI.lvprint(
+                    1, "WARNING: could not delete old mask", mask_file,
+                    f"({e.strerror}).",
+                )
 ################################################################################
     
 ################################################################################
@@ -422,7 +429,7 @@ def record_water_tris(tile):
         try:
             f_mesh = open(mesh_file_name, "r")
             UI.vprint(1, "   * ", mesh_file_name)
-        except:
+        except OSError:
             UI.lvprint(
                 1, "Mesh file ", mesh_file_name, " could not be read. Skipped."
             )
@@ -857,7 +864,8 @@ def triangulation_to_image(name, pixel_size, grid_size_or_bbox):
             mask_draw.polygon(
                 [(px1, py1), (px2, py2), (px3, py3)], fill="white"
             )
-        except:
+        except Exception:
+            # One degenerate triangle (extent tool); the rest still draws.
             pass
     f_ele.close()
     return ((xmin, ymin, xmax, ymax), ImageOps.flip(mask_im).convert("L"))
@@ -977,7 +985,7 @@ if __name__ == "__main__":
             else:
                 buffer += line
         f.close()
-    except:
+    except OSError:
         pass
     buffer += "# Created with : " + " ".join(sys.argv) + "\n"
     buffer += (
@@ -1038,7 +1046,7 @@ if __name__ == "__main__":
     ]:
         try:
             os.remove(f)
-        except:
+        except OSError:
             pass
     print("Done!")
 ################################################################################
