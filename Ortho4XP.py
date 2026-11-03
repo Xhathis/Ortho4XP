@@ -62,11 +62,17 @@ if __name__ == '__main__':
         except:
             print(cmd_line); sys.exit()
         if len(sys.argv) == 3:
-            try:
-                tile = CFG.Tile(lat, lon, '')
-            except Exception as e:
-                print(e)
-                print("ERROR: could not read tile config file."); sys.exit()
+            # This form builds from the tile's own config. Tile() alone only
+            # holds the global defaults (no provider, no zoom level), which
+            # built a tile without imagery and still exited 0.
+            tile = CFG.Tile(lat, lon, '')
+            tile_cfg = os.path.join(
+                tile.build_dir,
+                "Ortho4XP_" + FNAMES.short_latlon(lat, lon) + ".cfg",
+            )
+            if not os.path.isfile(tile_cfg) or not tile.read_from_config(tile_cfg):
+                print("ERROR: could not read tile config file", tile_cfg)
+                sys.exit(1)
         else:
             try:
                 provider_code = sys.argv[3]
