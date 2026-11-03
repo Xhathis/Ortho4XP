@@ -142,6 +142,22 @@ Test results:
 - `test` @ 103b02c (+ the three branches above), 2026-11-03: DSF
   byte-identical, 17/17 masks, app log identical, exit 0; both failure
   simulations (OSM download, water geometry) stop step 1 with exit 1.
+  → `dev` fast-forwarded to 0b139d6 (with these notes) on 2026-11-03.
+- `fix/bare-excepts-osm-utils` @ ed1769f (#3, 8; from dev): crafted OSM
+  data (relation to a missing way, one-point way) same as master; a
+  one-point way raises shapely GEOSException (not a ValueError).
+- `fix/bare-excepts-mask-utils` @ a203e3d (#3, 6; from dev): an
+  undeletable old mask now warns, 17 masks still built.
+- `fix/bare-excepts-dem-utils` @ 55a3575 (#3, 7): 10 DEM files (real,
+  missing, broken .hgt/.raw/.tif) give identical grids with master.
+- `fix/bare-excepts-dsf-utils` @ dc014f6 (#3, 3): Global Scenery copy
+  failure reports its cause, tmp stays clean.
+  (Each: full build byte-identical.)
+- `test` @ ed2edc8 (+ the four branches above), 2026-11-03: DSF
+  byte-identical, 17/17 masks, app log identical, exit 0; both failure
+  simulations stop step 1 with exit 1.
+  Branch base rule since then: a fix for a module already changed on
+  `dev` branches from `dev`, otherwise from `master` (avoids conflicts).
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -168,11 +184,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    silently does nothing. `delete_old_masks_in_tile(tile, dest_dir)` exists
    separately. Decide: remove the block, or pass `dest_dir` in. Check which
    caller is responsible for deleting old masks before changing it.
-3. **In progress** — done: O4_Tile_Utils, O4_Imagery_Utils,
-   O4_Vector_Map, O4_Mesh_Utils, O4_Airport_Utils (O4_Mask_Utils only
-   #1/#2); 80 left on `test` (GUI 30, Config 15, OSM 8, Mask 7, DEM 7,
-   Overlay 3, DSF 3, Vector_Utils 2, Scenery 2, UI 1, Parallel 1; the
-   one in Vector_Map is commented-out code). Pattern: ignore only the
+3. **Build path done** — Tile, Imagery, Vector_Map, Mesh, Airport,
+   OSM, Mask, DEM, DSF. 56 left on `test`, none in the build steps:
+   GUI 30, Config 15, Overlay 3, Vector_Utils 2, Scenery 2, UI 1,
+   Parallel 1 (+ 2 in commented-out code in Mask and Vector_Map). Pattern: ignore only the
    expected error (e.g. FileNotFoundError), report other OSErrors, let
    coding errors raise; `except Exception` only at trust boundaries
    (eval of config, user code, downloaded data) with a comment.
@@ -233,6 +248,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 14. **FIXED** (`554ea16`): `keep_obj8()` returned an unassigned
     variable when an OBJ8 patch had no usable TRIS, crashing step 1
     (also on master).
+15. `O4_DSF_Utils.extract_elevation_and_bathymetry_data`: the
+    `os.replace(tmp_file, tmp_file + ".7z")` has no try; a locked
+    tmp/+LL+LLL.dsf crashes step 3 (also on master).
+16. `build_masks()` returns early on errors (bad DEM, missing mesh)
+    without raising `UI.red_flag`, so the CLI still runs step 3.
 13. **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
     provider dict (found by the broken-config test, same on master).
