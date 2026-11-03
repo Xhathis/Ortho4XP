@@ -116,7 +116,7 @@ def discover_airport_names(airport_layer, dico_airports):
                             "smoothing_pix"
                         ]
                     )
-                except:
+                except ValueError:
                     pass
             try:
                 dico_airports[key]["boundary"] = (
@@ -162,7 +162,7 @@ def discover_airport_names(airport_layer, dico_airports):
                         "None.",
                     )
                     dico_airports[key]["boundary"] = None
-            except:
+            except Exception:
                 UI.lvprint(
                     2,
                     "WARNING:  A presumably erroneous tag marked aerodrome ",
@@ -237,7 +237,7 @@ def attach_surfaces_to_airports(airport_layer, dico_airports):
                         "boundary": None,
                     }
                     dico_airports[name][surface_type].append(wayid)
-                except:
+                except KeyError:
                     dico_airports[pt_check] = {
                         "key_type": "repr_node",
                         "repr_node": pt_check,
@@ -310,7 +310,7 @@ def attach_surfaces_to_airports(airport_layer, dico_airports):
                     "boundary": None,
                 }
                 dico_airports[name]["runway_as_rel"].append(relid)
-            except:
+            except KeyError:
                 dico_airports[pt_check] = {
                     "key_type": "repr_node",
                     "repr_node": pt_check,
@@ -446,7 +446,7 @@ def sort_and_reconstruct_runways(tile, airport_layer, dico_airports):
                     linear_width.append(
                         float(airport_layer.dicosmtags["w"][wayid]["width"])
                     )
-                except:
+                except (KeyError, ValueError):
                     linear_width.append(
                         0
                     )  
@@ -717,7 +717,7 @@ def build_hangar_areas(tile, airport_layer, dico_airports):
                 )
                 if not pol.is_valid:
                     continue
-            except:
+            except Exception:
                 UI.vprint(
                     2,
                     "Unable to turn hangar area to polygon, close to",
@@ -756,7 +756,7 @@ def build_apron_areas(tile, airport_layer, dico_airports):
                         airport_layer.dicosmn[airport_layer.dicosmw[wayid][0]],
                     )
                     continue
-            except:
+            except Exception:
                 UI.vprint(
                     2,
                     "Unable to turn apron area to polygon, close to",
@@ -835,7 +835,7 @@ def update_airport_boundaries(tile, dico_airports):
     try:
         with open(FNAMES.apt_file(tile), "wb") as outf:
             pickle.dump(dico_airports, outf)
-    except:
+    except (OSError, pickle.PicklingError):
         UI.vprint(
             1,
             "WARNING: Could not save airport info to file",
@@ -929,7 +929,7 @@ def smooth_raster_over_airports(tile, dico_airports, preserve_boundary=True):
                 max_pix = max(
                     int(dico_airports[airport]["smoothing_pix"]), max_pix
                 )
-            except:
+            except ValueError:
                 pass
     if not max_pix:
         tile.dem.write_to_file(FNAMES.alt_file(tile))
@@ -955,7 +955,7 @@ def smooth_raster_over_airports(tile, dico_airports, preserve_boundary=True):
                 if "smoothing_pix" in dico_airports[airport]
                 else tile.apt_smoothing_pix
             )
-        except:
+        except ValueError:
             pix = tile.apt_smoothing_pix
         if not pix:
             continue
@@ -1179,7 +1179,9 @@ def encode_runways_taxiways_and_aprons(
                             )
                             traverses.append((abs1, abs2))
                             abscissae += [abs1, abs2]
-                    except:
+                    except Exception:
+                        # Geometry error on one cross-section of the runway
+                        # only; the others still define its outline.
                         pass
                 abscissae = sorted(set(abscissae))
                 way = numpy.round(
@@ -1316,8 +1318,12 @@ def encode_runways_taxiways_and_aprons(
                     seeds["APRON"].append(
                         numpy.array(apron_pol.representative_point().coords[0])
                     )
-            except:
-                pass
+            except Exception as e:
+                # Geometry from OSM data; this apron is left out of the mesh.
+                UI.vprint(
+                    2, "     Skipping apron way", wayid,
+                    f"({type(e).__name__}: {e}).",
+                )
     for surface in ("RUNWAY", "TAXIWAY", "APRON"):
         if seeds[surface]:
             if surface in vector_map.seeds:
