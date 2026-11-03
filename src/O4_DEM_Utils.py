@@ -34,6 +34,15 @@ available_sources = (
 global_sources = ("View", "SRTM", "ALOS")
 
 ################################################################################
+class DEMError(Exception):
+    """The tile's own elevation data could not be read or downloaded.
+
+    Used to be replaced silently with zero altitude, so a batch reported a
+    flat tile as built.
+    """
+
+
+################################################################################
 class DEM:
     def __init__(self, lat, lon, source="", fill_nodata=True, info_only=False):
         self.lat = lat
@@ -118,6 +127,11 @@ class DEM:
                         3601,
                     )
                 else:
+                    if not info_only:
+                        raise DEMError(
+                            f"could not get the {short_source} elevation file "
+                            f"for this tile ({source})"
+                        )
                     (
                         self.epsg,
                         self.x0,
@@ -379,17 +393,42 @@ def build_combined_raster(source, lat, lon, info_only):
         verbose = True if (lat0 == lat and lon0 == lon) else False
         x = (180 + lon0) % 360
         y = 89 - lat0
+        file_name = FNAMES.elevation_data(source, lat0, (lon0 + 180) % 360 - 180)
         if not world_tiles[y, x]:
+            # No land in this tile: zero altitude is the right answer.
             tmparray = numpy.zeros((base, base), dtype=numpy.float32)
         elif ensure_elevation(source, lat0, (lon0 + 180) % 360 - 180, verbose):
             tmparray = read_elevation_from_file(
-                FNAMES.elevation_data(source, lat0, (lon0 + 180) % 360 - 180),
+                file_name,
                 lat0,
                 (lon0 + 180) % 360 - 180,
                 info_only,
                 base,
+                critical=verbose,
             )[-1]
+        elif verbose:
+            raise DEMError(f"could not get {file_name} from source {source}")
         else:
+            # A neighbour only fills the 36-sample margin; a flat margin is
+            # worth a warning, not losing the tile.
+            UI.lvprint(
+                1,
+                "    WARNING: could not get",
+                file_name,
+                "(neighbour tile) -> its margin is set to zero altitude.",
+            )
+            tmparray = numpy.zeros((base, base), dtype=numpy.float32)
+        if tmparray.shape != (base, base):
+            # E.g. a 1/3" file (10801 x 10801) in Elevation_data: the
+            # combined raster only takes 1" or 3" grids.
+            msg = (
+                f"{file_name} has a {tmparray.shape[1]} x {tmparray.shape[0]} "
+                f"grid, the {source} source needs {base} x {base} or "
+                "1201 x 1201; use custom_dem for other grids"
+            )
+            if verbose:
+                raise DEMError(msg)
+            UI.lvprint(1, "    WARNING:", msg, "-> margin set to zero altitude.")
             tmparray = numpy.zeros((base, base), dtype=numpy.float32)
         by = beyond
         ov = overlap
@@ -439,8 +478,14 @@ def build_combined_raster(source, lat, lon, info_only):
 
 ################################################################################
 def read_elevation_from_file(
-    file_name, lat, lon, info_only=False, base_if_error=3601
+    file_name, lat, lon, info_only=False, base_if_error=3601, critical=True
 ):
+    """Read a DEM file.
+
+    A read error raises DEMError when critical (the tile's own data);
+    otherwise (a neighbour's margin, or info_only) it is replaced with zero
+    altitude as before.
+    """
     alt_dem = None
     if file_name[-4:].lower() == ".hgt":
         x0 = y0 = 0
@@ -461,11 +506,15 @@ def read_elevation_from_file(
                     fill_nodata_values_with_nearest_neighbor(alt_dem, nodata)
                     alt_dem = upsample(alt_dem)
         except Exception as e:
-            print(e)
+            if critical and not info_only:
+                raise DEMError(
+                    f"in reading {file_name} ({type(e).__name__}: {e})"
+                ) from e
             UI.lvprint(
                 1,
                 "    ERROR: in reading elevation from",
                 file_name,
+                f"({type(e).__name__}: {e})",
                 "-> replaced with zero altitude.",
             )
             nxdem = nydem = base_if_error
@@ -488,6 +537,10 @@ def read_elevation_from_file(
         except (OSError, EOFError, ValueError) as e:
             # Missing/short .raw file (EOFError from array.fromfile) or a
             # size that doesn't make a square grid (reshape ValueError).
+            if critical and not info_only:
+                raise DEMError(
+                    f"in reading {file_name} ({type(e).__name__}: {e})"
+                ) from e
             UI.lvprint(
                 1,
                 "    ERROR: in reading elevation from",
@@ -558,6 +611,10 @@ def read_elevation_from_file(
         except Exception as e:
             # GDAL raises RuntimeError (UseExceptions), plus file and value
             # errors from the code around it.
+            if critical and not info_only:
+                raise DEMError(
+                    f"in reading {file_name} ({type(e).__name__}: {e})"
+                ) from e
             UI.lvprint(
                 1,
                 "   ERROR: in reading ",
@@ -575,6 +632,8 @@ def read_elevation_from_file(
             epsg = 4326
             nodata = -32768
     elif not has_gdal:
+        if critical and not info_only:
+            raise DEMError(f"unsupported raster (install Gdal): {file_name}")
         UI.lvprint(
             1,
             "   WARNING: unsupported raster (install Gdal):",
