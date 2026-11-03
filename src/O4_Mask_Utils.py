@@ -418,16 +418,6 @@ def record_water_tris(tile):
     [til_x_max, til_y_max] = GEO.wgs84_to_orthogrid(
         tile.lat, tile.lon + 1, tile.mask_zl
     )
-    UI.vprint(1, "-> Deleting existing masks")
-    for til_x in range(til_x_min, til_x_max + 1, 16):
-        for til_y in range(til_y_min, til_y_max + 1, 16):
-            try:
-                os.remove(
-                    os.path.join(dest_dir, FNAMES.legacy_mask(til_x, til_y))
-                )
-            except:
-                pass
-    UI.vprint(1, "-> Reading mesh data")
     for mesh_file_name in mesh_list:
         try:
             f_mesh = open(mesh_file_name, "r")
