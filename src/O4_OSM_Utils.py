@@ -18,6 +18,12 @@ max_osm_tentatives = 8
 # nothing until then, so a 60 s read timeout cut off slow but valid
 # answers (large residential layers) on every tentative.
 overpass_timeout = (10, 190)  # (connect, read) in seconds
+# A layer with several queries (roads, water) goes out as one union request:
+# fewer slow round trips, and a way matched by two queries comes back once
+# instead of being stored twice. It gets more server time, and falls back to
+# one request per query when it keeps failing.
+layer_request_server_timeout = 300  # seconds, sent as [timeout:...]
+layer_request_tentatives = max_osm_tentatives // 2
 
 
 def _load_overpass_servers() -> dict:
@@ -434,6 +440,41 @@ def OSM_queries_to_OSM_layer(
     if cached_suffix and os.path.isfile(cached_data_filename):
         UI.vprint(1, "    * Recycling OSM data from", cached_data_filename)
         return osm_layer.update_dicosm(cached_data_filename, input_tags, target_tags)
+    old_scheme = any(
+        isinstance(query, str)
+        and os.path.isfile(FNAMES.osm_old_cached(lat, lon, query))
+        for query in queries
+    )
+    if len(queries) > 1 and not old_scheme:
+        statements = tuple(
+            tag for query in queries
+            for tag in ([query] if isinstance(query, str) else query)
+        )
+        UI.vprint(
+            1,
+            "    * Downloading OSM data for",
+            cached_suffix or "the layer",
+            f"({len(statements)} queries in one request)",
+        )
+        response = get_overpass_data(
+            statements,
+            (lat, lon, lat + 1, lon + 1),
+            tentatives=layer_request_tentatives,
+            server_timeout=layer_request_server_timeout,
+        )
+        if UI.red_flag:
+            return 0
+        if response:
+            osm_layer.update_dicosm(response, input_tags, target_tags)
+            if cached_suffix:
+                osm_layer.write_to_file(cached_data_filename)
+            return 1
+        UI.vprint(
+            1,
+            "      No answer for the combined request (last:",
+            (get_overpass_data.last_error or "unknown") + "),",
+            "falling back to one request per query.",
+        )
     for query in queries:
         # look first for cached data (old scheme)
         if isinstance(query, str):
@@ -546,9 +587,13 @@ def _pick_overpass_server(tentative: int, server_keys: list) -> str:
     return overpass_server_choice
 
 
-def get_overpass_data(query: str, bbox: tuple) -> bytes:
+def get_overpass_data(
+    query: str, bbox: tuple, tentatives: int = 0, server_timeout: int = 0
+) -> bytes:
     """Fetch data from OSM overpass servers.
 
+    tentatives defaults to max_osm_tentatives; server_timeout, when given,
+    is sent as [timeout:...] and the read timeout is raised to match.
     On failure returns 0 and leaves the reason of the last tentative in
     get_overpass_data.last_error, for the caller's error message.
     """
@@ -566,22 +611,28 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
         overpass_query = query + str(bbox) + ";"
     else:
         overpass_query = "".join(x + str(bbox) + ";" for x in query)
+    settings, timeout = "", overpass_timeout
+    if server_timeout:
+        settings = f"[timeout:{server_timeout}];"
+        timeout = (overpass_timeout[0], server_timeout + 10)
 
-    for tentative in range(1, max_osm_tentatives + 1):
+    for tentative in range(1, (tentatives or max_osm_tentatives) + 1):
         current_key = _pick_overpass_server(tentative, server_keys)
         get_overpass_data.last_key = current_key
 
         UI.vprint(2, f"      Using OSM server {current_key}")
         url = (
             overpass_servers[current_key]
-            + "?data=("
+            + "?data="
+            + settings
+            + "("
             + overpass_query
             + ");(._;>>;);out meta;"
         )
         UI.vprint(3, url)
         wait = 2**tentative
         try:
-            r = s.get(url, timeout=overpass_timeout)
+            r = s.get(url, timeout=timeout)
             if r.status_code == 200:
                 if (
                     b"</osm>" not in r.content[-10:]
