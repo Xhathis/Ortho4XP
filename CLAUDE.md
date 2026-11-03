@@ -94,8 +94,15 @@ fresh|cached <dir>` (step 1 with the water layer downloaded into, then
 recycled from, a scratch cache; needs Overpass), `sim_mesh_failure.py`
 (Triangle4XP fails), `sim_step3_failures.py download|convert|dsf <held>`
 (one texture fails, or build_dsf raises; restore the held DDS and the
-DSF .bak afterwards) and `time_convert.py <slots> <N> <scratch>`.
-`Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
+DSF .bak afterwards) and `time_convert.py <slots> <N> <scratch>`,
+`sim_overpass_fallback.py [src_dir]` (get_overpass_data against two
+local mock servers; no real Overpass traffic).
+`Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out); since
+#23 tentatives 5-8 alternate with the other servers in
+overpass_servers.txt. The failure sims replace the whole server list
+with one closed port, so they still fail without fallback.
+Regression runs clear `Ortho4XP.log`: save the user's copy first and
+restore it afterwards (it holds their batch log).
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
 at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
@@ -212,6 +219,10 @@ Test results:
   (#21, #22). `test` @ 5650123: builds byte-identical, all 8 failure sims
   exit 1 (incl. sim_mesh_failure and sim_step3_failures download/convert/
   dsf), batch sims and gui_smoke as before.
+- `fix/overpass-fallback` @ 85aacc2 (#23): sim_overpass_fallback 8/8.
+  `test` @ 1c09d30: builds byte-identical, all 8 failure sims exit 1
+  (OSM sim ERROR line now ends "(last: DE: ConnectionError)"), batch
+  sims and gui_smoke as before.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -332,6 +343,12 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     be activated). Now the tile is only activated when complete.
 21. **FIXED** (`7e49496`): overlay 7z step unchecked (like #15).
 22. **FIXED** (`7e49496`): parallel_worker shared a mutable default.
+23. **FIXED** (`85aacc2`): with a fixed overpass_server_choice all 8
+    tentatives went to the same server, and the 60 s read timeout was
+    shorter than Overpass's 180 s query default; a batch lost tile
+    +43-066 (residential roads, ~15 min). Now fallback to the other
+    servers from tentative 5, read timeout 190 s, and the ERROR line
+    names the last failure.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
