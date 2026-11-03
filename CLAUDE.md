@@ -81,8 +81,10 @@ Older folders, reference only: no suffix = invalid (no inland water, #7);
 Test builds go to `G:\Ortho4XP_tests\<tile>_<provider>_<ZL>_<branch>-<sha>\`.
 Test helpers (run from the repo root with the venv Python) are in
 `G:\Ortho4XP_tests\tools\`: `run_masks.py` (step 2.5 only, optional
-custom extent / alternative module dir) and `sim_osm_failure.py` (CLI
-build with a simulated Overpass failure on the water layer).
+custom extent / alternative module dir), `sim_osm_failure.py` (CLI
+build with a simulated Overpass failure on the water layer) and
+`sim_water_geometry_failure.py` (CLI build where cleaning the inland
+water geometry fails).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
 
 Test results:
@@ -125,6 +127,21 @@ Test results:
   lines; OSM failure simulation still stops with exit 1.
   Merge note: install_windows.bat conflicted (line endings only,
   renormalized on `test` by fix/gitattributes); took the fix branch.
+  → `dev` fast-forwarded to 520c57b (with these notes) on 2026-11-03.
+- `fix/bare-excepts-vector-map` @ 554ea16 (#3, 13 sites + #14): a
+  water geometry failure now stops step 1 (sim: master built a tile
+  without water, exit 0). Synthetic broken patches give identical
+  .poly/.node with master. keep_obj8 crash fixed. Build identical.
+- `fix/bare-excepts-mesh-utils` @ 5404c25 (#3, 12 sites): broken
+  inputs raise only the caught types; build_mesh with a corrupt .apt
+  warns and completes; build identical.
+- `fix/bare-excepts-airport-utils` @ 58f35a2 (#3, 12 sites): step 1 on
+  real OSM data and on a copy with bad widths, smoothing_pix and
+  removed names gives identical .poly/.node/.apt with master; build
+  identical.
+- `test` @ 103b02c (+ the three branches above), 2026-11-03: DSF
+  byte-identical, 17/17 masks, app log identical, exit 0; both failure
+  simulations (OSM download, water geometry) stop step 1 with exit 1.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -151,9 +168,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    silently does nothing. `delete_old_masks_in_tile(tile, dest_dir)` exists
    separately. Decide: remove the block, or pass `dest_dir` in. Check which
    caller is responsible for deleting old masks before changing it.
-3. **In progress** — done: O4_Mask_Utils (#1/#2 only), O4_Tile_Utils,
-   O4_Imagery_Utils; 117 left on `test` (GUI 30, Config 15,
-   Vector_Map 14, Mesh 12, Airport 12, ...). Pattern: ignore only the
+3. **In progress** — done: O4_Tile_Utils, O4_Imagery_Utils,
+   O4_Vector_Map, O4_Mesh_Utils, O4_Airport_Utils (O4_Mask_Utils only
+   #1/#2); 80 left on `test` (GUI 30, Config 15, OSM 8, Mask 7, DEM 7,
+   Overlay 3, DSF 3, Vector_Utils 2, Scenery 2, UI 1, Parallel 1; the
+   one in Vector_Map is commented-out code). Pattern: ignore only the
    expected error (e.g. FileNotFoundError), report other OSErrors, let
    coding errors raise; `except Exception` only at trust boundaries
    (eval of config, user code, downloaded data) with a comment.
@@ -211,6 +230,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     not imported by the app, crashes when run. Also uses `os.system` (#4).
 12. `Providers/Sweden/.SE.lay.swp` is a stray vim swap file committed
     upstream.
+14. **FIXED** (`554ea16`): `keep_obj8()` returned an unassigned
+    variable when an OBJ8 patch had no usable TRIS, crashing step 1
+    (also on master).
 13. **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
     provider dict (found by the broken-config test, same on master).
