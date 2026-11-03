@@ -84,7 +84,9 @@ Test helpers (run from the repo root with the venv Python) are in
 custom extent / alternative module dir), `sim_osm_failure.py` (CLI
 build with a simulated Overpass failure on the water layer) and
 `sim_water_geometry_failure.py` (CLI build where cleaning the inland
-water geometry fails).
+water geometry fails), `sim_mask_dem_failure.py` (CLI build where the
+DEM for masks fails in step 2.5) and `sim_batch.py error|stop` (batch
+of 3, steps 1-2.5, with an error or a Stop on tile 2).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
 
 Test results:
@@ -158,6 +160,15 @@ Test results:
   simulations stop step 1 with exit 1.
   Branch base rule since then: a fix for a module already changed on
   `dev` branches from `dev`, otherwise from `master` (avoids conflicts).
+  → `dev` fast-forwarded to 9774e17 (with these notes) on 2026-11-03.
+- `fix/mask-errors-stop-build` @ b66a59b (#16), `fix/dsf-raster-tmp-errors`
+  @ a7448fe (#15), `fix/batch-skip-failed-tiles` @ 9da5892 (#7 follow-up),
+  all from dev, each with its own sims and a byte-identical build.
+- `test` @ 26a89c4 (+ the three above), 2026-11-03: DSF byte-identical,
+  17/17 masks, app log identical; CLI sims: OSM and water geometry stop
+  in step 1, mask/DEM failure stops in step 2.5, all exit 1; batch sims:
+  an error on tile 2 of 3 is skipped ("built 2, failed 1"), Stop during
+  tile 2 ends the batch.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -212,8 +223,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 6. Minor (pyflakes): 10 unused imports, 9 unused local variables, 3 f-strings
    without placeholders, 1 unused `global extents_dict`.
 7. **FIXED** (`ac12969`, `d48aaa0`, `f955376`: build stops with ERROR, CLI
-   exits 1, real exception shown). Open follow-up: a failed tile now stops
-   a whole batch; skipping just that tile would suit long batches better.
+   exits 1, real exception shown). Follow-up FIXED (`9da5892`): a batch
+   build skips a failed tile, continues and logs a summary; only the
+   Stop button (UI.stop_requested) ends the batch.
    **Failed OSM query silently drops a whole vector layer** (confirmed by the
    first baseline build, 2026-11-02). In `O4_OSM_Utils.OSM_queries_to_OSM_layer`
    one query that fails all `max_osm_tentatives` returns 0 for the whole
@@ -248,10 +260,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 14. **FIXED** (`554ea16`): `keep_obj8()` returned an unassigned
     variable when an OBJ8 patch had no usable TRIS, crashing step 1
     (also on master).
-15. `O4_DSF_Utils.extract_elevation_and_bathymetry_data`: the
+15. **FIXED** (`a7448fe`, also checks the 7z exit code).
+    `O4_DSF_Utils.extract_elevation_and_bathymetry_data`: the
     `os.replace(tmp_file, tmp_file + ".7z")` has no try; a locked
     tmp/+LL+LLL.dsf crashes step 3 (also on master).
-16. `build_masks()` returns early on errors (bad DEM, missing mesh)
+16. **FIXED** (`b66a59b`). `build_masks()` returns early on errors (bad DEM, missing mesh)
     without raising `UI.red_flag`, so the CLI still runs step 3.
 13. **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
