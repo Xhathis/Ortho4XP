@@ -96,7 +96,13 @@ recycled from, a scratch cache; needs Overpass), `sim_mesh_failure.py`
 (one texture fails, or build_dsf raises; restore the held DDS and the
 DSF .bak afterwards) and `time_convert.py <slots> <N> <scratch>`,
 `sim_overpass_fallback.py [src_dir]` (get_overpass_data against two
-local mock servers; no real Overpass traffic).
+local mock servers; no real Overpass traffic), `sim_dem_failure.py
+<scratch>` (DEM() cases A-I against a scratch Elevation_data copy,
+downloads blocked), `sim_dem_cli.py` (CLI build without elevation
+data: step 1 must stop, exit 1), `sim_batch.py dem` (tile 2 of 3
+without elevation data is skipped) and `check_ned_names.py [--head]`
+(USGS NED names; --head asks USGS that the files exist). Unit sims set
+`UI.log = False`: lvprint would otherwise append to the user's log.
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out); since
 #23 tentatives 5-8 alternate with the other servers in
 overpass_servers.txt. The failure sims replace the whole server list
@@ -223,6 +229,12 @@ Test results:
   `test` @ 1c09d30: builds byte-identical, all 8 failure sims exit 1
   (OSM sim ERROR line now ends "(last: DE: ConnectionError)"), batch
   sims and gui_smoke as before.
+- `fix/dem-errors-stop-build` @ d5a9a97 (#24), `fix/ned-tile-name` @
+  cffd6f4 (#25): sim_dem_failure 9/9 (dev: 4 cases built flat),
+  check_ned_names 4/4 with USGS HTTP 200 (dev: e173/e179).
+  `test` @ c473a68: builds byte-identical, all 9 failure sims exit 1
+  (incl. sim_dem_cli), batch sims error/stop/dem as designed,
+  gui_smoke 7/7, unit sims 0 failures.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -349,6 +361,14 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     +43-066 (residential roads, ~15 min). Now fallback to the other
     servers from tentative 5, read timeout 190 s, and the ERROR line
     names the last failure.
+24. **FIXED** (`d5a9a97`): a missing, unreadable or wrongly sized DEM
+    for the tile itself was replaced with zero altitude and only
+    logged, so a batch counted a flat tile as built (custom_dem=NED1,
+    2026-11-03). Now DEM.DEMError stops step 1 (red flag) and steps
+    2/2.5; a neighbour only warns (36-sample margin), ocean tiles and
+    info_only reads stay as before.
+25. **FIXED** (`cffd6f4`): NED tile id for eastern longitudes lost its
+    latitude (`tid + "w" if lon < 0 else "e"`), e.g. western Aleutians.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
