@@ -53,6 +53,19 @@ if __name__ == '__main__':
         Ortho4XP = GUI.Ortho4XP_GUI()
         Ortho4XP.mainloop()
         print("Bon vol!")
+    elif sys.argv[1] == "--batch-worker":
+        # One tile of a parallel batch build, started by
+        # TILE.build_tile_list: lat lon flags [custom_build_dir]
+        try:
+            tile = CFG.Tile(int(sys.argv[2]), int(sys.argv[3]),
+                            sys.argv[5] if len(sys.argv) > 5 else '')
+            sys.exit(TILE.batch_worker(tile, sys.argv[4]))
+        except SystemExit:
+            raise
+        except Exception:
+            traceback.print_exc()
+            print("Crash!")
+            sys.exit(2)
     else:  # sequel is only concerned with command line
         if len(sys.argv) < 3:
             print(cmd_line); sys.exit()
