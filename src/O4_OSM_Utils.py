@@ -14,6 +14,10 @@ from O4_Version import version as O4XP_VERSION
 # Default overpass_server_choice if not in config
 overpass_server_choice = "random"
 max_osm_tentatives = 8
+# Overpass gives a query 180 s by default before it answers, and sends
+# nothing until then, so a 60 s read timeout cut off slow but valid
+# answers (large residential layers) on every tentative.
+overpass_timeout = (10, 190)  # (connect, read) in seconds
 
 
 def _load_overpass_servers() -> dict:
@@ -455,7 +459,8 @@ def OSM_queries_to_OSM_layer(
                 query,
                 "after",
                 max_osm_tentatives,
-                "tentatives. The",
+                "tentatives (last:",
+                (get_overpass_data.last_error or "unknown") + "). The",
                 cached_suffix or "OSM",
                 "layer would be incomplete, stopping.",
             )
@@ -505,7 +510,8 @@ def OSM_query_to_OSM_layer(
                 query,
                 "after",
                 max_osm_tentatives,
-                ", skipping it.",
+                "tentatives (last:",
+                (get_overpass_data.last_error or "unknown") + "), skipping it.",
             )
             return 0
         osm_layer.update_dicosm(response, input_tags, target_tags)
@@ -514,8 +520,39 @@ def OSM_query_to_OSM_layer(
     return 1
 
 
+def _pick_overpass_server(tentative: int, server_keys: list) -> str:
+    """Return the server key to use for this tentative (1-based)."""
+    if overpass_server_choice == "random":
+        if len(server_keys) == 1:
+            return server_keys[0]
+        last_used = getattr(get_overpass_data, "last_key", None)
+        other_keys = [k for k in server_keys if k != last_used]
+        return random.choice(other_keys if other_keys else server_keys)
+    if overpass_server_choice not in server_keys:
+        UI.lvprint(
+            1,
+            "Selected overpass server not found in overpass_servers.txt, using:",
+            server_keys[0],
+        )
+        return server_keys[0]
+    # A fixed choice used to send all tentatives to the same server, so one
+    # overloaded server failed the whole tile. Keep the chosen server for the
+    # first half, then alternate with the others (odd tentatives).
+    others = [k for k in server_keys if k != overpass_server_choice]
+    if others and tentative > max_osm_tentatives // 2 and tentative % 2:
+        fallback = others[(tentative // 2) % len(others)]
+        UI.vprint(1, f"      Falling back to OSM server {fallback}")
+        return fallback
+    return overpass_server_choice
+
+
 def get_overpass_data(query: str, bbox: tuple) -> bytes:
-    """Fetch data from OSM overpass servers."""
+    """Fetch data from OSM overpass servers.
+
+    On failure returns 0 and leaves the reason of the last tentative in
+    get_overpass_data.last_error, for the caller's error message.
+    """
+    get_overpass_data.last_error = ""
     if not overpass_servers:
         UI.lvprint(1, "No overpass servers configured. Check overpass_servers.txt.")
         return 0
@@ -531,23 +568,7 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
         overpass_query = "".join(x + str(bbox) + ";" for x in query)
 
     for tentative in range(1, max_osm_tentatives + 1):
-        if overpass_server_choice == "random":
-            if len(server_keys) == 1:
-                current_key = server_keys[0]
-            else:
-                last_used = getattr(get_overpass_data, "last_key", None)
-                other_keys = [k for k in server_keys if k != last_used]
-                current_key = random.choice(other_keys if other_keys else server_keys)
-        elif overpass_server_choice in server_keys:
-            current_key = overpass_server_choice
-        else:
-            current_key = server_keys[0]
-            UI.lvprint(
-                1,
-                "Selected overpass server not found in overpass_servers.txt, using:",
-                server_keys[0],
-            )
-
+        current_key = _pick_overpass_server(tentative, server_keys)
         get_overpass_data.last_key = current_key
 
         UI.vprint(2, f"      Using OSM server {current_key}")
@@ -560,12 +581,15 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
         UI.vprint(3, url)
         wait = 2**tentative
         try:
-            r = s.get(url, timeout=60)
+            r = s.get(url, timeout=overpass_timeout)
             if r.status_code == 200:
                 if (
                     b"</osm>" not in r.content[-10:]
                     and b"</OSM>" not in r.content[-10:]
                 ):
+                    get_overpass_data.last_error = (
+                        f"{current_key}: corrupted answer (no closing </osm> tag)"
+                    )
                     UI.vprint(
                         1,
                         f"      OSM server {current_key} sent a corrupted answer ",
@@ -573,6 +597,7 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
                         f"new tentative in {wait} sec...",
                     )
                 elif len(r.content) <= 1000 and b"error" in r.content:
+                    get_overpass_data.last_error = f"{current_key}: error answer"
                     UI.vprint(
                         1,
                         f"      OSM server {current_key} sent us an error code "
@@ -583,6 +608,7 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
             else:
                 if r.status_code == 429:  # 429 is overpass software rate limiting us
                     wait = max(int(r.headers.get("Retry-After", 0)), wait)
+                get_overpass_data.last_error = f"{current_key}: HTTP {r.status_code}"
                 UI.vprint(
                     1,
                     f"      OSM server {current_key} rejected our query "
@@ -591,6 +617,7 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
         except Exception as e:
             # Name the actual error: a timeout, a refused connection and a
             # TLS problem need different remedies, "too busy" hid all three.
+            get_overpass_data.last_error = f"{current_key}: {type(e).__name__}"
             UI.vprint(
                 1,
                 f"      OSM server {current_key} did not answer "
