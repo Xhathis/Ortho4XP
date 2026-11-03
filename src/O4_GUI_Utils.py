@@ -136,11 +136,11 @@ class Ortho4XP_GUI(tk.Tk):
         )
         try:
             self.map_list.remove("OSM")
-        except:
+        except ValueError:
             pass
         try:
             self.map_list.remove("SEA")
-        except:
+        except ValueError:
             pass
 
         # Grid behaviour
@@ -409,7 +409,7 @@ class Ortho4XP_GUI(tk.Tk):
             self.default_zl.set(default_zl)
             self.custom_build_dir.set(custom_build_dir)
             f.close()
-        except:
+        except (OSError, ValueError):
             self.lat.set(48)
             self.lon.set(-6)
             self.default_website.set("BI")
@@ -602,7 +602,7 @@ class Ortho4XP_GUI(tk.Tk):
         try:
             (lat, lon) = self.get_lat_lon()
             return CFG.Tile(lat, lon, str(self.custom_build_dir.get()))
-        except:
+        except TypeError:
             raise Exception
 
     def build_poly_file(self):
@@ -736,7 +736,7 @@ class Ortho4XP_GUI(tk.Tk):
         try:
             self.config_window.lift()
             return 1
-        except:
+        except (AttributeError, tk.TclError):
             try:
                 (lat, lon) = self.get_lat_lon()
             except Exception as e:
@@ -749,10 +749,10 @@ class Ortho4XP_GUI(tk.Tk):
         try:
             self.earth_window.lift()
             return 1
-        except:
+        except (AttributeError, tk.TclError):
             try:
                 (lat, lon) = self.get_lat_lon(check=False)
-            except:
+            except TypeError:
                 (lat, lon) = (48, -6)
             self.earth_window = Ortho4XP_Earth_Preview(self, lat, lon)
             return 1
@@ -761,10 +761,10 @@ class Ortho4XP_GUI(tk.Tk):
         try:
             self.custom_zl_window.lift()
             return 1
-        except:
+        except (AttributeError, tk.TclError):
             try:
                 (lat, lon) = self.get_lat_lon()
-            except:
+            except TypeError:
                 return 0
             self.custom_zl_window = Ortho4XP_Custom_ZL(self, lat, lon)
             return 1
@@ -797,7 +797,7 @@ class Ortho4XP_GUI(tk.Tk):
             )
             f.write(self.custom_build_dir.get())
             f.close()
-        except:
+        except OSError:
             pass
         self.after_cancel(self.callback_pgrb)
         self.after_cancel(self.callback_console)
@@ -871,7 +871,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
             self.zlpol.set(
                 max(min(int(self.parent.default_zl.get()) + 1, 19), 15)
             )
-        except:
+        except ValueError:
             self.zlpol.set(17)
         self.gb = tk.StringVar()
         self.gb.set("0Gb")
@@ -1084,22 +1084,22 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         for item in self.polyobj_list:
             try:
                 self.canvas.delete(item)
-            except:
+            except (AttributeError, tk.TclError):
                 pass
         try:
             self.canvas.delete(self.img_map)
-        except:
+        except (AttributeError, tk.TclError):
             pass
         try:
             self.canvas.delete(self.boundary)
-        except:
+        except (AttributeError, tk.TclError):
             pass
         try:
             while self.ctp_thread.is_alive():
                 if self._stop_event.is_set():
                     return
                 self.ctp_thread.join(timeout=0.2)
-        except:
+        except (AttributeError, RuntimeError):
             pass
         if self._stop_event.is_set():
             return
@@ -1174,7 +1174,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
     def redraw_poly(self):
         try:
             self.canvas.delete(self.poly_curr)
-        except:
+        except (AttributeError, tk.TclError):
             pass
         try:
             color = self.dico_color[self.zlpol.get()]
@@ -1186,7 +1186,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
                 self.poly_curr = self.canvas.create_polygon(
                     self.points, outline=color, fill="", width=5
                 )
-        except:
+        except (IndexError, KeyError, tk.TclError):
             pass
         return
 
@@ -1264,7 +1264,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
             self.polyobj_list.pop(idx)
         try:
             self.canvas.delete(self.poly_curr)
-        except:
+        except (AttributeError, tk.TclError):
             pass
         self.compute_size()
         return
@@ -1398,7 +1398,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
             self.polygon_list.pop(-1)
             self.polyobj_list.pop(-1)
             self.compute_size()
-        except:
+        except (AttributeError, IndexError, tk.TclError):
             self.points = []
             self.coords = []
         return
@@ -1719,7 +1719,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         # in case this was a broken link
         try:
             os.remove(link)
-        except:
+        except OSError:
             pass
 
     def add_overlay_symlink(self, *args) -> None:
@@ -1799,7 +1799,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                     try:
                         lat = int(dir_name.split("XP_")[1][:3])
                         lon = int(dir_name.split("XP_")[1][3:7])
-                    except:
+                    except ValueError:
                         continue
                     # With the enlarged accepetance rule for directory name
                     # there might be more than one tile for the same (lat,lon),
@@ -1830,7 +1830,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                                 "r",
                             )
                             found_config = True
-                        except:
+                        except OSError:
                             try:
                                 tmpf = open(
                                     os.path.join(
@@ -1841,7 +1841,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                                     "r",
                                 )
                                 found_config = True
-                            except:
+                            except OSError:
                                 found_config = False
                         if found_config:
                             prov = zl = ""
@@ -1923,7 +1923,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                     try:
                         lat = int(file_name[0:3])
                         lon = int(file_name[3:7])
-                    except:
+                    except ValueError:
                         continue
                     [x0, y0] = GEO.wgs84_to_pix(lat + 1, lon, self.earthzl)
                     [x1, y1] = GEO.wgs84_to_pix(lat, lon + 1, self.earthzl)
@@ -1940,7 +1940,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                             "r",
                         )
                         found_config = True
-                    except:
+                    except OSError:
                         found_config = False
                     if found_config:
                         prov = zl = ""
@@ -2163,7 +2163,7 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
 
         try:
             self.canvas.delete(self.active_tile)
-        except:
+        except (AttributeError, tk.TclError):
             pass
         [x0, y0] = GEO.wgs84_to_pix(lat + 1, lon, self.earthzl)
         [x1, y1] = GEO.wgs84_to_pix(lat, lon + 1, self.earthzl)
@@ -2265,19 +2265,19 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             self.ny0 = ny0
             try:
                 self.canvas.delete(self.canv_imgNW)
-            except:
+            except (AttributeError, tk.TclError):
                 pass
             try:
                 self.canvas.delete(self.canv_imgNE)
-            except:
+            except (AttributeError, tk.TclError):
                 pass
             try:
                 self.canvas.delete(self.canv_imgSW)
-            except:
+            except (AttributeError, tk.TclError):
                 pass
             try:
                 self.canvas.delete(self.canv_imgSE)
-            except:
+            except (AttributeError, tk.TclError):
                 pass
             fargs_rc = [nx0, ny0]
             self.rc_thread = threading.Thread(
