@@ -1598,11 +1598,12 @@ def download_jpeg_ortho(
         )
         tile_coords = Path(file_dir).parent.name
         incomplete_imgs.setdefault(tile_coords, []).append(file_name)
-    if not os.path.exists(file_dir):
-        os.makedirs(file_dir)
+    out_file = os.path.join(file_dir, file_name)
+    tmp_file = FNAMES.temp_path_for(out_file)
     try:
+        os.makedirs(file_dir, exist_ok=True)
         if super_resol_factor == 1:
-            big_image.save(os.path.join(file_dir, file_name))
+            big_image.save(tmp_file)
         else:
             big_image.resize(
                 (
@@ -1610,8 +1611,13 @@ def download_jpeg_ortho(
                     int(height / super_resol_factor),
                 ),
                 Image.Resampling.BICUBIC,
-            ).save(os.path.join(file_dir, file_name))
+            ).save(tmp_file)
+        FNAMES.finish_temp_file(tmp_file, out_file)
     except Exception as e:
+        try:
+            os.remove(tmp_file)
+        except OSError:
+            pass
         UI.lvprint(
             0,
             "OS Error : could not save orthophoto on disk, ",
@@ -1732,11 +1738,17 @@ def build_jpeg_ortho(
             big_img = combine_textures(
                 tile, til_x_left, til_y_top, zoomlevel, provider_code
             )
-            if not os.path.exists(file_dir):
-                os.makedirs(file_dir)
+            out_file = os.path.join(file_dir, file_name)
+            tmp_file = FNAMES.temp_path_for(out_file)
             try:
-                big_img.convert("RGB").save(os.path.join(file_dir, file_name))
+                os.makedirs(file_dir, exist_ok=True)
+                big_img.convert("RGB").save(tmp_file)
+                FNAMES.finish_temp_file(tmp_file, out_file)
             except Exception as e:
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
                 UI.lvprint(
                     0,
                     "OS Error : could not save orthophoto on disk, "

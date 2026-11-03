@@ -1,10 +1,37 @@
 import os
 import sys
+import threading
 from math import floor
 
 
 g2xpl_16_prefix = ""
 g2xpl_16_suffix = ""
+
+def temp_path_for(path):
+    """A temporary name next to path, for writing a file that is shared.
+
+    Parallel batch builds run several processes: two of them can write the
+    same Viewfinder neighbour or imagery jpeg at once, and a third may read
+    it meanwhile. Writing under this name and then finish_temp_file() means
+    readers only ever see a complete file. The extension is kept for PIL.
+    """
+    (head, tail) = os.path.split(path)
+    return os.path.join(
+        head, f".tmp{os.getpid()}_{threading.get_ident()}_{tail}"
+    )
+
+
+def finish_temp_file(tmp_path, path):
+    """Move a file written under temp_path_for(path) into place."""
+    try:
+        os.replace(tmp_path, path)
+    except PermissionError:
+        # Windows refuses to replace a file another process has open; that
+        # process (or another writer) already has a complete copy.
+        if not os.path.isfile(path):
+            raise
+        os.remove(tmp_path)
+
 
 def resource_path(relative_path):
     """Get absolute path to resource."""

@@ -766,11 +766,12 @@ def ensure_elevation(source, lat, lon, verbose=True):
                     not os.path.exists(out_filename)
                     or os.path.getsize(out_filename) <= f.file_size
                 ):
-                    if not os.path.isdir(os.path.dirname(out_filename)):
-                        os.makedirs(os.path.dirname(out_filename))
-                    with open(out_filename, "wb") as out:
-                        UI.vprint(2, "      Extracting", out_filename)
+                    os.makedirs(os.path.dirname(out_filename), exist_ok=True)
+                    UI.vprint(2, "      Extracting", out_filename)
+                    tmp_filename = FNAMES.temp_path_for(out_filename)
+                    with open(tmp_filename, "wb") as out:
                         out.write(zip_ref.open(f, "r").read())
+                    FNAMES.finish_temp_file(tmp_filename, out_filename)
     elif source in ("SRTM", "ALOS"):
         if os.path.exists(FNAMES.elevation_data(source, lat, lon)):
             UI.vprint(
@@ -849,17 +850,19 @@ def ensure_elevation(source, lat, lon, verbose=True):
         r = http_request(url, source, verbose)
         if not r:
             return 0
-        if not os.path.isdir(
-            os.path.dirname(FNAMES.elevation_data(source, lat, lon))
-        ):
-            os.makedirs(
-                os.path.dirname(FNAMES.elevation_data(source, lat, lon))
-            )
-        with open(FNAMES.elevation_data(source, lat, lon), "wb") as out:
-            try:
+        out_filename = FNAMES.elevation_data(source, lat, lon)
+        tmp_filename = FNAMES.temp_path_for(out_filename)
+        try:
+            os.makedirs(os.path.dirname(out_filename), exist_ok=True)
+            with open(tmp_filename, "wb") as out:
                 out.write(r.content)
+            FNAMES.finish_temp_file(tmp_filename, out_filename)
+        except OSError:
+            try:
+                os.remove(tmp_filename)
             except OSError:
-                return 0
+                pass
+            return 0
     else:
         UI.vprint(1, "   ERROR: Unknown elevation source.")
         return 0
