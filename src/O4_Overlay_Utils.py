@@ -238,20 +238,14 @@ def build_overlay(lat, lon):
         )
     )
     os.remove(file_to_sniff_loc)
-    try:
-        os.remove(
-            os.path.join(
-                FNAMES.Tmp_dir,
-                FNAMES.short_latlon(lat, lon) + "_tmp_dsf.txt.elevation.raw",
-            )
-        )
-        os.remove(
-            os.path.join(
-                FNAMES.Tmp_dir,
-                FNAMES.short_latlon(lat, lon) + "_tmp_dsf.txt.sea_level.raw",
-            )
-        )
-    except OSError:
-        pass
+    # DSFTool writes one .raw per raster layer; XP12 DSFs have about a dozen
+    # (elevation, sea_level, seasons, soundscape), not just the first two.
+    raw_prefix = FNAMES.short_latlon(lat, lon) + "_tmp_dsf.txt."
+    for file_name in os.listdir(FNAMES.Tmp_dir):
+        if file_name.startswith(raw_prefix) and file_name.endswith(".raw"):
+            try:
+                os.remove(os.path.join(FNAMES.Tmp_dir, file_name))
+            except OSError:
+                pass
     UI.timings_and_bottom_line(timer)
     return 1
