@@ -100,6 +100,13 @@ Test results:
   byte-identical, 17/17 masks identical, app log identical, exit 0;
   simulated OSM failure stops step 1 with exit 1.
   → `dev` fast-forwarded to d35ed49 on 2026-11-03.
+- `fix/subprocess-links` @ f968a8c (issue #4), 2026-11-03: tested on
+  scratch folders only (never in X-Plane): plain, "&", "^ ()" and
+  "%OS%" paths (old MKLINK broke "%OS%" silently, exit 0), existing
+  link, missing parent, overlay toggle. GUI tile click and the
+  macOS/Linux os.symlink branch not run.
+- `test` @ 1fca344 (+ docs/claude-md, subprocess-links), 2026-11-03:
+  DSF byte-identical, 17/17 masks identical, app log identical, exit 0.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -132,7 +139,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    Narrow them module by module, to the specific exceptions
    (`OSError`, `ValueError`, `KeyError`, `requests` exceptions, ...), and log
    what was caught.
-4. **Shell commands built from strings:**
+4. **FIXED** for the GUI links (`f968a8c`, `make_dir_link()`);
+   `O4_Geotag.py` still open (see #11).
+   **Shell commands built from strings:**
    `src/O4_GUI_Utils.py` ~lines 1618–1721 create links with
    `os.system('MKLINK /J "..." "..."')` (Windows) / `ln -s` (other), and
    `src/O4_Geotag.py` uses `os.system`. They break on paths containing quotes
@@ -186,7 +195,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 4. ~~`fix/mask-utils-nameerrors` (#1, #2)~~ — on `dev`, tested with
    `masks_custom_extent` off and on.
 4b. ~~`fix/osm-layer-failure` (#7)~~ — on `dev`.
-5. `fix/subprocess-links` (#4).
+5. ~~`fix/subprocess-links` (#4)~~ — merged to `test` @ 1fca344.
 6. Bare excepts (#3), one module per branch, starting with the modules on the
    batch-build path (`O4_Tile_Utils`, `O4_Imagery_Utils`, `O4_Mask_Utils`).
 
