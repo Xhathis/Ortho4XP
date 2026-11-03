@@ -372,10 +372,20 @@ def initialize_providers_dict():
                         )
                         valid_provider = False
                 elif key == "max_threads":
+                    # The raw string used to stay in the dict and crash the
+                    # downloads later (int("many")); 0 workers downloaded
+                    # nothing. Drop bad values so the default (16) applies.
                     try:
                         provider[key] = int(value)
+                        if provider[key] < 1:
+                            raise ValueError
                     except ValueError:
-                        pass
+                        print(
+                            "Error in reading max_threads for provider",
+                            provider_code,
+                            ": not a positive integer, using the default.",
+                        )
+                        del provider[key]
                 elif key == "extent":
                     pass
                 elif key == "color_filters":
