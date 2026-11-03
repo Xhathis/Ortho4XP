@@ -51,6 +51,32 @@ _LOGGER.addHandler(handler)
 # are on Linux or Windows.
 OsX = "dar" in sys.platform
 
+
+def make_dir_link(target: str, link: str) -> bool:
+    """Create link -> target (junction on Windows, symlink elsewhere).
+
+    Returns True on success. Failures are reported, not raised, so the
+    caller can leave the GUI state unchanged.
+    """
+    try:
+        if sys.platform == "win32":
+            # A junction needs no admin rights or developer mode, unlike a
+            # symlink. CreateJunction takes the paths as arguments, so no
+            # shell parses them (MKLINK via os.system expanded "%VAR%" in a
+            # path and still returned 0), and errors come back as OSError
+            # instead of being ignored.
+            import _winapi
+            _winapi.CreateJunction(target, link)
+        else:
+            os.symlink(target, link)
+    except OSError as e:
+        UI.lvprint(
+            0, "ERROR: could not link", link, "to", target, f"({e.strerror})."
+        )
+        return False
+    return True
+
+
 ################################################################################
 class Ortho4XP_GUI(tk.Tk):
 
@@ -1613,11 +1639,9 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                 "zOrtho4XP_" + os.path.basename(self.working_dir),
             )
             target = os.path.realpath(self.working_dir)
-        if ("dar" in sys.platform) or ("win" not in sys.platform):
-            # Mac and Linux
-            os.system("ln -s " + ' "' + target + '" "' + link + '"')
-        else:
-            os.system('MKLINK /J "' + link + '" "' + target + '"')
+        if not make_dir_link(target, link):
+            # Don't show the tile as linked when it isn't.
+            return
         if not self.grouped:
             if not OsX:
                 self.canvas.itemconfig(
@@ -1714,11 +1738,8 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             )
             return
         # Add symlink if it doesn't exist
-        if ("dar" in sys.platform) or ("win" not in sys.platform):
-            # Mac and Linux
-            os.system("ln -s " + ' "' + FNAMES.Overlay_dir + '" "' + link + '"')
-        else:
-            os.system('MKLINK /J "' + link + '" "' + FNAMES.Overlay_dir + '"')
+        if not make_dir_link(FNAMES.Overlay_dir, link):
+            return
         UI.vprint(
             1, f"yOrtho4XP_Overlays link added to: {CFG.custom_scenery_dir}"
         )
