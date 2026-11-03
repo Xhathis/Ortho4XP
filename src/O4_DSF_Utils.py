@@ -122,7 +122,7 @@ def zone_list_to_ortho_dico(tile):
             f = open(FNAMES.apt_file(tile), "rb")
             dico_airports = pickle.load(f)
             f.close()
-        except:
+        except (OSError, EOFError, pickle.UnpicklingError):
             UI.vprint(
                 1,
                 "   WARNING: File",
@@ -386,9 +386,10 @@ def extract_elevation_and_bathymetry_data(lat, lon):
     UI.vprint(2, "     Making a copy of the Global Scenery DSF in tmp dir")
     try:
         shutil.copy(global_scenery_dsf, tmp_file)
-    except:
+    except OSError as e:
         UI.exit_message_and_bottom_line(
-            "     ERROR: could not copy it. Disk full, write permissions,",
+            "     ERROR: could not copy it",
+            f"({e.strerror or e}). Disk full, write permissions,",
             " erased tmp dir ?",
         )
         return (b"", b"")
@@ -692,16 +693,20 @@ def build_dsf(tile, download_queue):
                 else:
                     skipped_terrains_for_masking.add(terrain_attributes)
                     # clean up potential old masks in the tile dir
+                    old_mask = os.path.join(
+                        tile.build_dir,
+                        "textures",
+                        FNAMES.mask_file(*texture_attributes),
+                    )
                     try:
-                        os.remove(
-                            os.path.join(
-                                tile.build_dir,
-                                "textures",
-                                FNAMES.mask_file(*texture_attributes),
-                            )
-                        )
-                    except:
+                        os.remove(old_mask)
+                    except FileNotFoundError:
                         pass
+                    except OSError as e:
+                        UI.lvprint(
+                            1, "WARNING: could not delete old mask", old_mask,
+                            f"({e.strerror}).",
+                        )
             if needs_new_terrain:
                 terrain_idx = len(dico_terrains)
                 textured_tris[terrain_idx] = defaultdict(
