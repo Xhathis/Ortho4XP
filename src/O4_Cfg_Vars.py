@@ -60,6 +60,12 @@ cfg_app_vars = {
         "default": 4,
         "hint": "Number of parallel threads for dds conversion. Should be mainly dictated by the number of cores in your CPU.",
     },
+    "batch_parallel_tiles": {
+        "module": "TILE",
+        "type": int,
+        "default": 1,
+        "hint": "Number of tiles a batch build works on at the same time, each in its own process (1 = one after the other). 2-3 helps fresh tiles, which mostly wait on Overpass and imagery servers; each tile adds its own downloads and about one tile's worth of RAM.",
+    },
     "check_tms_response": {
         "module": "IMG",
         "type": bool,
@@ -368,6 +374,7 @@ list_app_vars = [
     "skip_converts",
     "max_download_slots",
     "max_convert_slots",
+    "batch_parallel_tiles",
     "check_tms_response",
     "http_timeout",
     "max_connect_retries",

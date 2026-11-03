@@ -1,6 +1,8 @@
 import os
+import sys
 import time
 import shutil
+import subprocess
 import queue
 import threading
 import traceback
@@ -17,6 +19,7 @@ from O4_Parallel_Utils import parallel_launch, parallel_join
 
 max_download_slots = 1
 max_convert_slots = 4
+batch_parallel_tiles = 1
 skip_downloads = False
 skip_converts = False
 
@@ -380,6 +383,9 @@ def build_tile_list(
         return 0
     UI.red_flag = 0
     UI.stop_requested = False
+    flags = (do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg)
+    if batch_parallel_tiles > 1 and len(list_lat_lon) > 1:
+        return _build_tile_list_parallel(tile, list_lat_lon, flags)
     timer = time.time()
     UI.lvprint(
         0, "Batch build launched for a number of", len(list_lat_lon), "tiles."
@@ -397,45 +403,8 @@ def build_tile_list(
             ":",
             FNAMES.short_latlon(lat, lon),
         )
-        (tile.lat, tile.lon) = (lat, lon)
-        tile.build_dir = FNAMES.build_dir(
-            tile.lat, tile.lon, tile.custom_build_dir
-        )
-        tile.dem = None
-        if override_cfg:
-            tile.read_from_config(use_global=True)
-        else:
-            tile.read_from_config()
-        if do_osm or do_mesh or do_dsf:
-            tile.make_dirs()
         tile_coords = FNAMES.short_latlon(lat, lon)
-        failed_step = None
-        # A step failed if it returned 0 or raised red_flag; not every error
-        # path raises the flag (e.g. Triangle4XP giving up in step 2).
-        if do_osm:
-            if not VMAP.build_poly_file(tile) or UI.red_flag:
-                failed_step = "1 (vector data)"
-        if do_mesh and not failed_step:
-            if not MESH.build_mesh(tile) or UI.red_flag:
-                failed_step = "2 (mesh)"
-        if do_mask and not failed_step:
-            if not MASK.build_masks(tile) or UI.red_flag:
-                failed_step = "2.5 (masks)"
-        if do_dsf and not failed_step:
-            ok = build_tile(tile)
-            if tile_coords in IMG.incomplete_imgs:
-                UI.lvprint(
-                    1,
-                    f"Attempting to rebuild textures with white squares: "
-                    f"{IMG.incomplete_imgs[tile_coords]}",
-                )
-                delete_incomplete_imgs(tile)
-                ok = build_tile(tile)
-            if not ok or UI.red_flag:
-                failed_step = "3 (DSF/imagery)"
-        if do_ovl and not failed_step:
-            if not OVL.build_overlay(lat, lon) or UI.red_flag:
-                failed_step = "overlay"
+        failed_step = _build_one_tile(tile, lat, lon, *flags)
         if failed_step:
             if UI.stop_requested:
                 # The user pressed Stop: end the whole batch, as before.
@@ -452,30 +421,217 @@ def build_tile_list(
             UI.red_flag = False
             UI.is_working = False
             continue
-        try:
-            UI.gui.earth_window.canvas.delete(
-                UI.gui.earth_window.dico_tiles_todo[(lat, lon)]
-            )
-            UI.gui.earth_window.dico_tiles_todo.pop((lat, lon), None)
-        except Exception:
-            # Cosmetic only: no GUI (AttributeError), tile not on the map
-            # (KeyError) or Earth window closed (tkinter.TclError).
-            pass
-    UI.lvprint(
-        0, "Batch process completed in", UI.nicer_timer(time.time() - timer)
-    )
-    UI.lvprint(
-        0, f"Tiles built: {len(list_lat_lon) - len(failed_tiles)}, "
-        f"failed: {len(failed_tiles)}."
-    )
-    for (coords, step) in failed_tiles:
-        UI.lvprint(0, f"   FAILED: {coords} in step {step}")
+        _remove_from_todo_map(lat, lon)
+    _batch_summary(timer, len(list_lat_lon), failed_tiles)
     if IMG.incomplete_imgs:
         UI.lvprint(
             0,
             f"\nERROR: Parts of the following images could not be obtained "
             f"and have been filled with white: {IMG.incomplete_imgs}",
         )
+    return 0 if failed_tiles else 1
+
+
+# Order matters: a batch worker's exit code is 10 + the index of its failed
+# step (see batch_worker and _build_tile_list_parallel).
+BATCH_STEPS = (
+    "1 (vector data)", "2 (mesh)", "2.5 (masks)", "3 (DSF/imagery)", "overlay"
+)
+
+
+def _build_one_tile(
+    tile, lat, lon, do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg
+):
+    """Build one tile of a batch; return the failed step or None."""
+    (tile.lat, tile.lon) = (lat, lon)
+    tile.build_dir = FNAMES.build_dir(tile.lat, tile.lon, tile.custom_build_dir)
+    tile.dem = None
+    if override_cfg:
+        tile.read_from_config(use_global=True)
+    else:
+        tile.read_from_config()
+    if do_osm or do_mesh or do_dsf:
+        tile.make_dirs()
+    tile_coords = FNAMES.short_latlon(lat, lon)
+    # A step failed if it returned 0 or raised red_flag; not every error
+    # path raises the flag (e.g. Triangle4XP giving up in step 2).
+    if do_osm:
+        if not VMAP.build_poly_file(tile) or UI.red_flag:
+            return BATCH_STEPS[0]
+    if do_mesh:
+        if not MESH.build_mesh(tile) or UI.red_flag:
+            return BATCH_STEPS[1]
+    if do_mask:
+        if not MASK.build_masks(tile) or UI.red_flag:
+            return BATCH_STEPS[2]
+    if do_dsf:
+        ok = build_tile(tile)
+        if tile_coords in IMG.incomplete_imgs:
+            UI.lvprint(
+                1,
+                f"Attempting to rebuild textures with white squares: "
+                f"{IMG.incomplete_imgs[tile_coords]}",
+            )
+            delete_incomplete_imgs(tile)
+            ok = build_tile(tile)
+        if not ok or UI.red_flag:
+            return BATCH_STEPS[3]
+    if do_ovl:
+        if not OVL.build_overlay(lat, lon) or UI.red_flag:
+            return BATCH_STEPS[4]
+    return None
+
+
+def _remove_from_todo_map(lat, lon):
+    try:
+        UI.gui.earth_window.canvas.delete(
+            UI.gui.earth_window.dico_tiles_todo[(lat, lon)]
+        )
+        UI.gui.earth_window.dico_tiles_todo.pop((lat, lon), None)
+    except Exception:
+        # Cosmetic only: no GUI (AttributeError), tile not on the map
+        # (KeyError) or Earth window closed (tkinter.TclError).
+        pass
+
+
+def _batch_summary(timer, nbr_tiles, failed_tiles):
+    UI.lvprint(
+        0, "Batch process completed in", UI.nicer_timer(time.time() - timer)
+    )
+    UI.lvprint(
+        0, f"Tiles built: {nbr_tiles - len(failed_tiles)}, "
+        f"failed: {len(failed_tiles)}."
+    )
+    for (coords, step) in failed_tiles:
+        UI.lvprint(0, f"   FAILED: {coords} in step {step}")
+
+
+def batch_worker(tile, flags):
+    """Build one tile for a parallel batch, in its own process.
+
+    flags is the "0"/"1" string of (osm, mesh, mask, dsf, ovl, override).
+    Returns the exit code: 0 when built, 10 + index in BATCH_STEPS when a
+    step failed.
+    """
+    UI.red_flag = 0
+    UI.stop_requested = False
+    failed_step = _build_one_tile(
+        tile, tile.lat, tile.lon, *(c == "1" for c in flags)
+    )
+    if IMG.incomplete_imgs:
+        UI.lvprint(
+            0,
+            f"ERROR: Parts of the following images could not be obtained "
+            f"and have been filled with white: {IMG.incomplete_imgs}",
+        )
+    return 0 if failed_step is None else 10 + BATCH_STEPS.index(failed_step)
+
+
+def _kill_process_tree(proc):
+    """Stop a batch worker and the tools it started (Triangle4XP, ...)."""
+    if sys.platform == "win32":
+        # terminate() would leave the worker's own child processes running.
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True,
+        )
+    else:
+        proc.kill()
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _build_tile_list_parallel(tile, list_lat_lon, flags):
+    """Build the tiles of a batch in up to batch_parallel_tiles processes.
+
+    Each tile runs in its own Ortho4XP.py --batch-worker process: tile
+    settings are module globals, so tiles cannot share one process. Fresh
+    tiles mostly wait on Overpass and imagery servers, which is what makes
+    running a few at once worth it.
+    """
+    nbr_slots = min(batch_parallel_tiles, len(list_lat_lon))
+    timer = time.time()
+    UI.lvprint(
+        0, "Batch build launched for a number of", len(list_lat_lon),
+        "tiles,", nbr_slots, "in parallel.",
+    )
+    script = FNAMES.resource_path("Ortho4XP.py")
+    # A frozen (PyInstaller) build is its own interpreter and script.
+    launcher = [sys.executable] if getattr(sys, "frozen", False) else [
+        sys.executable, script]
+    flag_string = "".join("1" if f else "0" for f in flags)
+    creationflags = (
+        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    )
+    env = dict(UI.subprocess_env(), PYTHONUNBUFFERED="1")
+    todo = list(list_lat_lon)
+    running = {}  # proc -> (lat, lon, coords, log path, log file, start)
+    failed_tiles = []
+    started = 0
+    UI.is_working = 1
+    try:
+        while todo or running:
+            while todo and len(running) < nbr_slots and not UI.stop_requested:
+                (lat, lon) = todo.pop(0)
+                started += 1
+                coords = FNAMES.short_latlon(lat, lon)
+                log_path = os.path.join(FNAMES.Tmp_dir, f"batch_{coords}.log")
+                log_file = open(log_path, "w", encoding="utf-8")
+                proc = subprocess.Popen(
+                    launcher + ["--batch-worker", str(lat), str(lon),
+                                flag_string, tile.custom_build_dir or ""],
+                    stdout=log_file, stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(script), env=env,
+                    creationflags=creationflags,
+                )
+                running[proc] = (lat, lon, coords, log_path, log_file,
+                                 time.time())
+                UI.vprint(
+                    0, f"Tile {coords} started ({started}/{len(list_lat_lon)},"
+                    f" {len(running)} running), output in {log_path}",
+                )
+            if UI.stop_requested:
+                for proc, info in running.items():
+                    _kill_process_tree(proc)
+                    info[4].close()
+                UI.lvprint(
+                    0, "Batch stopped:", len(running), "running tile(s)",
+                    "interrupted,", len(todo), "not started.",
+                )
+                UI.exit_message_and_bottom_line()
+                return 0
+            for proc in list(running):
+                code = proc.poll()
+                if code is None:
+                    continue
+                (lat, lon, coords, log_path, log_file, start) = running.pop(proc)
+                log_file.close()
+                if code == 0:
+                    UI.vprint(
+                        0, f"Tile {coords} built in",
+                        UI.nicer_timer(time.time() - start),
+                    )
+                    _remove_from_todo_map(lat, lon)
+                    try:
+                        os.remove(log_path)  # keep tmp clean; errors keep it
+                    except OSError:
+                        pass
+                    continue
+                if 10 <= code < 10 + len(BATCH_STEPS):
+                    step = BATCH_STEPS[code - 10]
+                else:
+                    step = f"? (worker exit code {code})"
+                UI.lvprint(
+                    0, "ERROR: Tile", coords, "failed in step", step,
+                    "- skipped, see", log_path,
+                )
+                failed_tiles.append((coords, step))
+            time.sleep(0.5)
+    finally:
+        UI.is_working = 0
+    _batch_summary(timer, len(list_lat_lon), failed_tiles)
     return 0 if failed_tiles else 1
 
 ################################################################################
