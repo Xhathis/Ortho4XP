@@ -586,11 +586,13 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
                     f"      OSM server {current_key} rejected our query "
                     f"(HTTP {r.status_code}), new tentative in {wait} sec...",
                 )
-        except Exception:
+        except Exception as e:
+            # Name the actual error: a timeout, a refused connection and a
+            # TLS problem need different remedies, "too busy" hid all three.
             UI.vprint(
                 1,
-                f"      OSM server {current_key} was too busy, new tentative in ",
-                f"{wait} sec...",
+                f"      OSM server {current_key} did not answer "
+                f"({type(e).__name__}: {e}), new tentative in {wait} sec...",
             )
         if UI.red_flag:
             return 0
