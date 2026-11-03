@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from pyproj.exceptions import CRSError
 import requests
 
 import O4_File_Names as FNAMES
@@ -28,16 +29,18 @@ try:
     import O4_Custom_URL as URL
 
     has_URL = True
-except:
+except Exception:
     try:
         # module loaded from a subdirectory of Extent for extent creation
         sys.path.append(os.path.join("../../Providers"))
         import O4_Custom_URL as URL
 
         has_URL = True
-    except:
+    except Exception as e:
+        # User-editable code: any error in it must not stop Ortho4XP.
         print(
-            "ERROR: Providers/O4_Custom_URL.py contains invalid code.",
+            "ERROR: Providers/O4_Custom_URL.py contains invalid code",
+            f"({type(e).__name__}: {e}).",
             "The corresponding providers won't probably work.",
         )
 
@@ -91,6 +94,7 @@ combined_providers_dict = {}
 local_combined_providers_dict = {}
 extents_dict = {"global": {"dir": None, "code": "global"}}
 color_filters_dict = {"none": []}
+_failed_color_filters = set()  # filters already reported as failing
 
 ################################################################################
 def initialize_extents_dict():
@@ -114,18 +118,15 @@ def initialize_extents_dict():
                     line = line.split("#")[0]
                 if "=" not in line:
                     continue
-                try:
-                    key = line.split("=")[0]
-                    value = line[len(key) + 1 :]
-                    extent[key] = value
-                except:
-                    print("Error for extent", extent_code, "in line", line)
-                    continue
+                # (no try needed: "=" is in line, so this cannot fail)
+                key = line.split("=")[0]
+                value = line[len(key) + 1 :]
+                extent[key] = value
                 # structuring data
                 if key == "epsg_code":
                     try:
                         GEO.record_epsg(int(value))
-                    except:
+                    except (ValueError, CRSError):
                         # HACK for Slovenia
                         if int(value) == 102060:
                             GEO.record_epsg(3912)
@@ -135,7 +136,7 @@ def initialize_extents_dict():
                 elif key == "mask_bounds":
                     try:
                         extent[key] = [float(x) for x in value.split(",")]
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading mask bounds for extent",
                             extent_code,
@@ -144,7 +145,7 @@ def initialize_extents_dict():
                 elif key == "buffer_width":
                     try:
                         extent[key] = float(value)
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading mask buffer width for extent",
                             extent_code,
@@ -153,7 +154,7 @@ def initialize_extents_dict():
                 elif key == "mask_width":
                     try:
                         extent[key] = float(value)
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading mask width for extent",
                             extent_code,
@@ -189,7 +190,7 @@ def initialize_color_filters_dict():
             try:
                 items = line.split()
                 color_filters.append([items[0]] + [float(x) for x in items[1:]])
-            except:
+            except ValueError:
                 valid_color_filters = False
         if valid_color_filters:
             color_filters_dict[color_code] = color_filters
@@ -268,7 +269,7 @@ def initialize_providers_dict():
                                 "not valid.",
                             )
                             valid_provider = False
-                    except:
+                    except Exception:
                         print(
                             "Definition of fake headers for provider",
                             provider_code,
@@ -278,7 +279,7 @@ def initialize_providers_dict():
                 elif key == "epsg_code":
                     try:
                         GEO.record_epsg(int(value))
-                    except:
+                    except (ValueError, CRSError):
                         # HACK for Slovenia
                         if int(value) == 102060:
                             GEO.record_epsg(3912)
@@ -299,7 +300,7 @@ def initialize_providers_dict():
                                 provider_code,
                             )
                             provider["in_GUI"] = True
-                    except:
+                    except Exception:
                         UI.vprint(
                             0, "Error in GUI status for provider", provider_code
                         )
@@ -321,7 +322,7 @@ def initialize_providers_dict():
                                 provider_code,
                                 "seems off limits, provider skipped.",
                             )
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading wms size for provider",
                             provider_code,
@@ -340,7 +341,7 @@ def initialize_providers_dict():
                             numpy.array([float(x) for x in value.split()])
                             for _ in range(40)
                         ]
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading top left corner for provider",
                             provider_code,
@@ -351,7 +352,7 @@ def initialize_providers_dict():
                         provider[key] = numpy.array(
                             [float(x) for x in value.split()]
                         )
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading scaledenominator for provider",
                             provider_code,
@@ -364,7 +365,7 @@ def initialize_providers_dict():
                         provider[key] = numpy.array(
                             [float(x) for x in value.split()]
                         )
-                    except:
+                    except ValueError:
                         print(
                             "Error in reading resolutions for provider",
                             provider_code,
@@ -373,7 +374,7 @@ def initialize_providers_dict():
                 elif key == "max_threads":
                     try:
                         provider[key] = int(value)
-                    except:
+                    except ValueError:
                         pass
                 elif key == "extent":
                     pass
@@ -404,7 +405,7 @@ def initialize_providers_dict():
                             "capabilities_" + provider_code + ".xml",
                         )
                     )
-                except:
+                except Exception:
                     try:
                         tilematrixsets = read_tilematrixsets(
                             os.path.join(
@@ -413,7 +414,7 @@ def initialize_providers_dict():
                                 "capabilities.xml",
                             )
                         )
-                    except:
+                    except Exception:
                         print(
                             "Error in reading capabilities for provider",
                             provider_code,
@@ -448,7 +449,7 @@ def initialize_providers_dict():
                         else:
                             print("no tilematrixset found")
                             valid_provider = False
-                    except:
+                    except Exception:
                         print(
                             "Error in reading capabilities for provider",
                             provider_code,
@@ -549,7 +550,7 @@ def initialize_combined_providers_dict():
                 if color_code == "default":
                     try:
                         color_code = providers_dict[layer_code]["color_filters"]
-                    except:
+                    except KeyError:
                         print(
                             "Unknown color filter in combined provider",
                             provider_code,
@@ -573,7 +574,7 @@ def initialize_combined_providers_dict():
                             color_filters_dict[color_code].append(
                                 ["saturation", saturation]
                             )
-                    except:
+                    except ValueError:
                         print(
                             "Unknown color filter in combined provider",
                             provider_code,
@@ -606,7 +607,7 @@ def initialize_combined_providers_dict():
                     provider_code,
                     "did not contained valid providers, skipped.",
                 )
-        except:
+        except Exception:
             print(
                 "Error reading definition of combined provider", provider_code
             )
@@ -691,13 +692,13 @@ def initialize_local_combined_providers_dict(tile):
                     buffer_width = (
                         extents_dict[name]["buffer_width"] / pixel_size
                     )
-                except:
+                except KeyError:
                     buffer_width = 0.0
                 try:
                     mask_width = int(
                         extents_dict[name]["mask_width"] / pixel_size
                     )
-                except:
+                except KeyError:
                     mask_width = int(100 / pixel_size)
                 pixel_size = pixel_size / 111139
                 vector_map = VECT.Vector_Map()
@@ -797,7 +798,7 @@ def initialize_local_combined_providers_dict(tile):
                 ]:
                     try:
                         os.remove(f)
-                    except:
+                    except OSError:
                         pass
             else:
                 new_comb_list.append(rlayer)
@@ -1041,7 +1042,7 @@ def http_request_to_image(width, height, url, request_headers, http_session):
                 try:
                     small_image = Image.open(io.BytesIO(r.content))
                     return (1, small_image)
-                except:
+                except Exception:
                     UI.vprint(
                         2,
                         "Server said 'OK', but the received ",
@@ -2031,7 +2032,7 @@ def create_tile_preview(lat, lon, zoomlevel, provider_code):
         else:
             try:
                 big_image.save(filepreview)
-            except:
+            except (AttributeError, OSError):
                 pass
             return 0
     return 1
@@ -2138,7 +2139,15 @@ def color_transform(im, color_code):
                     )
                 im = Image.merge(im.mode, bands)
         return im
-    except:
+    except Exception as e:
+        # Keep the unfiltered image rather than failing the texture, but say
+        # so (once per filter): silently wrong colours are hard to trace.
+        if color_code not in _failed_color_filters:
+            _failed_color_filters.add(color_code)
+            UI.lvprint(
+                1, "WARNING: color filter", color_code, "could not be applied",
+                f"({type(e).__name__}: {e}), using unfiltered imagery.",
+            )
         return im
 
 
@@ -2309,7 +2318,7 @@ def convert_texture(
         if os.path.exists(os.path.join(FNAMES.Geotiff_dir, out_file_name)):
             try:
                 os.remove(os.path.join(FNAMES.Geotiff_dir, out_file_name))
-            except:
+            except OSError:
                 pass
         png_file_name = out_file_name.replace("tif", "png")
         tmp_tif_file_name = os.path.join(
@@ -2391,7 +2400,7 @@ def convert_texture(
                             ),
                         )
                     )
-                except:
+                except OSError:
                     pass
             dxt5 = True
         file_to_convert = os.path.join(FNAMES.resource_path("tmp"), png_file_name)
@@ -2427,7 +2436,7 @@ def convert_texture(
                             ),
                         )
                     )
-                except:
+                except OSError:
                     pass
             dxt5 = True
         file_to_convert = os.path.join(FNAMES.resource_path("tmp"), png_file_name)
@@ -2525,7 +2534,7 @@ def convert_texture(
                     os.remove(
                         os.path.join(FNAMES.resource_path("tmp"), png_file_name)
                     )
-                except:
+                except OSError:
                     pass
                 return
             conv_cmd = [
@@ -2570,12 +2579,12 @@ def convert_texture(
     if erase_tmp_png:
         try:
             os.remove(os.path.join(FNAMES.resource_path("tmp"), png_file_name))
-        except:
+        except OSError:
             pass
     if erase_tmp_tif:
         try:
             os.remove(tmp_tif_file_name)
-        except:
+        except OSError:
             pass
     return
 
