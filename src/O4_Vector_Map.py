@@ -920,6 +920,9 @@ def keep_obj8(
     idx_node = 0
     dico_index = {}
     index = 0
+    # Footprint added to the patch area; stays empty when the file has no
+    # usable TRIS (returning an unassigned name used to crash step 1).
+    multipol = geometry.Polygon()
     latscale = GEO.m_to_lat
     lonscale = latscale / cos(lat_anchor * pi / 180)
     f = open(objfile_name, "r")
