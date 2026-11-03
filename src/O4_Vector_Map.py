@@ -204,13 +204,24 @@ def include_airports(vector_map, tile):
     APT.update_airport_boundaries(tile, dico_airports)
     APT.list_airports_and_runways(dico_airports)
     UI.vprint(1, "   Loading elevation data and smoothing it over airports.")
-    tile.dem = DEM.DEM(
-        tile.lat,
-        tile.lon,
-        tile.custom_dem,
-        tile.fill_nodata or "to zero",
-        info_only=False,
-    )
+    try:
+        tile.dem = DEM.DEM(
+            tile.lat,
+            tile.lon,
+            tile.custom_dem,
+            tile.fill_nodata or "to zero",
+            info_only=False,
+        )
+    except DEM.DEMError as e:
+        # Building on with zero altitude gave a flat tile that a batch
+        # reported as built.
+        UI.lvprint(
+            0,
+            "   ERROR: Elevation data:",
+            str(e) + ". The tile would be flat, stopping.",
+        )
+        UI.red_flag = True
+        return (0, 0)
     APT.smooth_raster_over_airports(tile, dico_airports)
     (patches_area, patches_list) = include_patches(vector_map, tile)
     runway_taxiway_apron_area = APT.encode_runways_taxiways_and_aprons(
