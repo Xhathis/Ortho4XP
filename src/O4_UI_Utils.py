@@ -6,6 +6,10 @@ import O4_File_Names as FNAMES
 
 verbosity = 1
 red_flag = False
+# red_flag stops the current step, both on errors and on the Stop button;
+# stop_requested is set only by the Stop button, so a batch build can tell
+# "skip this tile" from "stop everything".
+stop_requested = False
 is_working = False
 cleaning_level = 1
 gui = None
