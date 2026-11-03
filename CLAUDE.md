@@ -85,8 +85,11 @@ custom extent / alternative module dir), `sim_osm_failure.py` (CLI
 build with a simulated Overpass failure on the water layer) and
 `sim_water_geometry_failure.py` (CLI build where cleaning the inland
 water geometry fails), `sim_mask_dem_failure.py` (CLI build where the
-DEM for masks fails in step 2.5) and `sim_batch.py error|stop` (batch
-of 3, steps 1-2.5, with an error or a Stop on tile 2).
+DEM for masks fails in step 2.5), `sim_batch.py error|stop` (batch
+of 3, steps 1-2.5, with an error or a Stop on tile 2) and
+`gui_smoke.py` (scripted run of the real GUI: Earth and config
+windows, tile selection; no downloads, no Custom Scenery links; back
+up .last_gui_params.txt around it).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
 
 Test results:
@@ -169,6 +172,14 @@ Test results:
   in step 1, mask/DEM failure stops in step 2.5, all exit 1; batch sims:
   an error on tile 2 of 3 is skipped ("built 2, failed 1"), Stop during
   tile 2 ends the batch.
+  → `dev` fast-forwarded to ff86062 (with these notes) on 2026-11-03.
+- `fix/bare-excepts-config-utils` @ c820a6d (15), `fix/bare-excepts-gui-utils`
+  @ 214745d (30, from dev), `fix/bare-excepts-small-modules` @ 043ce7e (9),
+  `fix/cli-read-tile-config` @ ed16185 (#17, from dev). Config: broken
+  global/tile configs give the same values as master; GUI: scripted run
+  same as dev's module; overlay extraction identical to master.
+- `test` @ 53c6742 (+ the four above), 2026-11-03: 4-arg and 2-arg CLI
+  builds byte-identical, all five sims as designed, gui_smoke 7/7 ok.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -195,10 +206,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    silently does nothing. `delete_old_masks_in_tile(tile, dest_dir)` exists
    separately. Decide: remove the block, or pass `dest_dir` in. Check which
    caller is responsible for deleting old masks before changing it.
-3. **Build path done** — Tile, Imagery, Vector_Map, Mesh, Airport,
-   OSM, Mask, DEM, DSF. 56 left on `test`, none in the build steps:
-   GUI 30, Config 15, Overlay 3, Vector_Utils 2, Scenery 2, UI 1,
-   Parallel 1 (+ 2 in commented-out code in Mask and Vector_Map). Pattern: ignore only the
+3. **FIXED** — no bare `except:` left in live code (only 2 in
+   commented-out code in Mask and Vector_Map). Pattern: ignore only the
    expected error (e.g. FileNotFoundError), report other OSErrors, let
    coding errors raise; `except Exception` only at trust boundaries
    (eval of config, user code, downloaded data) with a comment.
@@ -266,6 +275,12 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     tmp/+LL+LLL.dsf crashes step 3 (also on master).
 16. **FIXED** (`b66a59b`). `build_masks()` returns early on errors (bad DEM, missing mesh)
     without raising `UI.red_flag`, so the CLI still runs step 3.
+17. **FIXED** (`ed16185`): `Ortho4XP.py lat lon` never read the tile
+    config, built with an empty provider (exit 0) and saved that into
+    the tile config; it now reads the tile config or exits 1.
+18. `build_overlay()` removes only the elevation and sea_level rasters
+    from tmp; the 9 other XP12 rasters (seasons, soundscape) stay
+    (also on master).
 13. **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
     provider dict (found by the broken-config test, same on master).
