@@ -351,9 +351,12 @@ class OSM_layer:
                             + '"/>\n'
                         )
                     fout.write("  </node>\n")
-        for wayid in tuple(self.dicosmfirst["w"]) + tuple(
-            set(self.dicosmw).difference(self.dicosmfirst["w"])
-        ):
+        # Write ways and relations in the order they were read (dict
+        # insertion order). Reading the file back then gives every element
+        # the same id as with the original download; iterating sets here
+        # reshuffled them, so geometry built from the cache differed from
+        # geometry built from a fresh download (mesh, masks and DSF).
+        for wayid in self.dicosmw:
             fout.write('  <way id="' + str(wayid) + '" version="1">\n')
             for nodeid in self.dicosmw[wayid]:
                 fout.write('    <nd ref="' + str(nodeid) + '"/>\n')
@@ -368,9 +371,7 @@ class OSM_layer:
                     + '"/>\n'
                 )
             fout.write("  </way>\n")
-        for relid in tuple(self.dicosmfirst["r"]) + tuple(
-            set(self.dicosmrorig).difference(self.dicosmfirst["r"])
-        ):
+        for relid in self.dicosmrorig:
             fout.write('  <relation id="' + str(relid) + '" version="1">\n')
             for wayid in self.dicosmrorig[relid]["outer"]:
                 fout.write(
