@@ -79,8 +79,28 @@ def build_overlay(lat, lon):
     f.close()
     if dsfid == "7z":
         UI.vprint(1, "-> The original DSF is a 7z archive, uncompressing...")
-        os.replace(file_to_sniff_loc, file_to_sniff_loc + ".7z")
-        subprocess.run([unzip_cmd, "e", f"-o{FNAMES.Tmp_dir}", f"{file_to_sniff_loc}.7z"], env=UI.subprocess_env())
+        # Same guard as in O4_DSF_Utils: a locked tmp file or a failing 7z
+        # used to crash the overlay step a few lines later.
+        try:
+            os.replace(file_to_sniff_loc, file_to_sniff_loc + ".7z")
+            result = subprocess.run(
+                [unzip_cmd, "e", "-y", f"-o{FNAMES.Tmp_dir}",
+                 f"{file_to_sniff_loc}.7z"],
+                env=UI.subprocess_env(),
+            )
+            if result.returncode or not os.path.isfile(file_to_sniff_loc):
+                raise OSError(f"7z exited with code {result.returncode}")
+        except OSError as e:
+            UI.exit_message_and_bottom_line(
+                "   ERROR: could not uncompress the overlay DSF",
+                f"({e.strerror or e}).",
+            )
+            for leftover in (file_to_sniff_loc, file_to_sniff_loc + ".7z"):
+                try:
+                    os.remove(leftover)
+                except OSError:
+                    pass
+            return 0
         os.remove(file_to_sniff_loc + ".7z")
     UI.vprint(1, "-> Converting the copy to text format")
     dsfconvertcmd = [
