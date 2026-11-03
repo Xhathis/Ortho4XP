@@ -103,6 +103,13 @@ data: step 1 must stop, exit 1), `sim_batch.py dem` (tile 2 of 3
 without elevation data is skipped) and `check_ned_names.py [--head]`
 (USGS NED names; --head asks USGS that the files exist). Unit sims set
 `UI.log = False`: lvprint would otherwise append to the user's log.
+`sim_osm_layer_request.py <scratch>` (#26 against a mock server),
+`compare_layer_request.py <scratch> [lat lon]` (real Overpass:
+combined vs per-query layer download, same set of ways?),
+`check_atomic_files.py <scratch>` and `test_parallel_batch.py
+compare|fail|stop <out_dir>` (#27: real builds of +43-067/-066/-065,
+GO2 ZL16, user's global cfg, custom build dir; ~7 min for all three
+modes; writes Masks\+40-070 as usual; back up Ortho4XP.log around it).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out); since
 #23 tentatives 5-8 alternate with the other servers in
 overpass_servers.txt. The failure sims replace the whole server list
@@ -235,6 +242,14 @@ Test results:
   `test` @ c473a68: builds byte-identical, all 9 failure sims exit 1
   (incl. sim_dem_cli), batch sims error/stop/dem as designed,
   gui_smoke 7/7, unit sims 0 failures.
+- `fix/osm-layer-request` @ 6c9c6d4 (#26): sim_osm_layer_request 7/7;
+  real Overpass on +55+012: same set of ways combined/per query (big
+  roads 8167, water 13224), 48 s vs 317 s and 51 s vs 217 s, 1
+  duplicated water way gone. `fix/parallel-batch` @ c180af9 (#27):
+  check_atomic_files 6/6; test_parallel_batch compare (masks 39/39
+  and 3 DSFs identical to a two-phase sequential reference, 115 s vs
+  169 s), fail and stop as designed. `test` @ 72772f9: builds
+  byte-identical, all sims as before, gui_smoke 7/7, unit sims 0.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -369,6 +384,25 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     info_only reads stay as before.
 25. **FIXED** (`cffd6f4`): NED tile id for eastern longitudes lost its
     latitude (`tid + "w" if lon < 0 else "e"`), e.g. western Aleutians.
+26. **DONE** (`6c9c6d4`): a layer with several queries (big/small
+    roads, water) goes to Overpass as one union request
+    ([timeout:300], read 310 s); 4 failed tries fall back to one
+    request per query. Fresh downloads lose duplicated ways (a way
+    matched by two queries was stored twice), so a fresh tile can
+    differ slightly from one built before; cached layers unchanged.
+27. **DONE** (`6c49c86`, `15562e4`, `c180af9`): app setting
+    `batch_parallel_tiles` (default 1 = sequential as before). Above 1
+    the batch runs `Ortho4XP.py --batch-worker` processes (output in
+    tmp\batch_<tile>.log, kept only on failure), in two phases: steps
+    1-2 for all tiles, then 2.5-3. Stop kills the worker trees
+    (taskkill /T). Shared Viewfinder/NED/imagery files are written to a
+    temp name and os.replace'd. Recommended 2-3 (Overpass allows few
+    parallel requests per IP; each tile adds its imagery downloads).
+28. Finding (not changed): build_masks also uses the neighbour tiles'
+    meshes (select_neighbor_meshes), so in a sequential batch over a
+    fresh region a tile's masks depend on the order (earlier tiles see
+    no later neighbour). The parallel two-phase batch does not have
+    this; rebuilding steps 2.5-3 after all meshes exist fixes it too.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -385,11 +419,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 - max_download_slots=1 already means 16 parallel requests per texture
   (provider max_threads); fresh tiles are bound by Overpass and imagery
   download times, not CPU.
-- Ideas not done (need a new baseline or larger changes): one Overpass
-  request per layer instead of per query (fewer slow requests in step 1,
-  but changes element order); running several CLI processes in parallel
-  for different tiles of a batch (separate globals; needs a real
-  multi-tile test); algorithmic work in insert_edge, blur_mask,
+- Done 2026-11-03: one Overpass request per layer (#26) and parallel
+  batch tiles (#27, 3 cached Nova Scotia tiles: 115 s vs 169 s; fresh
+  tiles gain more, they wait on servers).
+- Ideas not done: algorithmic work in insert_edge, blur_mask,
   build_dsf.
 
 ## Planned order of work
