@@ -3,6 +3,7 @@ import time
 import shutil
 import queue
 import threading
+import traceback
 from collections import defaultdict
 import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
@@ -40,7 +41,10 @@ def download_textures(
     convert_queue,
     workers=None,
     producer_done_event=None,
+    failed=None,
 ):
+    # failed: list that receives the attributes of textures which could not
+    # be downloaded after max_attempts (build_tile won't activate the DSF).
     worker_count = max(1, workers or max_download_slots)
     UI.vprint(1, f"-> Opening download queue with {worker_count} worker(s).")
 
@@ -88,7 +92,15 @@ def download_textures(
                 should_retry = attempt < max_attempts and not UI.red_flag
                 if not should_retry:
                     attempts.pop(attrs, None)
+                    if not UI.red_flag and failed is not None:
+                        failed.append(attrs)
             _update_progress_locked()
+        if not ok and not should_retry and not UI.red_flag:
+            UI.lvprint(
+                1, "ERROR: Could not get texture",
+                FNAMES.dds_file_name_from_attributes(*attrs),
+                f"after {max_attempts} attempts.",
+            )
 
         if ok:
             convert_queue.put((tile, *attrs))
@@ -204,16 +216,34 @@ def build_tile(tile):
         UI.exit_message_and_bottom_line("")
         return 0
 
+    dsf_file_name = os.path.join(
+        tile.build_dir,
+        "Earth nav data",
+        FNAMES.long_latlon(tile.lat, tile.lon) + ".dsf",
+    )
+    # A .tmp left by an earlier failed run must never be activated below.
+    remove_if_exists(dsf_file_name + ".tmp")
     download_queue = queue.Queue()
     convert_queue = queue.Queue()
 
     download_launched = False
     convert_launched = False
     download_workers = max_download_slots
+    failed_downloads = []
+    IMG.failed_conversions.clear()
+    dsf_result = {"ok": 0}
 
-    build_dsf_thread = threading.Thread(
-        target=DSF.build_dsf, args=[tile, download_queue]
-    )
+    def _build_dsf():
+        # Runs in a thread: record the outcome, since an exception or a
+        # 0 return would otherwise go unnoticed and a partial DSF could be
+        # activated.
+        try:
+            dsf_result["ok"] = DSF.build_dsf(tile, download_queue)
+        except Exception:
+            UI.lvprint(0, "ERROR: building the DSF failed:")
+            UI.lvprint(0, traceback.format_exc())
+
+    build_dsf_thread = threading.Thread(target=_build_dsf)
     producer_done_event = threading.Event()
 
     download_thread = threading.Thread(
@@ -224,6 +254,7 @@ def build_tile(tile):
             convert_queue,
             download_workers,
             producer_done_event,
+            failed_downloads,
         ],
     )
     build_dsf_thread.start()
@@ -257,12 +288,31 @@ def build_tile(tile):
                 UI.vprint(1, "DDS conversion process interrupted.")
             elif dico_conv_progress["done"] >= 1:
                 UI.vprint(1, " *DDS conversion of textures completed.")
+    if UI.red_flag:
+        UI.exit_message_and_bottom_line()
+        return 0
+    # Only activate a complete tile: a DSF that references missing textures
+    # looks like a successful build but shows holes in X-Plane. Leaving it
+    # inactive makes the tile count as failed (CLI exit 1, batch summary);
+    # a rerun of step 3 only fetches what is missing.
+    problems = []
+    if not dsf_result["ok"]:
+        problems.append("the DSF could not be built")
+    if failed_downloads:
+        problems.append(f"{len(failed_downloads)} texture(s) not downloaded")
+    if IMG.failed_conversions:
+        problems.append(
+            f"{len(IMG.failed_conversions)} texture(s) not converted"
+        )
+    if problems:
+        UI.lvprint(
+            0, "ERROR: Tile", FNAMES.short_latlon(tile.lat, tile.lon),
+            "is incomplete (" + ", ".join(problems) + "); the DSF was not",
+            "activated. Run step 3 again to retry the missing parts.",
+        )
+        UI.exit_message_and_bottom_line("")
+        return 0
     UI.vprint(1, " *Activating DSF file.")
-    dsf_file_name = os.path.join(
-        tile.build_dir,
-        "Earth nav data",
-        FNAMES.long_latlon(tile.lat, tile.lon) + ".dsf",
-    )
     try:
         os.replace(dsf_file_name + ".tmp", dsf_file_name)
     except OSError as e:
@@ -270,8 +320,7 @@ def build_tile(tile):
             0, "ERROR : could not rename DSF file, tile is not active",
             f"({e.strerror}).",
         )
-    if UI.red_flag:
-        UI.exit_message_and_bottom_line()
+        UI.exit_message_and_bottom_line("")
         return 0
     if UI.cleaning_level > 1:
         remove_if_exists(FNAMES.alt_file(tile))
