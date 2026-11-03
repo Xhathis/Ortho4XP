@@ -96,6 +96,14 @@ recycled from, a scratch cache; needs Overpass), `sim_mesh_failure.py`
 (one texture fails, or build_dsf raises; restore the held DDS and the
 DSF .bak afterwards) and `time_convert.py <slots> <N> <scratch>`.
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out).
+Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
+settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
+at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
+...), so it no longer matches the baseline. For regression tests, back up
+Ortho4XP.cfg, copy the baseline's saved Ortho4XP.cfg over it, run the
+tests, then restore the backup. Never leave the baseline config in place.
+The values before the 2026-11-03 tuning are in Ortho4XP.cfg.before-tuning.bak
+(coast_curv_tol 10 had no effect: it only refines when < curvature_tol).
 
 Test results:
 - `test` @ d07031d (fix/gitattributes + fix/mask-utils-nameerrors),
