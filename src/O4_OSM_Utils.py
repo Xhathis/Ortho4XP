@@ -443,19 +443,21 @@ def OSM_queries_to_OSM_layer(
         if UI.red_flag:
             return 0
         if not response:
-            UI.logprint(
-                "No valid answer for",
+            # A missing query leaves the whole layer incomplete (e.g. a tile
+            # without any inland water), and nothing of it gets cached.
+            # Raise the red flag so the build stops here instead of producing
+            # a tile that looks fine but lacks data.
+            UI.lvprint(
+                0,
+                "   ERROR: No valid answer for",
                 query,
                 "after",
                 max_osm_tentatives,
-                ", skipping it.",
+                "tentatives. The",
+                cached_suffix or "OSM",
+                "layer would be incomplete, stopping.",
             )
-            UI.vprint(
-                1,
-                "      No valid answer after",
-                max_osm_tentatives,
-                ", skipping it.",
-            )
+            UI.red_flag = True
             return 0
         osm_layer.update_dicosm(response, input_tags, target_tags)
     if cached_suffix:
@@ -584,11 +586,13 @@ def get_overpass_data(query: str, bbox: tuple) -> bytes:
                     f"      OSM server {current_key} rejected our query "
                     f"(HTTP {r.status_code}), new tentative in {wait} sec...",
                 )
-        except Exception:
+        except Exception as e:
+            # Name the actual error: a timeout, a refused connection and a
+            # TLS problem need different remedies, "too busy" hid all three.
             UI.vprint(
                 1,
-                f"      OSM server {current_key} was too busy, new tentative in ",
-                f"{wait} sec...",
+                f"      OSM server {current_key} did not answer "
+                f"({type(e).__name__}: {e}), new tentative in {wait} sec...",
             )
         if UI.red_flag:
             return 0
