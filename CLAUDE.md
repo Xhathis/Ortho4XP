@@ -190,6 +190,11 @@ Test results:
   all sims and gui_smoke as before, providers unchanged, and
   cache_roundtrip: fresh download and recycled cache now give identical
   .poly/.node.
+  → `dev` fast-forwarded to 7693fb0 (with these notes) on 2026-11-03.
+- `fix/pyflakes-cleanup` @ fc5914a (#6): pyflakes reports 0 findings;
+  config still applied via exec; builds byte-identical; gui_smoke 7/7.
+- `test` @ df760d1 (+ #6), 2026-11-03: build byte-identical, all five
+  sims as designed. All issues in this file are now fixed.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -238,7 +243,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    check=True)` or `_winapi.CreateJunction`.
 5. **FIXED** (`20dbfe3`). **No `.gitattributes`.** Add `* text=auto eol=lf` for source files and
    keep `*.bat` as `eol=crlf`, to avoid whole-file CRLF diffs.
-6. Minor (pyflakes): 10 unused imports, 9 unused local variables, 3 f-strings
+6. **FIXED** (`fc5914a`). pyflakes is installed in the venv
+   (`venv\Scripts\python.exe -m pyflakes Ortho4XP.py src/O4_*.py` must
+   stay at 0 findings). The IMG/OSM/OVL/TILE/UI imports in
+   O4_Config_Utils are exec() targets (see `_EXEC_TARGETS`), not unused.
+   Minor (pyflakes): 10 unused imports, 9 unused local variables, 3 f-strings
    without placeholders, 1 unused `global extents_dict`.
 7. **FIXED** (`ac12969`, `d48aaa0`, `f955376`: build stops with ERROR, CLI
    exits 1, real exception shown). Follow-up FIXED (`9da5892`): a batch
