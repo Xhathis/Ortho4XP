@@ -332,10 +332,12 @@ def build_tile_list(
     if UI.is_working:
         return 0
     UI.red_flag = 0
+    UI.stop_requested = False
     timer = time.time()
     UI.lvprint(
         0, "Batch build launched for a number of", len(list_lat_lon), "tiles."
     )
+    failed_tiles = []  # (tile coords, step) of tiles skipped after an error
     k = 0
     for (lat, lon) in list_lat_lon:
         k += 1
@@ -359,23 +361,21 @@ def build_tile_list(
             tile.read_from_config()
         if do_osm or do_mesh or do_dsf:
             tile.make_dirs()
+        tile_coords = FNAMES.short_latlon(lat, lon)
+        failed_step = None
         if do_osm:
             VMAP.build_poly_file(tile)
             if UI.red_flag:
-                UI.exit_message_and_bottom_line()
-                return 0
-        if do_mesh:
+                failed_step = "1 (vector data)"
+        if do_mesh and not failed_step:
             MESH.build_mesh(tile)
             if UI.red_flag:
-                UI.exit_message_and_bottom_line()
-                return 0
-        if do_mask:
+                failed_step = "2 (mesh)"
+        if do_mask and not failed_step:
             MASK.build_masks(tile)
             if UI.red_flag:
-                UI.exit_message_and_bottom_line()
-                return 0
-        if do_dsf:
-            tile_coords = FNAMES.short_latlon(lat, lon)
+                failed_step = "2.5 (masks)"
+        if do_dsf and not failed_step:
             build_tile(tile)
             if tile_coords in IMG.incomplete_imgs:
                 UI.lvprint(
@@ -386,13 +386,27 @@ def build_tile_list(
                 delete_incomplete_imgs(tile)
                 build_tile(tile)
             if UI.red_flag:
-                UI.exit_message_and_bottom_line()
-                return 0
-        if do_ovl:
+                failed_step = "3 (DSF/imagery)"
+        if do_ovl and not failed_step:
             OVL.build_overlay(lat, lon)
             if UI.red_flag:
+                failed_step = "overlay"
+        if failed_step:
+            if UI.stop_requested:
+                # The user pressed Stop: end the whole batch, as before.
                 UI.exit_message_and_bottom_line()
                 return 0
+            # An error in this tile: the step has already reported it and
+            # left the previous files in place. Skip the tile so a long
+            # unattended batch still builds the others.
+            UI.lvprint(
+                0, "ERROR: Tile", tile_coords, "failed in step", failed_step,
+                "- skipped, continuing with the next tile.",
+            )
+            failed_tiles.append((tile_coords, failed_step))
+            UI.red_flag = False
+            UI.is_working = False
+            continue
         try:
             UI.gui.earth_window.canvas.delete(
                 UI.gui.earth_window.dico_tiles_todo[(lat, lon)]
@@ -405,13 +419,19 @@ def build_tile_list(
     UI.lvprint(
         0, "Batch process completed in", UI.nicer_timer(time.time() - timer)
     )
+    UI.lvprint(
+        0, f"Tiles built: {len(list_lat_lon) - len(failed_tiles)}, "
+        f"failed: {len(failed_tiles)}."
+    )
+    for (coords, step) in failed_tiles:
+        UI.lvprint(0, f"   FAILED: {coords} in step {step}")
     if IMG.incomplete_imgs:
         UI.lvprint(
             0,
             f"\nERROR: Parts of the following images could not be obtained "
             f"and have been filled with white: {IMG.incomplete_imgs}",
         )
-    return 1
+    return 0 if failed_tiles else 1
 
 ################################################################################
 def remove_unwanted_textures(tile):

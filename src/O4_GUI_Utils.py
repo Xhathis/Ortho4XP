@@ -770,6 +770,7 @@ class Ortho4XP_GUI(tk.Tk):
             return 1
 
     def set_red_flag(self):
+        UI.stop_requested = True
         UI.red_flag = True
 
     def exit_prg(self) -> None:
