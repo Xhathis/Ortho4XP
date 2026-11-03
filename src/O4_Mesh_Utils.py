@@ -51,7 +51,7 @@ if os.path.exists(FNAMES.resource_path("community_server.txt")):
             community_server = True
             community_prefix = line
             break
-    except:
+    except (OSError, UnicodeDecodeError):
         pass
 
 
@@ -141,7 +141,7 @@ def build_curv_tol_weight_map(tile, weight_array):
             f = open(FNAMES.apt_file(tile), "rb")
             dico_airports = pickle.load(f)
             f.close()
-        except:
+        except (OSError, EOFError, pickle.UnpicklingError):
             UI.vprint(
                 1,
                 "   WARNING: File",
@@ -632,7 +632,7 @@ def build_mesh(tile):
         f = open(node_file, "r")
         input_nodes = int(f.readline().split()[0])
         f.close()
-    except:
+    except (OSError, ValueError, IndexError):
         UI.exit_message_and_bottom_line("\nERROR: In reading ", node_file)
         return 0
 
@@ -642,7 +642,7 @@ def build_mesh(tile):
     do_refine = "r" if tile.iterate else "A"
     try:
         max_tris = float(tile.limit_tris) * 1e6
-    except:
+    except (TypeError, ValueError):
         UI.vprint(1, "   Warning : limit_tris wrongly set, defaults to 5M.")
         max_tris = 5e6
     if max_tris <= 0 or max_tris >= 5e7:
@@ -699,7 +699,7 @@ def build_mesh(tile):
         else:
             try:
                 print(line.decode("utf-8")[:-1])
-            except:
+            except (UnicodeDecodeError, OSError):
                 pass
     time.sleep(0.3)
     fingers_crossed.poll()
@@ -734,7 +734,7 @@ def build_mesh(tile):
                 else:
                     try:
                         print(line.decode("utf-8")[:-1])
-                    except:
+                    except (UnicodeDecodeError, OSError):
                         pass
             time.sleep(0.3)
             fingers_crossed.poll()
@@ -764,32 +764,30 @@ def build_mesh(tile):
 
     write_mesh_file(tile, vertices)
     #
+    to_delete = []
     if UI.cleaning_level:
-        try:
-            os.remove(FNAMES.weight_file(tile))
-        except:
-            pass
-        try:
-            os.remove(FNAMES.output_node_file(tile))
-        except:
-            pass
-        try:
-            os.remove(FNAMES.output_ele_file(tile))
-        except:
-            pass
+        to_delete += [
+            FNAMES.weight_file(tile),
+            FNAMES.output_node_file(tile),
+            FNAMES.output_ele_file(tile),
+        ]
     if UI.cleaning_level > 2:
+        to_delete += [
+            FNAMES.alt_file(tile),
+            FNAMES.input_node_file(tile),
+            FNAMES.input_poly_file(tile),
+        ]
+    for file_name in to_delete:
+        # Cleanup only: a missing file is fine, other failures (file locked,
+        # no permission) are reported but don't fail the mesh step.
         try:
-            os.remove(FNAMES.alt_file(tile))
-        except:
+            os.remove(file_name)
+        except FileNotFoundError:
             pass
-        try:
-            os.remove(FNAMES.input_node_file(tile))
-        except:
-            pass
-        try:
-            os.remove(FNAMES.input_poly_file(tile))
-        except:
-            pass
+        except OSError as e:
+            UI.lvprint(
+                1, "WARNING: could not delete", file_name, f"({e.strerror})."
+            )
 
     UI.timings_and_bottom_line(timer)
     UI.logprint(
