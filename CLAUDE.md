@@ -56,28 +56,47 @@ Guidance for Claude Code working in this repository.
 
 There is no test suite, so every change is checked against a **baseline**:
 
-1. Build the agreed reference tile from unmodified `master`; keep its log,
-   masks (PNG), and the DSF/terrain output as the baseline. (Reference tile,
-   zoom level and provider: ask the user if not recorded below.)
-2. Build the same tile, same config, from the branch under test.
-3. Compare: log errors/warnings, masks pixel by pixel, DSF contents
-   (`DSFTool.exe --dsf2text`, then diff). Explain every difference — an
-   unexplained difference is a failure, even if the tile "looks fine".
+1. The baseline is the reference tile built from frozen inputs (OSM,
+   DEM, Global Scenery DSF, config), all kept inside the baseline folder.
+2. Build the same tile from the commit under test in the isolated
+   regression worktree (below), never in `G:\Ortho4XP`.
+3. Compare: masks and DSF by hash, then `--dsf2text` diff, then the app
+   log. Explain every difference — an unexplained difference is a
+   failure, even if the tile "looks fine".
 4. Where possible add `pytest` tests for pure functions (coordinate
    conversion in `O4_Geo_Utils`, file naming in `O4_File_Names`, config
    parsing) before refactoring them.
 
 Reference tile: `+55+012` (lat 55, lon 12 — Zealand / Copenhagen, Denmark).
 Provider `Arc` (Esri World Imagery, `Providers/Global/Arc.lay`), ZL 17.
-Build output: `G:\Ortho4XP\Tiles` (default; no custom build dir).
-Baseline: `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_master-3cff870_cached\`
-(see its `BASELINE.txt` and `SHA256SUMS`), built from cached inputs only.
-Before a test build, check `OSM_data\+50+010\+55+012\*.osm.bz2` against its
-`SHA256SUMS`; compare masks and DSF by hash, then `--dsf2text` diff (skip the
-header lines with the file path). The order of "Created …png" lines in
-`console.log` varies between runs (parallel threads) and is not a difference.
-Older folders, reference only: no suffix = invalid (no inland water, #7);
-`_run2` = superseded (fresh water download, #9).
+Baseline (since 2026-11-04):
+`G:\Ortho4XP_baseline\+55+012_Arc_ZL17_dev-c85e958_frozen\` — `inputs\`
+(4 OSM layers of the old baseline, DEM N54-N56 E011-E013 = the user's
+library .hgt files, X-Plane 12 Global Scenery +55+012.dsf, the old
+baseline's Ortho4XP.cfg), `expected\` (DSF, dsf2text, 17 masks, logs),
+`SHA256SUMS`, `BASELINE.txt`. Mesh 869,192 triangles; Triangle4XP lowers
+min_angle 10->8->6->4->2 (4 WARNINGs, expected: comes from this DEM,
+master 3cff870 gives the identical DSF and masks).
+Run a regression (any cwd, venv Python):
+`venv\Scripts\python.exe G:\Ortho4XP_tests\tools\regression.py run <commit> [--label name]`
+(~2 min; exit 0 = PASS). It checks the commit out in the git worktree
+`G:\Ortho4XP_tests\regression\ws` (detached HEAD), resets that
+worktree's data folders from `inputs\` and runs `Ortho4XP.py 55 12 Arc
+17` there: Ortho4XP takes all data folders and Ortho4XP.cfg from its
+cwd, so the user's folders, config, log and tiles are never touched,
+and no neighbour meshes exist (masks are deterministic, #28).
+custom_overlay_src points at the frozen Global Scenery copy, Custom
+Scenery is empty. Only imagery (Orthophotos, textures) persists in the
+worktree; it is not in the DSF or masks. After the build every input
+is re-hashed: an added or changed file (a download) fails the run.
+Results: `G:\Ortho4XP_tests\+55+012_Arc_ZL17_<label>-<sha>\` (console.log,
+DSF, masks, app_log.diff, dsf.diff if needed). The order of "Created
+…png" lines in console.log varies between runs and is not a difference.
+`regression.py freeze|baseline` made the baseline; a new one needs a
+new folder (they refuse to overwrite).
+Older baselines, reference only: `master-3cff870_cached` (Viewfinder
+DEM, not saved; no longer reproducible), no suffix = invalid (no inland
+water, #7), `_run2` = superseded (fresh water download, #9).
 Test builds go to `G:\Ortho4XP_tests\<tile>_<provider>_<ZL>_<branch>-<sha>\`.
 Test helpers (run from the repo root with the venv Python) are in
 `G:\Ortho4XP_tests\tools\`: `run_masks.py` (step 2.5 only, optional
@@ -121,30 +140,19 @@ build_tile calls directly).
 #23 tentatives 5-8 alternate with the other servers in
 overpass_servers.txt. The failure sims replace the whole server list
 with one closed port, so they still fail without fallback.
-Regression runs clear `Ortho4XP.log`: save the user's copy first and
-restore it afterwards (it holds their batch log).
-Baseline inputs drift since 2026-11-04 (user emptied OSM_data,
-Orthophotos and Masks on purpose to time a fresh batch, then promised
-to keep the caches until the project ends; their test set is the 9
-tiles +54..+56 / +010..+012 in Tiles\). For a regression: swap the
-baseline's own `+55+012_*.osm.bz2` copies into OSM_data and rename the
-neighbour tiles' Data*.mesh away (they feed the masks, #28), restore
-both afterwards. Elevation_data N54-N56 E011-E013 are now the user's
-library files, not the Viewfinder files of the baseline (not saved in
-it), so +55+012 no longer matches the baseline: compare `test` with
-`dev` built on the same inputs (A/B) instead. A new baseline should
-keep its own copies of the DEM files.
-Tiles\zOrtho4XP_+55+012 is both the regression tile and one of the
-user's 9 test tiles (GO2 ZL16, their own settings): save its
-Data+55+012.*, tile cfg, Earth nav data and Masks\+50+010\+55+012
-before a regression or A/B run and restore them afterwards, or the
-user's next step-3 batch runs on the regression's mesh.
+The full-build failure sims (sim_osm_failure, sim_water_geometry_failure,
+sim_mask_dem_failure, sim_mesh_failure, sim_step3_failures, sim_dem_cli,
+sim_batch) still build in `G:\Ortho4XP` itself. For those only: save
+the user's Ortho4XP.log and Ortho4XP.cfg (copy the old baseline's cfg
+over it), their OSM copies of +55+012 (swap in the baseline's), hide
+the neighbour Data*.mesh files, and save Tiles\zOrtho4XP_+55+012
+(Data+55+012.*, tile cfg, Earth nav data, textures it adds) and
+Masks\+50+010\+55+012; restore all afterwards. That tile is one of the
+user's 9 test tiles (+54..+56 / +010..+012, GO2 ZL16, their settings).
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
 at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
-...), so it no longer matches the baseline. For regression tests, back up
-Ortho4XP.cfg, copy the baseline's saved Ortho4XP.cfg over it, run the
-tests, then restore the backup. Never leave the baseline config in place.
+batch_parallel_tiles 3, ...). Never leave a test config in place.
 The values before the 2026-11-03 tuning are in Ortho4XP.cfg.before-tuning.bak
 (coast_curv_tol 10 had no effect: it only refines when < curvature_tol).
 
@@ -286,6 +294,13 @@ Test results:
   hand. `fix/step3-provider-check` @ 4326c43 (#31): check 6/6 (dev
   fails the empty/unknown cases). `test` @ ac1acff: all sims, gui_smoke
   7/7, unit sims 0; A/B dev/test DSF, masks, app log identical.
+- Third run (step 3 only, 9 tiles, 3 parallel), 2026-11-04: 9 built,
+  0 failed, 1h27m, download-bound (~12 textures/min per worker).
+- Frozen baseline `+55+012_Arc_ZL17_dev-c85e958_frozen`, 2026-11-04:
+  built in 923 s (Arc imagery downloaded once into the worktree);
+  `regression.py run` of c85e958 again (107 s) and of master 3cff870
+  (83 s): DSF byte-identical, 17/17 masks, app log identical, inputs
+  unchanged. So every fix on dev leaves a normal build unchanged.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
