@@ -268,7 +268,9 @@ class Tile:
                 self.build_dir,
                 "Ortho4XP_" + FNAMES.short_latlon(self.lat, self.lon) + ".cfg",
             )
-            config_file_bak = config_file + ".bak"
+        # Also for a given config_file: the name used to be set only above,
+        # so write_to_config(path) raised UnboundLocalError.
+        config_file_bak = config_file + ".bak"
         try:
             os.replace(config_file, config_file_bak)
         except OSError:
