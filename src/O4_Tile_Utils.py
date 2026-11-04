@@ -418,37 +418,40 @@ def build_tile_list(
         0, "Batch build launched for a number of", len(list_lat_lon), "tiles."
     )
     failed_tiles = []  # (tile coords, step) of tiles skipped after an error
-    k = 0
-    for (lat, lon) in list_lat_lon:
-        k += 1
-        UI.vprint(
-            1,
-            "Dealing with tile ",
-            k,
-            "/",
-            len(list_lat_lon),
-            ":",
-            FNAMES.short_latlon(lat, lon),
-        )
-        tile_coords = FNAMES.short_latlon(lat, lon)
-        failed_step = _build_one_tile(tile, lat, lon, *flags)
-        if failed_step:
-            if UI.stop_requested:
-                # The user pressed Stop: end the whole batch, as before.
-                UI.exit_message_and_bottom_line()
-                return 0
-            # An error in this tile: the step has already reported it and
-            # left the previous files in place. Skip the tile so a long
-            # unattended batch still builds the others.
-            UI.lvprint(
-                0, "ERROR: Tile", tile_coords, "failed in step", failed_step,
-                "- skipped, continuing with the next tile.",
-            )
-            failed_tiles.append((tile_coords, failed_step))
-            UI.red_flag = False
-            UI.is_working = False
-            continue
-        _remove_from_todo_map(lat, lon)
+    phases = _batch_phases(flags)
+    todo = list(list_lat_lon)
+    # Same two phases as the parallel batch: a tile's masks also use its
+    # neighbours' meshes, so all meshes must exist before any masks.
+    for (p, (name, steps)) in enumerate(phases):
+        if len(phases) > 1:
+            UI.vprint(0, f"Batch phase {p + 1}/{len(phases)}: {name}")
+        last_phase = p == len(phases) - 1
+        for (k, (lat, lon)) in enumerate(todo, 1):
+            tile_coords = FNAMES.short_latlon(lat, lon)
+            UI.vprint(1, "Dealing with tile ", k, "/", len(todo), ":",
+                      tile_coords)
+            failed_step = _build_one_tile(tile, lat, lon, *steps)
+            if failed_step:
+                if UI.stop_requested:
+                    # The user pressed Stop: end the whole batch, as before.
+                    UI.exit_message_and_bottom_line()
+                    return 0
+                # An error in this tile: the step has already reported it
+                # and left the previous files in place. Skip the tile so a
+                # long unattended batch still builds the others.
+                UI.lvprint(
+                    0, "ERROR: Tile", tile_coords, "failed in step",
+                    failed_step, "- skipped, continuing with the next tile.",
+                )
+                failed_tiles.append((tile_coords, failed_step))
+                UI.red_flag = False
+                UI.is_working = False
+                continue
+            if last_phase:
+                _remove_from_todo_map(lat, lon)
+        failed = {coords for (coords, _) in failed_tiles}
+        todo = [(lat, lon) for (lat, lon) in todo
+                if FNAMES.short_latlon(lat, lon) not in failed]
     _batch_summary(timer, len(list_lat_lon), failed_tiles)
     if IMG.incomplete_imgs:
         UI.lvprint(
@@ -464,6 +467,22 @@ def build_tile_list(
 BATCH_STEPS = (
     "1 (vector data)", "2 (mesh)", "2.5 (masks)", "3 (DSF/imagery)", "overlay"
 )
+
+
+def _batch_phases(flags):
+    """The phases of a batch: [(name, flags for _build_one_tile)].
+
+    Steps 1-2 for every tile, then steps 2.5-3 and overlays: the masks of
+    a tile also use the meshes of its neighbours (#28,
+    MASK.select_neighbor_meshes). Phases with no step ticked are left out.
+    """
+    (do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg) = flags
+    return [
+        (name, steps + (override_cfg,)) for (name, steps) in (
+            ("steps 1-2", (do_osm, do_mesh, False, False, False)),
+            ("steps 2.5-3", (False, False, do_mask, do_dsf, do_ovl)),
+        ) if any(steps)
+    ]
 
 
 def _build_one_tile(
@@ -583,19 +602,13 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     (MASK.select_neighbor_meshes); without the phase barrier they would
     depend on which neighbour happened to finish its mesh first.
     """
-    (do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg) = flags
     nbr_slots = min(batch_parallel_tiles, len(list_lat_lon))
     timer = time.time()
     UI.lvprint(
         0, "Batch build launched for a number of", len(list_lat_lon),
         "tiles,", nbr_slots, "in parallel.",
     )
-    phases = [
-        (name, steps) for (name, steps) in (
-            ("steps 1-2", (do_osm, do_mesh, False, False, False)),
-            ("steps 2.5-3", (False, False, do_mask, do_dsf, do_ovl)),
-        ) if any(steps)
-    ]
+    phases = _batch_phases(flags)
     todo = list(list_lat_lon)
     failed_tiles = []
     # The provider, zoomlevel and custom zones picked in the GUI only live
@@ -618,7 +631,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
             if len(phases) > 1:
                 UI.vprint(0, f"Batch phase {k + 1}/{len(phases)}: {name}")
             result = _run_batch_phase(
-                tile, todo, steps + (override_cfg,), nbr_slots,
+                tile, todo, steps, nbr_slots,
                 last_phase=(k == len(phases) - 1),
                 context_file=context_file,
             )
