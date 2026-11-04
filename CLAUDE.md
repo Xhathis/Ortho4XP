@@ -26,7 +26,8 @@ Guidance for Claude Code working in this repository.
   `nvcompress`, `7z.exe`, `moulinette.exe`, plus the wheels above.
 - `Providers/`, `Filters/`, `Patches/` — data/config, not code.
 - Concurrency is **threads only** (`threading`), no `multiprocessing`.
-- There are **no tests**. A real tile build is currently the only check.
+- Unit tests (pytest, `tests/`) cover pure functions only; builds are
+  checked with the regression worktree (see Testing method).
 
 ## Safety rules (must follow)
 
@@ -54,7 +55,15 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-There is no test suite, so every change is checked against a **baseline**:
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, <1 s, 135
+tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
+2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
+read/write and the helpers of #23/#28/#32. tests/conftest.py switches
+to an empty temp folder in pytest_collection, before any O4 module is
+imported (FNAMES paths and CFG's Ortho4XP.cfg come from the cwd), so
+they never touch the user's data. Run them before every commit; add a
+test before changing a pure function. Everything else (builds) is
+checked against a **baseline**:
 
 1. The baseline is the reference tile built from frozen inputs (OSM,
    DEM, Global Scenery DSF, config), all kept inside the baseline folder.
@@ -63,9 +72,8 @@ There is no test suite, so every change is checked against a **baseline**:
 3. Compare: masks and DSF by hash, then `--dsf2text` diff, then the app
    log. Explain every difference — an unexplained difference is a
    failure, even if the tile "looks fine".
-4. Where possible add `pytest` tests for pure functions (coordinate
-   conversion in `O4_Geo_Utils`, file naming in `O4_File_Names`, config
-   parsing) before refactoring them.
+4. Run the unit tests (above); add `pytest` tests for a pure function
+   before refactoring it.
 
 Reference tile: `+55+012` (lat 55, lon 12 — Zealand / Copenhagen, Denmark).
 Provider `Arc` (Esri World Imagery, `Providers/Global/Arc.lay`), ZL 17.
@@ -340,6 +348,11 @@ Test results:
   pixels, same water coverage; app log identical); sims 11/11.
   `test` @ 702e768: new baseline `test-702e768_frozen` (82 s, DSF
   38,698,543 bytes, same as the 31392f5 build), repeat run PASS.
+- `fix/pytest-pure-functions` @ 94efcec (#33 + unit tests): 135 tests
+  pass; the same tests on master 3cff870: 58 pass (geo, file names,
+  config reading unchanged by this fork), 77 fail only for code added
+  here (helpers, atomic temp files) and #33. `test` @ e887b72:
+  regression PASS (DSF, 17/17 masks, app log).
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -523,6 +536,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Tiles built before need step 2 (and 2.5-3) again to get the
     better mesh. Upstream's Triangle4XP.exe will have the same
     problem if it is ever updated from there: re-run pe_stack.py.
+33. **FIXED** (`ad120a3`): Tile.write_to_config(config_file) raised
+    UnboundLocalError (the .bak name was set only for the default
+    path). No caller passes a path; found by the unit tests.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
