@@ -93,7 +93,18 @@ Results: `G:\Ortho4XP_tests\+55+012_Arc_ZL17_<label>-<sha>\` (console.log,
 DSF, masks, app_log.diff, dsf.diff if needed). The order of "Created
 …png" lines in console.log varies between runs and is not a difference.
 `regression.py freeze|baseline` made the baseline; a new one needs a
-new folder (they refuse to overwrite).
+new folder (they refuse to overwrite). `--overlay <src_dir>` builds
+`<commit>` with that folder's O4_*.py copied over it (uncommitted code
+in a fix worktree), restored afterwards.
+`sims_in_ws.py <commit> [--overlay <src_dir>] sim_batch.py error ;
+sim_batch.py stop ; ...` runs sims in the same worktree on the frozen
+inputs (no save/restore of the user's files needed for those).
+`test_batch_order.py <src_dir> <out_dir>` (#28, cwd G:\Ortho4XP for the
+cached +43-067/-066/-065 data): sequential batch forward and reversed,
+masks and DSFs must match; writes Masks\+40-070 and Ortho4XP.log, so
+back both up around it.
+Fix branches are edited in their own worktree `G:\Ortho4XP_wt\<name>`,
+so the user's checkout stays on `dev` while Ortho4XP may be open.
 Older baselines, reference only: `master-3cff870_cached` (Viewfinder
 DEM, not saved; no longer reproducible), no suffix = invalid (no inland
 water, #7), `_run2` = superseded (fresh water download, #9).
@@ -301,6 +312,13 @@ Test results:
   `regression.py run` of c85e958 again (107 s) and of master 3cff870
   (83 s): DSF byte-identical, 17/17 masks, app log identical, inputs
   unchanged. So every fix on dev leaves a normal build unchanged.
+- `fix/sequential-batch-phases` @ aac178a (#28): test_batch_order on dev
+  fails (forward 38 / reverse 37 masks, 2 of 3 DSFs differ), on the fix
+  39/39 masks and 3 DSFs identical (132 s per order); _batch_phases
+  equals the old parallel phase list for all 64 flag combinations;
+  sim_batch error/stop/dem in the worktree as designed (a duplicated
+  tile that fails is dropped from phase 2 entirely: sim artefact, GUI
+  lists are unique); regression --overlay PASS (DSF, 17/17 masks, log).
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -449,11 +467,13 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (taskkill /T). Shared Viewfinder/NED/imagery files are written to a
     temp name and os.replace'd. Recommended 2-3 (Overpass allows few
     parallel requests per IP; each tile adds its imagery downloads).
-28. Finding (not changed): build_masks also uses the neighbour tiles'
+28. **FIXED** (`aac178a`): build_masks also uses the neighbour tiles'
     meshes (select_neighbor_meshes), so in a sequential batch over a
-    fresh region a tile's masks depend on the order (earlier tiles see
-    no later neighbour). The parallel two-phase batch does not have
-    this; rebuilding steps 2.5-3 after all meshes exist fixes it too.
+    fresh region a tile's masks depended on the order (earlier tiles
+    saw no later neighbour). Sequential batches now run in the same two
+    phases as parallel ones (_batch_phases: steps 1-2 for all tiles,
+    then 2.5-3 and overlays). Single-tile builds still see only the
+    neighbour meshes that exist at that time.
 29. **FIXED** (`5abde83`): parallel batch workers built fresh tiles
     with no provider: the GUI's provider, zoomlevel and custom zones
     live only in the GUI process (CFG.default_website, default_zl,
