@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import shutil
+import json
 import subprocess
 import queue
 import threading
@@ -571,6 +572,20 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     ]
     todo = list(list_lat_lon)
     failed_tiles = []
+    # The provider, zoomlevel and custom zones picked in the GUI only live
+    # in this process (CFG globals, copied into tile); a tile without its
+    # own config takes them from there. Workers are new processes that
+    # only read Ortho4XP.cfg, where they are not stored: hand them over.
+    context_file = os.path.join(FNAMES.Tmp_dir, "batch_context.json")
+    with open(context_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "default_website": tile.default_website,
+                "default_zl": tile.default_zl,
+                "zone_list": tile.zone_list,
+            },
+            f,
+        )
     UI.is_working = 1
     try:
         for (k, (name, steps)) in enumerate(phases):
@@ -579,6 +594,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
             result = _run_batch_phase(
                 tile, todo, steps + (override_cfg,), nbr_slots,
                 last_phase=(k == len(phases) - 1),
+                context_file=context_file,
             )
             if result is None:  # Stop button
                 return 0
@@ -588,11 +604,17 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
                     if FNAMES.short_latlon(lat, lon) not in failed]
     finally:
         UI.is_working = 0
+        try:
+            os.remove(context_file)
+        except OSError:
+            pass
     _batch_summary(timer, len(list_lat_lon), failed_tiles)
     return 0 if failed_tiles else 1
 
 
-def _run_batch_phase(tile, list_lat_lon, flags, nbr_slots, last_phase):
+def _run_batch_phase(
+    tile, list_lat_lon, flags, nbr_slots, last_phase, context_file
+):
     """Run one worker per tile, nbr_slots at a time.
 
     Returns the list of (coords, failed step), or None after Stop.
@@ -619,7 +641,8 @@ def _run_batch_phase(tile, list_lat_lon, flags, nbr_slots, last_phase):
             log_file = open(log_path, "w", encoding="utf-8")
             proc = subprocess.Popen(
                 launcher + ["--batch-worker", str(lat), str(lon),
-                            flag_string, tile.custom_build_dir or ""],
+                            flag_string, tile.custom_build_dir or "",
+                            context_file],
                 stdout=log_file, stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(script), env=env,
                 creationflags=creationflags,
