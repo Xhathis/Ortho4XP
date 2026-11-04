@@ -109,13 +109,28 @@ combined vs per-query layer download, same set of ways?),
 `check_atomic_files.py <scratch>` and `test_parallel_batch.py
 compare|fail|stop <out_dir>` (#27: real builds of +43-067/-066/-065,
 GO2 ZL16, user's global cfg, custom build dir; ~7 min for all three
-modes; writes Masks\+40-070 as usual; back up Ortho4XP.log around it).
+modes; writes Masks\+40-070 as usual; back up Ortho4XP.log around it;
+mode `context`: no tile configs, provider only as CFG globals like the
+GUI, DSFs must equal those of `par`), `check_overpass_slot.py`
+(#30: 3 processes never query a mock server at once; killed slot
+holder; 429 wait).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out); since
 #23 tentatives 5-8 alternate with the other servers in
 overpass_servers.txt. The failure sims replace the whole server list
 with one closed port, so they still fail without fallback.
 Regression runs clear `Ortho4XP.log`: save the user's copy first and
 restore it afterwards (it holds their batch log).
+Baseline inputs drift since 2026-11-04 (user emptied OSM_data,
+Orthophotos and Masks on purpose to time a fresh batch, then promised
+to keep the caches until the project ends; their test set is the 9
+tiles +54..+56 / +010..+012 in Tiles\). For a regression: swap the
+baseline's own `+55+012_*.osm.bz2` copies into OSM_data and rename the
+neighbour tiles' Data*.mesh away (they feed the masks, #28), restore
+both afterwards. Elevation_data N54-N56 E011-E013 are now the user's
+library files, not the Viewfinder files of the baseline (not saved in
+it), so +55+012 no longer matches the baseline: compare `test` with
+`dev` built on the same inputs (A/B) instead. A new baseline should
+keep its own copies of the DEM files.
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
 at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
@@ -250,6 +265,13 @@ Test results:
   and 3 DSFs identical to a two-phase sequential reference, 115 s vs
   169 s), fail and stop as designed. `test` @ 72772f9: builds
   byte-identical, all sims as before, gui_smoke 7/7, unit sims 0.
+- First real parallel batch (9 fresh Danish tiles, 3 workers),
+  2026-11-04: 0 of 9 built (#29, #30). `fix/batch-worker-gui-state` @
+  5abde83 (#29), `fix/overpass-slot` @ 249807c (#30). `test` @
+  a34a069: all failure/batch sims, gui_smoke 7/7, unit sims 0;
+  test_parallel_batch compare/fail/stop/context all ok; A/B on
+  +55+012 (current inputs, see above): dev and test DSF, 17 masks and
+  app log byte-identical.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -403,6 +425,15 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     fresh region a tile's masks depend on the order (earlier tiles see
     no later neighbour). The parallel two-phase batch does not have
     this; rebuilding steps 2.5-3 after all meshes exist fixes it too.
+29. **FIXED** (`5abde83`): parallel batch workers built fresh tiles
+    with no provider: the GUI's provider, zoomlevel and custom zones
+    live only in the GUI process (CFG.default_website, default_zl,
+    zone_list). The parent now hands them over in
+    tmp\batch_context.json.
+30. **FIXED** (`249807c`): 3 workers queried overpass-api.de at once
+    (HTTP 429, then connection resets, 7 tiles lost in step 1). A lock
+    on OSM_data\.overpass.lock (msvcrt.locking) lets one Overpass
+    request run at a time across processes; a 429 waits >= 60 s.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
