@@ -536,17 +536,27 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Windows Triangle4XP.exe had a 2 MB stack and crashed with
     STATUS_STACK_OVERFLOW (exit 0xC00000FD) in quality refinement on
     detailed tiles. build_mesh blamed an "uncatched OSM error" and
-    retried with min_angle 8, 6, 4, 2, 0, so such tiles got sliver
-    meshes (+55+012: min_angle 2 with the regression and the user's
-    settings, a Nova Scotia tile 0; probably every detailed tile ever
-    built on Windows). The exe now reserves 256 MB (needed: 6-8 MB;
-    only SizeOfStackReserve + PE checksum changed, see
-    tools\pe_stack.py); where the old exe succeeded the output is
-    identical. The WARNING now gives the exit code; build_mesh and
-    triangulate wait() for the tool instead of sleep + poll().
-    Tiles built before need step 2 (and 2.5-3) again to get the
-    better mesh. Upstream's Triangle4XP.exe will have the same
-    problem if it is ever updated from there: re-run pe_stack.py.
+    retried with min_angle 8, 6, 4, 2, 0, so such tiles were meshed
+    with a lower min_angle than configured (+55+012: 2 with the
+    regression and the user's settings, a Nova Scotia tile 0). Of the
+    user's 9 Danish tiles only +55+012 and +56+010 were affected; the
+    other 7 rebuilt to DSFs of the same size. The exe now reserves
+    256 MB (needed: 6-8 MB; only SizeOfStackReserve + PE checksum
+    changed, see tools\pe_stack.py); where the old exe succeeded the
+    output is identical. The WARNING now gives the exit code;
+    build_mesh and triangulate wait() for the tool instead of
+    sleep + poll().
+    Effect on quality (measured on +55+012, user settings, same input):
+    NOT a clear improvement. 2 deg mesh 1,548,040 tris vs 10 deg
+    1,813,974 (+17%). 82% of the triangles touch a constrained segment
+    (roads, coast, water; Triangle4XP runs with -Y, so no Steiner points
+    on those and no angle guarantee there): < 2 deg 5.1% (2 deg mesh)
+    vs 8.0% (10 deg mesh). Open terrain was fine in both (< 2 deg
+    0.001% vs 0.000%, smallest 0.9 vs 2.6 deg). So the fix makes the
+    configured min_angle hold on Windows as on Linux/macOS; it does
+    not remove slivers, and a lower min_angle is a valid choice for
+    leaner meshes. Upstream's Triangle4XP.exe will have the same
+    crash if it is ever updated from there: re-run pe_stack.py.
 33. **FIXED** (`ad120a3`): Tile.write_to_config(config_file) raised
     UnboundLocalError (the .bak name was set only for the default
     path). No caller passes a path; found by the unit tests.
