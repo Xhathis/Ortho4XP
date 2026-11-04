@@ -2,6 +2,7 @@
 import sys
 import os
 import traceback
+import json
 
 Ortho4XP_dir = '..' if getattr(sys, 'frozen', False) else '.'
 
@@ -55,8 +56,17 @@ if __name__ == '__main__':
         print("Bon vol!")
     elif sys.argv[1] == "--batch-worker":
         # One tile of a parallel batch build, started by
-        # TILE.build_tile_list: lat lon flags [custom_build_dir]
+        # TILE.build_tile_list: lat lon flags [custom_build_dir [context]]
         try:
+            if len(sys.argv) > 6:
+                # Provider, zoomlevel and custom zones picked in the GUI
+                # (see TILE._build_tile_list_parallel); Tile() copies the
+                # CFG globals.
+                with open(sys.argv[6], encoding="utf-8") as f:
+                    context = json.load(f)
+                CFG.default_website = context["default_website"]
+                CFG.default_zl = context["default_zl"]
+                CFG.zone_list = context["zone_list"]
             tile = CFG.Tile(int(sys.argv[2]), int(sys.argv[3]),
                             sys.argv[5] if len(sys.argv) > 5 else '')
             sys.exit(TILE.batch_worker(tile, sys.argv[4]))
