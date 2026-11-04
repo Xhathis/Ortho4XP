@@ -353,6 +353,17 @@ Test results:
   config reading unchanged by this fork), 77 fail only for code added
   here (helpers, atomic temp files) and #33. `test` @ e887b72:
   regression PASS (DSF, 17/17 masks, app log).
+Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
+yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
+download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
+`Elevation_data` (310 GB, the user's DEM library) are junctions to
+`F:\Ortho4XP_data\<same name>` (copied with robocopy, every file
+SHA-256 checked, tools\verify_copy.py). Ortho4XP only renames within a
+folder, so junctions across drives are safe. Tiles and Overlays stay
+real folders on G: because X-Plane's scenery_packs.ini names them by
+absolute path. The originals were kept in `G:\Ortho4XP_old_caches` for
+the user to delete. Never delete a junction with a recursive delete
+(it would empty the F: folder): remove only the link (`rmdir`).
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
