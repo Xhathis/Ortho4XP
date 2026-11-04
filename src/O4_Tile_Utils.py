@@ -170,6 +170,32 @@ def build_tile(tile):
         UI.exit_message_and_bottom_line("")
         return 0
 
+    # Without a known provider every texture "could not be obtained", and
+    # the cause drowned in hundreds of such lines (a batch on 2026-11-04 had
+    # default_website= empty in its tile configs). Say it once, up front.
+    unknown_providers = [
+        code
+        for code in [tile.default_website]
+        + [region[2] for region in tile.zone_list]
+        if code not in IMG.providers_dict
+        and code not in IMG.combined_providers_dict
+    ]
+    if unknown_providers:
+        UI.lvprint(
+            0,
+            "ERROR: Unknown or empty imagery provider",
+            ", ".join(repr(code) for code in unknown_providers),
+            "for tile",
+            FNAMES.short_latlon(tile.lat, tile.lon),
+            "- choose one in the GUI, or set default_website in",
+            os.path.join(
+                tile.build_dir,
+                "Ortho4XP_" + FNAMES.short_latlon(tile.lat, tile.lon) + ".cfg",
+            ),
+        )
+        UI.exit_message_and_bottom_line("")
+        return 0
+
     timer = time.time()
 
     tile.write_to_config()
