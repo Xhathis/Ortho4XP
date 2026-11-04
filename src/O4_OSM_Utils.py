@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import io
 import bz2
@@ -10,6 +11,11 @@ from shapely.errors import ShapelyError
 import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
 from O4_Version import version as O4XP_VERSION
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 # Default overpass_server_choice if not in config
 overpass_server_choice = "random"
@@ -24,6 +30,63 @@ overpass_timeout = (10, 190)  # (connect, read) in seconds
 # one request per query when it keeps failing.
 layer_request_server_timeout = 300  # seconds, sent as [timeout:...]
 layer_request_tentatives = max_osm_tentatives // 2
+# After an HTTP 429 the server wants us to slow down; retrying within a few
+# seconds (2, 4, 8 s) got the connection reset by overpass-api.de.
+overpass_rate_limit_wait = 60  # seconds, at least
+
+
+def _lock_file(f):
+    if sys.platform == "win32":
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_file(f):
+    if sys.platform == "win32":
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _acquire_overpass_slot():
+    """Wait until no other Ortho4XP process has an Overpass request running.
+
+    Parallel batch workers each download their own tile's OSM data; three
+    at once got HTTP 429 and then connection resets from overpass-api.de,
+    which allows about two running queries per IP. One request at a time is
+    what the sequential batch always did. The OS releases the lock when a
+    process ends, also when it is killed (Stop button). Returns the open
+    lock file, or None if the build was stopped while waiting.
+    """
+    os.makedirs(FNAMES.OSM_dir, exist_ok=True)
+    f = open(os.path.join(FNAMES.OSM_dir, ".overpass.lock"), "a+")
+    waiting = False
+    while True:
+        try:
+            _lock_file(f)
+            return f
+        except OSError:
+            if UI.red_flag:
+                f.close()
+                return None
+            if not waiting:
+                UI.vprint(
+                    1,
+                    "      Waiting for another Ortho4XP process to finish "
+                    "its OSM request...",
+                )
+                waiting = True
+            time.sleep(1)
+
+
+def _release_overpass_slot(f):
+    try:
+        _unlock_file(f)
+    finally:
+        f.close()
 
 
 def _load_overpass_servers() -> dict:
@@ -631,8 +694,14 @@ def get_overpass_data(
         )
         UI.vprint(3, url)
         wait = 2**tentative
+        slot = _acquire_overpass_slot()
+        if slot is None:
+            return 0
         try:
-            r = s.get(url, timeout=timeout)
+            try:
+                r = s.get(url, timeout=timeout)
+            finally:
+                _release_overpass_slot(slot)
             if r.status_code == 200:
                 if (
                     b"</osm>" not in r.content[-10:]
@@ -658,7 +727,8 @@ def get_overpass_data(
                     return r.content
             else:
                 if r.status_code == 429:  # 429 is overpass software rate limiting us
-                    wait = max(int(r.headers.get("Retry-After", 0)), wait)
+                    wait = max(int(r.headers.get("Retry-After", 0)), wait,
+                               overpass_rate_limit_wait)
                 get_overpass_data.last_error = f"{current_key}: HTTP {r.status_code}"
                 UI.vprint(
                     1,
