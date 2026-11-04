@@ -113,7 +113,10 @@ modes; writes Masks\+40-070 as usual; back up Ortho4XP.log around it;
 mode `context`: no tile configs, provider only as CFG globals like the
 GUI, DSFs must equal those of `par`), `check_overpass_slot.py`
 (#30: 3 processes never query a mock server at once; killed slot
-holder; 429 wait).
+holder; 429 wait), `check_step3_provider.py [tile_dir]` (#31: empty,
+unknown and zone providers stop build_tile at once, GO2/Arc pass; uses
+an existing tile's mesh read-only and silences UI.logprint, which
+build_tile calls directly).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out); since
 #23 tentatives 5-8 alternate with the other servers in
 overpass_servers.txt. The failure sims replace the whole server list
@@ -131,6 +134,11 @@ library files, not the Viewfinder files of the baseline (not saved in
 it), so +55+012 no longer matches the baseline: compare `test` with
 `dev` built on the same inputs (A/B) instead. A new baseline should
 keep its own copies of the DEM files.
+Tiles\zOrtho4XP_+55+012 is both the regression tile and one of the
+user's 9 test tiles (GO2 ZL16, their own settings): save its
+Data+55+012.*, tile cfg, Earth nav data and Masks\+50+010\+55+012
+before a regression or A/B run and restore them afterwards, or the
+user's next step-3 batch runs on the regression's mesh.
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
 at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
@@ -272,6 +280,12 @@ Test results:
   test_parallel_batch compare/fail/stop/context all ok; A/B on
   +55+012 (current inputs, see above): dev and test DSF, 17 masks and
   app log byte-identical.
+- Second run of the 9 tiles: steps 1-2.5 fine (#30 works), step 3
+  failed on all: their tile configs still had default_website= empty
+  from the first run (tile config wins over the GUI). Set to GO2 by
+  hand. `fix/step3-provider-check` @ 4326c43 (#31): check 6/6 (dev
+  fails the empty/unknown cases). `test` @ ac1acff: all sims, gui_smoke
+  7/7, unit sims 0; A/B dev/test DSF, masks, app log identical.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
@@ -434,6 +448,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (HTTP 429, then connection resets, 7 tiles lost in step 1). A lock
     on OSM_data\.overpass.lock (msvcrt.locking) lets one Overpass
     request run at a time across processes; a 429 waits >= 60 s.
+31. **FIXED** (`4326c43`): build_tile ran on with an empty or unknown
+    provider and reported every texture as "could not get" (hundreds
+    of lines); it now stops before any work with one ERROR naming the
+    provider and the tile config.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
