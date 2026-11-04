@@ -96,9 +96,13 @@ DSF, masks, app_log.diff, dsf.diff if needed). The order of "Created
 new folder (they refuse to overwrite). `--overlay <src_dir>` builds
 `<commit>` with that folder's O4_*.py copied over it (uncommitted code
 in a fix worktree), restored afterwards.
-`sims_in_ws.py <commit> [--overlay <src_dir>] sim_batch.py error ;
-sim_batch.py stop ; ...` runs sims in the same worktree on the frozen
-inputs (no save/restore of the user's files needed for those).
+`sims_in_ws.py <commit> [--overlay <src_dir>] all` runs the 8 CLI
+failure sims and the 3 batch sims in the same worktree (~15 min),
+each after a fresh reset from the frozen inputs, and checks each
+one's exit code and specific message (FAILURES: 0 = all as designed;
+logs in `G:\Ortho4XP_tests\sims_<sha>\`). A texture
+sim_step3_failures moves to `regression\held` is put back. Single
+sims: `sims_in_ws.py <commit> sim_batch.py error ; sim_batch.py stop`.
 `test_batch_order.py <src_dir> <out_dir>` (#28, cwd G:\Ortho4XP for the
 cached +43-067/-066/-065 data): sequential batch forward and reversed,
 masks and DSFs must match; writes Masks\+40-070 and Ortho4XP.log, so
@@ -109,7 +113,7 @@ Older baselines, reference only: `master-3cff870_cached` (Viewfinder
 DEM, not saved; no longer reproducible), no suffix = invalid (no inland
 water, #7), `_run2` = superseded (fresh water download, #9).
 Test builds go to `G:\Ortho4XP_tests\<tile>_<provider>_<ZL>_<branch>-<sha>\`.
-Test helpers (run from the repo root with the venv Python) are in
+Test helpers (venv Python; the sims below through sims_in_ws.py) are in
 `G:\Ortho4XP_tests\tools\`: `run_masks.py` (step 2.5 only, optional
 custom extent / alternative module dir), `sim_osm_failure.py` (CLI
 build with a simulated Overpass failure on the water layer) and
@@ -123,8 +127,7 @@ up .last_gui_params.txt around it) and `cache_roundtrip.py
 fresh|cached <dir>` (step 1 with the water layer downloaded into, then
 recycled from, a scratch cache; needs Overpass), `sim_mesh_failure.py`
 (Triangle4XP fails), `sim_step3_failures.py download|convert|dsf <held>`
-(one texture fails, or build_dsf raises; restore the held DDS and the
-DSF .bak afterwards) and `time_convert.py <slots> <N> <scratch>`,
+(one texture fails, or build_dsf raises) and `time_convert.py <slots> <N> <scratch>`,
 `sim_overpass_fallback.py [src_dir]` (get_overpass_data against two
 local mock servers; no real Overpass traffic), `sim_dem_failure.py
 <scratch>` (DEM() cases A-I against a scratch Elevation_data copy,
@@ -151,15 +154,13 @@ build_tile calls directly).
 #23 tentatives 5-8 alternate with the other servers in
 overpass_servers.txt. The failure sims replace the whole server list
 with one closed port, so they still fail without fallback.
-The full-build failure sims (sim_osm_failure, sim_water_geometry_failure,
+Never run the full-build sims (sim_osm_failure, sim_water_geometry_failure,
 sim_mask_dem_failure, sim_mesh_failure, sim_step3_failures, sim_dem_cli,
-sim_batch) still build in `G:\Ortho4XP` itself. For those only: save
-the user's Ortho4XP.log and Ortho4XP.cfg (copy the old baseline's cfg
-over it), their OSM copies of +55+012 (swap in the baseline's), hide
-the neighbour Data*.mesh files, and save Tiles\zOrtho4XP_+55+012
-(Data+55+012.*, tile cfg, Earth nav data, textures it adds) and
-Masks\+50+010\+55+012; restore all afterwards. That tile is one of the
-user's 9 test tiles (+54..+56 / +010..+012, GO2 ZL16, their settings).
+sim_batch) with cwd G:\Ortho4XP: they would build into the user's
+Tiles\zOrtho4XP_+55+012, one of their 9 test tiles (+54..+56 /
++010..+012, GO2 ZL16, their settings), and use their config, caches
+and log. Use sims_in_ws.py. Only test_batch_order, test_parallel_batch
+and gui_smoke still run in G:\Ortho4XP (other tiles; see their notes).
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
 at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
@@ -319,6 +320,9 @@ Test results:
   sim_batch error/stop/dem in the worktree as designed (a duplicated
   tile that fails is dropped from phase 2 entirely: sim artefact, GUI
   lists are unique); regression --overlay PASS (DSF, 17/17 masks, log).
+- Sims moved into the regression worktree, 2026-11-04: `sims_in_ws.py
+  57305b7 all`: 11/11 as designed (8 CLI sims exit 1 with their own
+  message, 3 batch sims), user's Ortho4XP.log and tiles untouched.
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
 `custom_scenery_dir` to its `Custom Scenery`. The latter is only used by the
