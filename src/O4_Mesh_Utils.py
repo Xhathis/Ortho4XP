@@ -700,8 +700,9 @@ def build_mesh(tile):
                 print(line.decode("utf-8")[:-1])
             except (UnicodeDecodeError, OSError):
                 pass
-    time.sleep(0.3)
-    fingers_crossed.poll()
+    # wait(), not poll(): an exit code of None (process not finished yet)
+    # would count as success and the mesh would be read half-written.
+    fingers_crossed.wait()
     if fingers_crossed.returncode:
         min_angles = [8, 6, 4, 2, 0]
         for min_angle in min_angles:
@@ -709,8 +710,8 @@ def build_mesh(tile):
                 continue
             UI.vprint(
                 0,
-                "\nWARNING: Triangle4XP could not achieve the requested quality ",
-                "(min_angle) most likely due to an uncatched OSM error.\n",
+                "\nWARNING: Triangle4XP failed (",
+                _tool_failure(fingers_crossed.returncode), ").\n",
                 f"Reattempting with a lower angle constraint (min_angle={min_angle}).",
             )
             Tri_option = (
@@ -735,8 +736,7 @@ def build_mesh(tile):
                         print(line.decode("utf-8")[:-1])
                     except (UnicodeDecodeError, OSError):
                         pass
-            time.sleep(0.3)
-            fingers_crossed.poll()
+            fingers_crossed.wait()
             if fingers_crossed.returncode == 0:
                 break
         else:
@@ -834,6 +834,20 @@ def sort_mesh(tile):
 
 
 ################################################################################
+def _tool_failure(returncode):
+    """Describe a failed tool's exit code for the log."""
+    code = returncode & 0xFFFFFFFF
+    if code == 0xC00000FD:
+        # Windows STATUS_STACK_OVERFLOW: the bundled Triangle4XP.exe had a
+        # 2 MB stack and crashed in quality refinement on detailed tiles;
+        # it now reserves 256 MB. Seen here again, the stack is too small.
+        return "exit code 0xC00000FD, stack overflow"
+    if code >= 0xC0000000:
+        return f"exit code {code:#X}, crashed"
+    return f"exit code {returncode}, most likely an uncaught OSM error"
+
+
+################################################################################
 def triangulate(name, path_to_Ortho4XP_dir):
     Tri_option = " -pAYPQ "
     mesh_cmd = [
@@ -850,7 +864,7 @@ def triangulate(name, path_to_Ortho4XP_dir):
             break
         else:
             print(line.decode("utf-8")[:-1])
-    fingers_crossed.poll()
+    fingers_crossed.wait()
     if fingers_crossed.returncode:
         print("\nERROR: triangle crashed, check osm mask data.\n")
         return 0
