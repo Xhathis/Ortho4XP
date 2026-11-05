@@ -380,9 +380,8 @@ def build_tile(tile, white_retry_follows=False):
         remove_if_exists(FNAMES.alt_file(tile))
         remove_if_exists(FNAMES.input_node_file(tile))
         remove_if_exists(FNAMES.input_poly_file(tile))
-    if UI.cleaning_level > 2:
-        remove_if_exists(FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon))
-        remove_if_exists(FNAMES.apt_file(tile))
+    if UI.cleaning_level > 2 and not keep_mesh_after_step3:
+        _remove_mesh_files(tile.build_dir, tile.lat, tile.lon)
     if UI.cleaning_level > 1 and not tile.grouped:
         remove_unwanted_textures(tile)
     UI.timings_and_bottom_line(timer)
@@ -390,6 +389,57 @@ def build_tile(tile, white_retry_follows=False):
         "Step 3 for tile lat=", tile.lat, ", lon=", tile.lon, ": normal exit."
     )
     return 1
+
+################################################################################
+# cleaning_level > 2 deletes a tile's mesh and .apt after its step 3. In a
+# batch, the neighbours' step 2.5 still reads that mesh
+# (MASK.select_neighbor_meshes, #28): deleted at once, the masks of every
+# neighbour built later lacked it, so they depended on the build order
+# again. Batches set this (workers too) and delete the files at the end
+# instead, see _remove_meshes_after_batch (#42).
+keep_mesh_after_step3 = False
+
+
+def _remove_mesh_files(build_dir, lat, lon):
+    remove_if_exists(FNAMES.mesh_file(build_dir, lat, lon))
+    remove_if_exists(
+        os.path.join(build_dir, "Data" + FNAMES.short_latlon(lat, lon) + ".apt")
+    )
+
+
+def _remove_meshes_after_batch(tile, built, not_built, do_dsf):
+    """cleaning_level > 2: delete the meshes the batch kept for its tiles'
+    neighbours, now that every step 2.5 is done.
+
+    built: (lat, lon) of the tiles built through the last phase. A mesh
+    stays when step 3 was not part of the batch (that is what deletes it
+    in a single build), and when a neighbour failed: rerunning that tile
+    alone would build its masks without this mesh.
+    """
+    if UI.cleaning_level <= 2 or not do_dsf or not built:
+        return
+    failed = {coords for (coords, _) in _real_failures(not_built)}
+    removed, kept = 0, []
+    for (lat, lon) in built:
+        coords = FNAMES.short_latlon(lat, lon)
+        neighbours = {
+            FNAMES.short_latlon(lat + dlat, (lon + dlon + 180) % 360 - 180)
+            for dlat in (-1, 0, 1) for dlon in (-1, 0, 1)
+        } - {coords}
+        if neighbours & failed:
+            kept.append(coords)
+            continue
+        _remove_mesh_files(
+            FNAMES.build_dir(lat, lon, tile.custom_build_dir), lat, lon
+        )
+        removed += 1
+    UI.vprint(1, f"Cleaning: removed the mesh of {removed} built tile(s).")
+    if kept:
+        UI.lvprint(
+            0, "   Mesh kept (next to a failed tile, for its rerun):",
+            " ".join(kept),
+        )
+
 
 ################################################################################
 def build_all(tile):
@@ -442,13 +492,23 @@ def build_tile_list(
     UI.red_flag = 0
     UI.stop_requested = False
     flags = (do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg)
-    if batch_parallel_tiles > 1 and len(list_lat_lon) > 1:
-        return _build_tile_list_parallel(tile, list_lat_lon, flags)
+    global keep_mesh_after_step3
+    keep_mesh_after_step3 = True
+    try:
+        if batch_parallel_tiles > 1 and len(list_lat_lon) > 1:
+            return _build_tile_list_parallel(tile, list_lat_lon, flags)
+        return _build_tile_list_sequential(tile, list_lat_lon, flags)
+    finally:
+        keep_mesh_after_step3 = False
+
+
+def _build_tile_list_sequential(tile, list_lat_lon, flags):
     timer = time.time()
     UI.lvprint(
         0, "Batch build launched for a number of", len(list_lat_lon), "tiles."
     )
     failed_tiles = []  # (tile coords, step) of tiles skipped after an error
+    built = []  # (lat, lon) of tiles through the last phase
     phases = _batch_phases(flags)
     todo = list(list_lat_lon)
     # Same two phases as the parallel batch: a tile's masks also use its
@@ -487,9 +547,11 @@ def build_tile_list(
                 continue
             if last_phase:
                 _remove_from_todo_map(lat, lon)
+                built.append((lat, lon))
         failed = {coords for (coords, _) in failed_tiles}
         todo = [(lat, lon) for (lat, lon) in todo
                 if FNAMES.short_latlon(lat, lon) not in failed]
+    _remove_meshes_after_batch(tile, built, failed_tiles, flags[3])
     _batch_summary(timer, len(list_lat_lon), failed_tiles)
     if IMG.incomplete_imgs:
         UI.lvprint(
@@ -634,6 +696,9 @@ def batch_worker(tile, flags):
     """
     UI.red_flag = 0
     UI.stop_requested = False
+    global keep_mesh_after_step3
+    # The parent deletes the meshes once the whole batch is done (#42).
+    keep_mesh_after_step3 = True
     failed_step = _build_one_tile(
         tile, tile.lat, tile.lon, *(c == "1" for c in flags)
     )
@@ -691,6 +756,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     phases = _batch_phases(flags)
     todo = list(list_lat_lon)
     failed_tiles = []
+    built = []  # (lat, lon) of tiles through the last phase
     # The provider, zoomlevel and custom zones picked in the GUI only live
     # in this process (CFG globals, copied into tile); a tile without its
     # own config takes them from there. Workers are new processes that
@@ -714,6 +780,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
                 tile, todo, steps, nbr_slots,
                 last_phase=(k == len(phases) - 1),
                 context_file=context_file,
+                built=built,
             )
             if result is None:  # Stop button
                 return 0
@@ -727,16 +794,19 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
             os.remove(context_file)
         except OSError:
             pass
+    _remove_meshes_after_batch(tile, built, failed_tiles, flags[3])
     _batch_summary(timer, len(list_lat_lon), failed_tiles)
     return 0 if _real_failures(failed_tiles) else 1
 
 
 def _run_batch_phase(
-    tile, list_lat_lon, flags, nbr_slots, last_phase, context_file
+    tile, list_lat_lon, flags, nbr_slots, last_phase, context_file,
+    built=None,
 ):
     """Run one worker per tile, nbr_slots at a time.
 
-    Returns the list of (coords, failed step), or None after Stop.
+    Returns the list of (coords, failed step), or None after Stop. In the
+    last phase, built tiles are added to built (when given).
     """
     script = FNAMES.resource_path("Ortho4XP.py")
     # A frozen (PyInstaller) build is its own interpreter and script.
@@ -794,6 +864,8 @@ def _run_batch_phase(
                 )
                 if last_phase:
                     _remove_from_todo_map(lat, lon)
+                    if built is not None:
+                        built.append((lat, lon))
                 try:
                     os.remove(log_path)  # keep tmp clean; errors keep it
                 except OSError:
