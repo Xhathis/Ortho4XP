@@ -514,10 +514,32 @@ def _batch_phases(flags):
     ]
 
 
-def _build_one_tile(
-    tile, lat, lon, do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg
+def _build_one_tile(tile, lat, lon, *flags):
+    """Build one tile of a batch; return the failed step or None.
+
+    An unexpected exception (a bug, odd OSM geometry, a full disk) fails
+    only this tile: in a sequential batch it used to end the whole batch
+    without a summary and leave UI.is_working set, so the GUI refused any
+    further work until restarted. A parallel worker returns the step's
+    exit code instead of a bare traceback exit.
+    """
+    current = ["tile setup"]
+    try:
+        return _build_one_tile_steps(tile, lat, lon, current, *flags)
+    except Exception:
+        UI.lvprint(
+            0, "ERROR: unexpected error in tile",
+            FNAMES.short_latlon(lat, lon), "during step", current[0] + ":",
+        )
+        UI.lvprint(0, traceback.format_exc())
+        return current[0]
+
+
+def _build_one_tile_steps(
+    tile, lat, lon, current,
+    do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg
 ):
-    """Build one tile of a batch; return the failed step or None."""
+    """The steps of _build_one_tile; current[0] names the running step."""
     (tile.lat, tile.lon) = (lat, lon)
     tile.build_dir = FNAMES.build_dir(tile.lat, tile.lon, tile.custom_build_dir)
     tile.dem = None
@@ -530,19 +552,24 @@ def _build_one_tile(
     # A step failed if it returned 0 or raised red_flag; not every error
     # path raises the flag (e.g. Triangle4XP giving up in step 2).
     if do_osm:
+        current[0] = BATCH_STEPS[0]
         if not VMAP.build_poly_file(tile) or UI.red_flag:
             return BATCH_STEPS[0]
     if do_mesh:
+        current[0] = BATCH_STEPS[1]
         if not MESH.build_mesh(tile) or UI.red_flag:
             return BATCH_STEPS[1]
     if do_mask:
+        current[0] = BATCH_STEPS[2]
         if not MASK.build_masks(tile) or UI.red_flag:
             return BATCH_STEPS[2]
     if do_dsf:
+        current[0] = BATCH_STEPS[3]
         ok = build_tile_retrying_white(tile)
         if not ok or UI.red_flag:
             return BATCH_STEPS[3]
     if do_ovl:
+        current[0] = BATCH_STEPS[4]
         if not OVL.build_overlay(lat, lon) or UI.red_flag:
             return BATCH_STEPS[4]
     return None
@@ -591,7 +618,11 @@ def batch_worker(tile, flags):
             f"(tile not activated; run step 3 again to retry): "
             f"{IMG.incomplete_imgs}",
         )
-    return 0 if failed_step is None else 10 + BATCH_STEPS.index(failed_step)
+    if failed_step is None:
+        return 0
+    if failed_step in BATCH_STEPS:
+        return 10 + BATCH_STEPS.index(failed_step)
+    return 1  # "tile setup": the parent reports the exit code
 
 
 def _kill_process_tree(proc):
