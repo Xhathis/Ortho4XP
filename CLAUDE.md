@@ -387,6 +387,11 @@ Test results:
   sim_dem_failure 9/9. `test` @ f6d21c2: regression PASS (DSF, 17/17
   masks, app log identical, nothing downloaded), sims_in_ws all
   14/14, sim_overlay 7/7, 158 unit tests, pyflakes 0.
+- Greenland batch on `dev` 085280b (17 tiles +59..+61 / -043..-050,
+  3 parallel, steps 1-3 + overlays), 2026-11-05: 17 built, 0 failed,
+  1h50m; +61-050 got dem1/P22, 17 overlay DSFs. The one WARNING
+  (holes filled with zero) is +61-050's NW margin corner: neighbour
+  N62W051 is 17% void, see #39.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -636,6 +641,22 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     2026-11-05: 12,633 files at 1", 613 at 3" (53 blocks, mostly
     tropics / Africa / South America; upgraded where Viewfinder has
     1" when those tiles are built), 33 custom at 0.5".
+    Same day: 1,546 library .hgt files (2020, older folder rule) sat
+    one 10-degree folder too far west/south for tiles on a W/S
+    multiple of 10 (W050, S90, ...), so Ortho4XP never saw them
+    (+61-050's 1" data was on disk in +60-060). Moved by
+    `G:\Ortho4XP_tests\tools\fix_dem_folders.py` (dry run by default,
+    `--apply`, `--undo`): 1,470 moved, 70 3" files replaced by the
+    misfiled 1" ones, 6 identical copies parked. Replaced and
+    duplicate files are in Elevation_data\_misfiled_hold (0.33 GB,
+    the user deletes it), the moves in _misfiled_moves.csv; 37 old
+    folders (-100..., +80-010) are empty. A rescan finds 0.
+39. **OPEN** (minor, log only): the "raster contain holes that seem
+    to big to be filled" WARNING names neither tile nor file, and
+    fill_nodata_values_with_nearest_neighbor stops after 20 rounds,
+    so a fully void 36-sample margin corner (void neighbour) always
+    triggers it and is set to 0 m, though the tile itself is fine.
+    Fix idea: name tile and file; margin-only holes as INFO.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
