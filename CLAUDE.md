@@ -106,12 +106,13 @@ DSF, masks, app_log.diff, dsf.diff if needed). The order of "Created
 new folder (they refuse to overwrite). `--overlay <src_dir>` builds
 `<commit>` with that folder's O4_*.py copied over it (uncommitted code
 in a fix worktree), restored afterwards.
-`sims_in_ws.py <commit> [--overlay <src_dir>] all` runs the 8 CLI
-failure sims and the 3 batch sims in the same worktree (~15 min),
+`sims_in_ws.py <commit> [--overlay <src_dir>] all` runs the 10 CLI
+sims and the 4 batch sims in the same worktree (~20 min),
 each after a fresh reset from the frozen inputs, and checks each
 one's exit code and specific message (FAILURES: 0 = all as designed;
 logs in `G:\Ortho4XP_tests\sims_<sha>\`). A texture
-sim_step3_failures moves to `regression\held` is put back. Single
+sim_step3_failures moves to `regression\held` is put back (a .jpg to
+the worktree's Orthophotos, a .dds to the tile's textures). Single
 sims: `sims_in_ws.py <commit> sim_batch.py error ; sim_batch.py stop`.
 `test_batch_order.py <src_dir> <out_dir>` (#28, cwd G:\Ortho4XP for the
 cached +43-067/-066/-065 data): sequential batch forward and reversed,
@@ -141,7 +142,12 @@ up .last_gui_params.txt around it) and `cache_roundtrip.py
 fresh|cached <dir>` (step 1 with the water layer downloaded into, then
 recycled from, a scratch cache; needs Overpass), `sim_mesh_failure.py`
 (Triangle4XP fails), `sim_step3_failures.py download|convert|dsf <held>`
-(one texture fails, or build_dsf raises) and `time_convert.py <slots> <N> <scratch>`,
+(one texture fails, or build_dsf raises; `white` / `white-once`: its
+imagery comes back partly white always / only the first time, #35),
+`sim_batch.py exception` (tile 2's mesh step raises, #37),
+`sim_overlay.py <src_dir>` (cwd = regression worktree; build_overlay
+for +55+012: normal, stale tmp, 3 DSFTool failures, missing source,
+blocked destination, #34; ~30 s) and `time_convert.py <slots> <N> <scratch>`,
 `sim_overpass_fallback.py [src_dir]` (get_overpass_data against two
 local mock servers; no real Overpass traffic), `sim_dem_failure.py
 <scratch>` (DEM() cases A-I against a scratch Elevation_data copy,
@@ -353,6 +359,15 @@ Test results:
   config reading unchanged by this fork), 77 fail only for code added
   here (helpers, atomic temp files) and #33. `test` @ e887b72:
   regression PASS (DSF, 17/17 masks, app log).
+- Readiness review 2026-11-05: `fix/overlay-step-checks` @ 57a63b3
+  (#34; sim_overlay 7/7, overlay DSF byte-identical to dev's),
+  `fix/white-squares-fail-tile` @ d75c421 (#35), `fix/log-console-
+  warnings` @ 0f53681 (#36), `fix/batch-catch-tile-errors` @ d54ed55
+  (#37; dev: sim_batch exception ends the batch at tile 2, exit 1).
+  `test` @ e6ba425 (one conflict in _build_one_tile, both kept):
+  regression PASS (DSF, 17/17 masks, app log identical), sims_in_ws
+  all 14/14, sim_overlay 7/7, 135 unit tests, pyflakes 0. Not run:
+  gui_smoke and test_parallel_batch (they use G:\Ortho4XP).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -560,6 +575,32 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 33. **FIXED** (`ad120a3`): Tile.write_to_config(config_file) raised
     UnboundLocalError (the .bak name was set only for the default
     path). No caller passes a path; found by the unit tests.
+34. **FIXED** (`57a63b3`): build_overlay read DSFTool's returncode
+    before waiting for it (always None, the check never fired) and
+    did not check the text2dsf run, so a failed overlay could count
+    as built; no "normal exit" log line; final copy not atomic; an
+    OSError killed the thread with UI.is_working set. The overlay
+    tick itself always worked: `yOrtho4XP_Overlays` was empty because
+    no batch since 2026-11-03 had it ticked (the Nov 3 overlays were
+    removed from the folder that evening, cause unknown).
+35. **FIXED** (`38d3aeb`, `d75c421`): imagery that stayed partly white
+    after the one retry was activated and counted as built; the white
+    JPEG and DDS were reused by every later run (an existing DDS is
+    never rebuilt), and a parallel batch's summary never mentioned
+    it (incomplete_imgs lives in the worker). Now handled like a
+    failed download (#20): DSF not activated, tile failed, white files
+    deleted for a rerun. The retry (build_tile_retrying_white) is now
+    also used by the CLI and the GUI step 3 button. Tiles built before
+    this with white patches cannot be detected afterwards.
+36. **FIXED** (`0f53681`): warnings that mean a tile differs from its
+    settings (Triangle4XP min_angle fallback, DEM holes/no_data/EPSG,
+    .apt missing, failed geotag/convert, OSM cache unwritable) went
+    only to the console: in a parallel batch that is the worker's
+    tmp log, deleted on success. Now also in Ortho4XP.log.
+37. **FIXED** (`d54ed55`): an unexpected exception in a step ended a
+    sequential batch (also every one-tile batch) without a summary,
+    with UI.is_working left set (GUI refused work until restarted).
+    Now only that tile fails, in the step that was running.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
