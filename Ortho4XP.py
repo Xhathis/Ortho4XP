@@ -113,7 +113,7 @@ if __name__ == '__main__':
             # flag (e.g. Triangle4XP giving up): the next step would then run
             # on the files of a previous build.
             for step in (VMAP.build_poly_file, MESH.build_mesh,
-                         MASK.build_masks, TILE.build_tile):
+                         MASK.build_masks, TILE.build_tile_retrying_white):
                 ok = step(tile)
                 if UI.red_flag or not ok:
                     print("Build stopped, see Ortho4XP.log.")
