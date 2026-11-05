@@ -566,10 +566,10 @@ def read_elevation_from_file(
             (nxdem, nydem) = (ds.RasterXSize, ds.RasterYSize)
             nodata = rs.GetNoDataValue()
             if nodata is None:
-                UI.vprint(
+                UI.lvprint(
                     1,
-                    "    WARNING: raster DEM does not advertise its no_data ",
-                    "value, assuming -32768.",
+                    "    WARNING: raster DEM", file_name, "does not advertise",
+                    "its no_data value, assuming -32768.",
                 )
                 nodata = -32768
             else:  
@@ -583,10 +583,10 @@ def read_elevation_from_file(
             try:
                 epsg = int(ds.GetProjection().split('"')[-2])
             except (IndexError, ValueError):
-                UI.vprint(
+                UI.lvprint(
                     1,
-                    "    WARNING: raster DEM does not advertise its EPSG ",
-                    "code, assuming 4326.",
+                    "    WARNING: raster DEM", file_name, "does not advertise",
+                    "its EPSG code, assuming 4326.",
                 )
                 epsg = 4326
             if epsg not in (
@@ -778,9 +778,10 @@ def ensure_elevation(source, lat, lon, verbose=True):
                 2, "   Recycling ", FNAMES.elevation_data(source, lat, lon)
             )
             return 1
-        UI.vprint(
+        UI.lvprint(
             1,
-            "    WARNING : This elevation source has no longer direct downloads !"
+            "    WARNING: elevation source", source, "has no direct downloads",
+            "any longer, tile", FNAMES.short_latlon(lat, lon),
         )
         return 0
         # TODO : is there a way to get it back (worth it ?) 
@@ -939,7 +940,7 @@ def fill_nodata_values_with_nearest_neighbor(alt_dem, nodata):
         alt_dem[alt_dem == nodata] = atemp[alt_dem == nodata]
         step += 1
         if step > 20:
-            UI.vprint(
+            UI.lvprint(
                 1,
                 "    WARNING: The raster contain holes that seem to big to ",
                 "be filled... I'm filling the remainder with zero.",

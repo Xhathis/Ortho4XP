@@ -141,7 +141,7 @@ def build_curv_tol_weight_map(tile, weight_array):
             dico_airports = pickle.load(f)
             f.close()
         except (OSError, EOFError, pickle.UnpicklingError):
-            UI.vprint(
+            UI.lvprint(
                 1,
                 "   WARNING: File",
                 FNAMES.apt_file(tile),
@@ -642,7 +642,7 @@ def build_mesh(tile):
     try:
         max_tris = float(tile.limit_tris) * 1e6
     except (TypeError, ValueError):
-        UI.vprint(1, "   Warning : limit_tris wrongly set, defaults to 5M.")
+        UI.lvprint(1, "   WARNING: limit_tris wrongly set, defaults to 5M.")
         max_tris = 5e6
     if max_tris <= 0 or max_tris >= 5e7:
         max_tris = 5e6
@@ -708,10 +708,14 @@ def build_mesh(tile):
         for min_angle in min_angles:
             if tile.min_angle <= min_angle:
                 continue
-            UI.vprint(
+            # Logged as well: in a parallel batch the console is the
+            # worker's tmp log, deleted when the tile succeeds, and a mesh
+            # with a lower min_angle than configured should not go unseen.
+            UI.lvprint(
                 0,
-                "\nWARNING: Triangle4XP failed (",
-                _tool_failure(fingers_crossed.returncode), ").\n",
+                "WARNING: Triangle4XP failed for tile",
+                FNAMES.short_latlon(tile.lat, tile.lon), "(",
+                _tool_failure(fingers_crossed.returncode), ").",
                 f"Reattempting with a lower angle constraint (min_angle={min_angle}).",
             )
             Tri_option = (

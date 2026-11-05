@@ -376,7 +376,7 @@ class OSM_layer:
             else:
                 fout = open(filename, "w", encoding="utf-8")
         except OSError:
-            UI.vprint(1, "    Could not open", filename, "for writing.")
+            UI.lvprint(1, "    WARNING: could not open", filename, "for writing.")
             return 0
         fout.write(
             '<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" '
