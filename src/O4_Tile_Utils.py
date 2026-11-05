@@ -395,9 +395,12 @@ def build_tile(tile, white_retry_follows=False):
 def build_all(tile):
     # Each step returns 0 on failure; check that as well as red_flag, since
     # not every error path raises the flag.
-    if not VMAP.build_poly_file(tile) or UI.red_flag:
+    step1 = VMAP.build_poly_file(tile)
+    if not step1 or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
+    if step1 == VMAP.SEA_ONLY:
+        return 1  # nothing to build (#41)
     if not MESH.build_mesh(tile) or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
@@ -459,6 +462,13 @@ def build_tile_list(
             UI.vprint(1, "Dealing with tile ", k, "/", len(todo), ":",
                       tile_coords)
             failed_step = _build_one_tile(tile, lat, lon, *steps)
+            if failed_step == SEA_SKIPPED:
+                # Open sea, nothing to build (#41): not a failure, but
+                # no later phase either.
+                failed_tiles.append((tile_coords, SEA_SKIPPED))
+                UI.is_working = False
+                _remove_from_todo_map(lat, lon)
+                continue
             if failed_step:
                 if UI.stop_requested:
                     # The user pressed Stop: end the whole batch, as before.
@@ -488,7 +498,7 @@ def build_tile_list(
             f"(tile not activated; run step 3 again to retry): "
             f"{IMG.incomplete_imgs}",
         )
-    return 0 if failed_tiles else 1
+    return 0 if _real_failures(failed_tiles) else 1
 
 
 # Order matters: a batch worker's exit code is 10 + the index of its failed
@@ -496,6 +506,14 @@ def build_tile_list(
 BATCH_STEPS = (
     "1 (vector data)", "2 (mesh)", "2.5 (masks)", "3 (DSF/imagery)", "overlay"
 )
+# Step 1 found open sea (VMAP.SEA_ONLY): listed with the failed tiles so
+# that no later phase runs, but counted apart and not an error (#41).
+SEA_SKIPPED = "sea only"
+SEA_EXIT_CODE = 3  # a batch worker's exit code for SEA_SKIPPED
+
+
+def _real_failures(not_built):
+    return [(c, s) for (c, s) in not_built if s != SEA_SKIPPED]
 
 
 def _batch_phases(flags):
@@ -553,8 +571,11 @@ def _build_one_tile_steps(
     # path raises the flag (e.g. Triangle4XP giving up in step 2).
     if do_osm:
         current[0] = BATCH_STEPS[0]
-        if not VMAP.build_poly_file(tile) or UI.red_flag:
+        step1 = VMAP.build_poly_file(tile)
+        if not step1 or UI.red_flag:
             return BATCH_STEPS[0]
+        if step1 == VMAP.SEA_ONLY:
+            return SEA_SKIPPED
     if do_mesh:
         current[0] = BATCH_STEPS[1]
         if not MESH.build_mesh(tile) or UI.red_flag:
@@ -587,14 +608,19 @@ def _remove_from_todo_map(lat, lon):
         pass
 
 
-def _batch_summary(timer, nbr_tiles, failed_tiles):
+def _batch_summary(timer, nbr_tiles, not_built):
     UI.lvprint(
         0, "Batch process completed in", UI.nicer_timer(time.time() - timer)
     )
+    failed_tiles = _real_failures(not_built)
+    sea = [coords for (coords, step) in not_built if step == SEA_SKIPPED]
     UI.lvprint(
-        0, f"Tiles built: {nbr_tiles - len(failed_tiles)}, "
-        f"failed: {len(failed_tiles)}."
+        0, f"Tiles built: {nbr_tiles - len(not_built)}, "
+        + (f"skipped (open sea): {len(sea)}, " if sea else "")
+        + f"failed: {len(failed_tiles)}."
     )
+    if sea:
+        UI.lvprint(0, "   Open sea, nothing built:", " ".join(sea))
     for (coords, step) in failed_tiles:
         UI.lvprint(0, f"   FAILED: {coords} in step {step}")
 
@@ -603,8 +629,8 @@ def batch_worker(tile, flags):
     """Build one tile for a parallel batch, in its own process.
 
     flags is the "0"/"1" string of (osm, mesh, mask, dsf, ovl, override).
-    Returns the exit code: 0 when built, 10 + index in BATCH_STEPS when a
-    step failed.
+    Returns the exit code: 0 when built, SEA_EXIT_CODE for open sea, 10 +
+    index in BATCH_STEPS when a step failed.
     """
     UI.red_flag = 0
     UI.stop_requested = False
@@ -620,6 +646,8 @@ def batch_worker(tile, flags):
         )
     if failed_step is None:
         return 0
+    if failed_step == SEA_SKIPPED:
+        return SEA_EXIT_CODE
     if failed_step in BATCH_STEPS:
         return 10 + BATCH_STEPS.index(failed_step)
     return 1  # "tile setup": the parent reports the exit code
@@ -700,7 +728,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
         except OSError:
             pass
     _batch_summary(timer, len(list_lat_lon), failed_tiles)
-    return 0 if failed_tiles else 1
+    return 0 if _real_failures(failed_tiles) else 1
 
 
 def _run_batch_phase(
@@ -768,6 +796,15 @@ def _run_batch_phase(
                     _remove_from_todo_map(lat, lon)
                 try:
                     os.remove(log_path)  # keep tmp clean; errors keep it
+                except OSError:
+                    pass
+                continue
+            if code == SEA_EXIT_CODE:
+                UI.vprint(0, f"Tile {coords} is open sea, nothing to build.")
+                _remove_from_todo_map(lat, lon)
+                failed_tiles.append((coords, SEA_SKIPPED))
+                try:
+                    os.remove(log_path)
                 except OSError:
                     pass
                 continue
