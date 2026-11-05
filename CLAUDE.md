@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~2 s, 158
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 164
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -392,6 +392,16 @@ Test results:
   1h50m; +61-050 got dem1/P22, 17 overlay DSFs. The one WARNING
   (holes filled with zero) is +61-050's NW margin corner: neighbour
   N62W051 is 17% void, see #39.
+- `fix/dem-hole-warning` @ aaa9bdd (#39): 6 new unit tests (164
+  pass), real +61-050 read gives one INFO naming the tile with the
+  same altitudes. `test` @ d2bbee9: regression PASS (DSF, 17/17
+  masks, app log identical), sim_dem_failure 9/9, sim_dem_cli and
+  sim_batch dem as designed, pyflakes 0, gui_smoke 7/7,
+  test_parallel_batch compare/fail/stop/context all ok (compare now
+  122 mask files: ZL16 airport masks from cover_airports_with_highres
+  for all airports; the 83 extra files were removed afterwards).
+  `sim_dem_cli.py` needs the tile arguments when run on its own
+  (without them Ortho4XP.py opens the GUI and the sim hangs).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -651,12 +661,16 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     duplicate files are in Elevation_data\_misfiled_hold (0.33 GB,
     the user deletes it), the moves in _misfiled_moves.csv; 37 old
     folders (-100..., +80-010) are empty. A rescan finds 0.
-39. **OPEN** (minor, log only): the "raster contain holes that seem
-    to big to be filled" WARNING names neither tile nor file, and
+39. **FIXED** (`aaa9bdd`, log only): the "raster contain holes that
+    seem to big to be filled" WARNING named neither tile nor file, and
     fill_nodata_values_with_nearest_neighbor stops after 20 rounds,
     so a fully void 36-sample margin corner (void neighbour) always
-    triggers it and is set to 0 m, though the tile itself is fine.
-    Fix idea: name tile and file; margin-only holes as INFO.
+    triggered it (set to 0 m, the tile itself fine). Now it names the
+    tile (or 3" file) and the sample count; holes left only in the
+    COMBINED_MARGIN are a console INFO, holes in the tile stay a
+    logged WARNING. Filling unchanged. Note: Viewfinder leaves the sea
+    void, so coastal tiles have many voids (+48-003: 29%, all in the
+    Channel, bordered by 0 m): ">= 10000 voids -> zero" is right there.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -694,7 +708,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 7. Readiness review 2026-11-05: no known issue left that silently
    produces a broken or incomplete tile; `dev` is the production
    version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
-   Not yet run on the current code: gui_smoke, test_parallel_batch.
+8. ~~#39~~ — on `dev`; gui_smoke and test_parallel_batch run on it.
+   No open issue left in this file.
 
 ## Coding style
 
