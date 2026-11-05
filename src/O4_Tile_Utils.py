@@ -148,7 +148,9 @@ def download_textures(
     return 1
 
 ################################################################################
-def build_tile(tile):
+def build_tile(tile, white_retry_follows=False):
+    """Step 3. white_retry_follows: the caller retries once if imagery
+    came back partly white, so that alone is not reported as an ERROR."""
     if UI.is_working:
         return 0
     UI.is_working = 1
@@ -339,16 +341,23 @@ def build_tile(tile):
             f"{len(IMG.failed_conversions)} texture(s) not converted"
         )
     white_imgs = IMG.incomplete_imgs.get(tile_coords, [])
+    white_problem = (
+        f"{len(white_imgs)} texture(s) partly white (imagery not obtained)"
+    )
     if white_imgs:
-        problems.append(
-            f"{len(white_imgs)} texture(s) partly white (imagery not "
-            "obtained)"
-        )
+        problems.append(white_problem)
         # The white JPEG and DDS would be reused by every later run (an
         # existing DDS is never rebuilt), so the hole would stay for good.
         # Removing them makes a rerun fetch them again. The list itself
         # stays: the callers retry once when they see it.
         _delete_white_files(tile, white_imgs)
+    if problems == [white_problem] and white_retry_follows:
+        UI.lvprint(
+            1, "Tile", tile_coords, "has", len(white_imgs),
+            "partly white texture(s); the DSF was not activated, retrying.",
+        )
+        UI.exit_message_and_bottom_line("")
+        return 0
     if problems:
         UI.lvprint(
             0, "ERROR: Tile", FNAMES.short_latlon(tile.lat, tile.lon),
@@ -410,7 +419,7 @@ def build_tile_retrying_white(tile):
     so the second run downloads them again. If they are still white, the
     tile stays inactive and counts as failed.
     """
-    ok = build_tile(tile)
+    ok = build_tile(tile, white_retry_follows=True)
     tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
     if not ok and not UI.red_flag and tile_coords in IMG.incomplete_imgs:
         UI.lvprint(
