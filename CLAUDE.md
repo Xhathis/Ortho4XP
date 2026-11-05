@@ -62,10 +62,11 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, <1 s, 135
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~2 s, 158
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
-read/write and the helpers of #23/#28/#32. tests/conftest.py switches
+read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
+#38 (fake server, in-memory zips). tests/conftest.py switches
 to an empty temp folder in pytest_collection, before any O4 module is
 imported (FNAMES paths and CFG's Ortho4XP.cfg come from the cwd), so
 they never touch the user's data. Run them before every commit; add a
@@ -378,6 +379,14 @@ Test results:
   regression PASS (DSF, 17/17 masks, app log identical), sims_in_ws
   all 14/14, sim_overlay 7/7, 135 unit tests, pyflakes 0. Not run:
   gui_smoke and test_parallel_batch (they use G:\Ortho4XP).
+- `fix/viewfinder-best-resolution` @ 6446e0c (#38): 23 new unit tests
+  (zone name identical to the old code for all 64,800 tiles; fake
+  server: 1"-only, both, 3"-only, upgrade, outage, archive without the
+  tile, Wellington); real download of dem1/P22 into a scratch folder:
+  N61W050 3601 x 3601 in 2 s; dem1/E36 404, dem3/E36 200;
+  sim_dem_failure 9/9. `test` @ f6d21c2: regression PASS (DSF, 17/17
+  masks, app log identical, nothing downloaded), sims_in_ws all
+  14/14, sim_overlay 7/7, 158 unit tests, pyflakes 0.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -612,6 +621,21 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     sequential batch (also every one-tile batch) without a summary,
     with UI.is_working left set (GUI refused work until restarted).
     Now only that tile fails, in the step that was running.
+38. **FIXED** (`6446e0c`): Viewfinder DEM resolution came from a
+    hard-coded list of 1" zones and the other resolution was never
+    tried. Zone P22 (SW Greenland) exists only as dem1, so the dem3
+    request gave 404: +61-050 failed in step 1 (first user batch of
+    Greenland tiles, 2026-11-05; older code built it flat) and
+    +60-049/+61-049 got a zero-altitude west margin (rebuild them).
+    Now 1" first everywhere, then 3"; an existing 3" file is upgraded
+    when a 1" archive exists; zones with a real 404 for dem1 are
+    listed in Elevation_data\viewfinder_no_dem1.txt (delete it to
+    check again); 1" or finer files are never re-downloaded or
+    replaced, and a zone download no longer rewrites same-size files.
+    Wellington Intl (-42,174) stays 3" (1" has holes). Library on
+    2026-11-05: 12,633 files at 1", 613 at 3" (53 blocks, mostly
+    tropics / Africa / South America; upgraded where Viewfinder has
+    1" when those tiles are built), 33 custom at 0.5".
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
