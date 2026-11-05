@@ -48,6 +48,13 @@ Guidance for Claude Code working in this repository.
 - `fix/<short-name>` — one topic per branch, small focused commits.
 - `test` — merges of fix branches that are ready for a test build.
 - `dev` — fixes that have passed a test build.
+- `docs/claude-md` — this file; merged into `test` like a fix branch.
+- Once a fix branch is on `dev` and pushed, delete it (local and
+  origin) and remove its worktree; the `--no-ff` merge commit keeps
+  its name and history. The 46 merged fix branches up to #37 were
+  deleted on 2026-11-05 (the commit SHAs in this file still resolve).
+  Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
+  should exist.
 - One logical change per commit so a regression can be bisected.
 - Mark commits that touch Windows-only branches (`sys.platform` / `os.name`)
   or the bundled `.exe` tools in the message.
@@ -124,9 +131,9 @@ so the user's checkout stays on `dev` while Ortho4XP may be open.
 worktree) logs every Triangle4XP run's options and exit code and
 saves the mesh command to tmp\mesh_cmd.json; `pe_stack.py <exe>
 [<MB> <out.exe>]` shows or sets an exe's stack reserve.
-Older baselines, reference only: `master-3cff870_cached` (Viewfinder
-DEM, not saved; no longer reproducible), no suffix = invalid (no inland
-water, #7), `_run2` = superseded (fresh water download, #9).
+The older `master-3cff870*` baselines (not reproducible, or invalid
+by #7/#9) and the old result folders were deleted on 2026-11-05;
+`G:\Ortho4XP_baseline` holds only the two `_frozen` baselines.
 Test builds go to `G:\Ortho4XP_tests\<tile>_<provider>_<ZL>_<branch>-<sha>\`.
 Test helpers (venv Python; the sims below through sims_in_ws.py) are in
 `G:\Ortho4XP_tests\tools\`: `run_masks.py` (step 2.5 only, optional
@@ -182,10 +189,13 @@ Tiles\zOrtho4XP_+55+012, one of their 9 test tiles (+54..+56 /
 and log. Use sims_in_ws.py. Only test_batch_order, test_parallel_batch
 and gui_smoke still run in G:\Ortho4XP (other tiles; see their notes).
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
-settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, ICAO airport cover
-at ZL18 over 2 km, road_level 3, apt_curv_tol 0.5 / 2 km, XP12 water,
-batch_parallel_tiles 3, ...). Never leave a test config in place.
-The values before the 2026-11-03 tuning are in Ortho4XP.cfg.before-tuning.bak
+settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, airport cover
+at ZL18 for all airports (cover_airports_with_highres=True,
+apt_smoothing_pix 8; was ICAO only, see .before-bushflying.bak), road_level 3,
+apt_curv_tol 0.5 / 2 km, XP12 water, batch_parallel_tiles 3, ...).
+Never leave a test config in place. Ortho4XP.cfg and *.lnk are in
+.gitignore (the user's own files). The values before the 2026-11-03
+tuning are in Ortho4XP.cfg.before-tuning.bak
 (coast_curv_tol 10 had no effect: it only refines when < curvature_tol).
 
 Test results:
@@ -376,8 +386,9 @@ download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
 SHA-256 checked, tools\verify_copy.py). Ortho4XP only renames within a
 folder, so junctions across drives are safe. Tiles and Overlays stay
 real folders on G: because X-Plane's scenery_packs.ini names them by
-absolute path. The originals were kept in `G:\Ortho4XP_old_caches` for
-the user to delete. Never delete a junction with a recursive delete
+absolute path. The originals on G: were deleted on 2026-11-05. The
+cached +43-065/-066/-067 data (Nova Scotia, no tiles) is input for
+test_batch_order and test_parallel_batch: keep it. Never delete a junction with a recursive delete
 (it would empty the F: folder): remove only the link (`rmdir`).
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
@@ -634,8 +645,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 4b. ~~`fix/osm-layer-failure` (#7)~~ — on `dev`.
 5. ~~`fix/subprocess-links` (#4)~~ — merged to `test` @ 1fca344.
 5b. ~~#10, #8~~ — on `test`.
-6. Bare excepts (#3), one module per branch, starting with the modules on the
-   batch-build path (`O4_Tile_Utils`, `O4_Imagery_Utils`, `O4_Mask_Utils`).
+6. ~~Bare excepts (#3)~~ — on `dev`, as are all issues up to #37.
+7. Readiness review 2026-11-05: no known issue left that silently
+   produces a broken or incomplete tile; `dev` is the production
+   version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
+   Not yet run on the current code: gui_smoke, test_parallel_batch.
 
 ## Coding style
 
