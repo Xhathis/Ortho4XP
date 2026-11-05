@@ -61,7 +61,8 @@ class DEM:
             self.nodata_to_zero()
         elif fill_nodata:
             if not fill_nodata_values_with_nearest_neighbor(
-                self.alt_dem, self.nodata
+                self.alt_dem, self.nodata,
+                "tile " + FNAMES.short_latlon(lat, lon), self.margin,
             ):
                 UI.vprint(
                     1,
@@ -80,6 +81,8 @@ class DEM:
         )
 
     def load_data(self, source, info_only=False):
+        # Samples taken from neighbour tiles on each side of alt_dem.
+        self.margin = 0
         if not source:
             if os.path.exists(FNAMES.generic_tif(self.lat, self.lon)):
                 source = FNAMES.generic_tif(self.lat, self.lon)
@@ -107,6 +110,7 @@ class DEM:
                 ) = build_combined_raster(
                     short_source, self.lat, self.lon, info_only
                 )
+                self.margin = COMBINED_MARGIN
             else:
                 if ensure_elevation(short_source, self.lat, self.lon):
                     (
@@ -361,6 +365,10 @@ class DEM:
         return tmp
 
 ################################################################################
+# Samples (0.01 degree) taken from each neighbour tile around the tile.
+COMBINED_MARGIN = 36
+
+
 def build_combined_raster(source, lat, lon, info_only):
     world_tiles = numpy.array(
         Image.open(os.path.join(FNAMES.Utils_dir, "world_tiles.png"))
@@ -368,7 +376,7 @@ def build_combined_raster(source, lat, lon, info_only):
     if source in ("View", "SRTM"):
         base = 3601
         overlap = 1
-        beyond = 36
+        beyond = COMBINED_MARGIN
         x0 = y0 = -0.01
         x1 = y1 = 1.01
         epsg = 4326
@@ -377,7 +385,7 @@ def build_combined_raster(source, lat, lon, info_only):
     elif source == ("ALOS"):
         base = 3600
         overlap = 0
-        beyond = 36
+        beyond = COMBINED_MARGIN
         eps = 1 / 7200
         x0 = y0 = -0.01 + eps
         x1 = y1 = 1.01 - eps
@@ -503,7 +511,9 @@ def read_elevation_from_file(
             if nxdem == 1201:
                 nxdem = nydem = 3601
                 if not info_only:
-                    fill_nodata_values_with_nearest_neighbor(alt_dem, nodata)
+                    fill_nodata_values_with_nearest_neighbor(
+                        alt_dem, nodata, file_name
+                    )
                     alt_dem = upsample(alt_dem)
         except Exception as e:
             if critical and not info_only:
@@ -936,7 +946,13 @@ def http_request(url, source, verbose=False):
         time.sleep(2 ** tentative)
 
 ################################################################################
-def fill_nodata_values_with_nearest_neighbor(alt_dem, nodata):
+def fill_nodata_values_with_nearest_neighbor(alt_dem, nodata, what="", margin=0):
+    """Fill no_data samples from their neighbours, at most 20 rounds.
+
+    what names the data in messages (tile or file); margin is the width
+    of the border taken from neighbour tiles (build_combined_raster), so
+    that holes left only there are not reported as holes in the tile.
+    """
     step = 0
     while (alt_dem == nodata).any():
         if not step:
@@ -968,16 +984,43 @@ def fill_nodata_values_with_nearest_neighbor(alt_dem, nodata):
         alt_dem[alt_dem == nodata] = atemp[alt_dem == nodata]
         step += 1
         if step > 20:
-            UI.lvprint(
-                1,
-                "    WARNING: The raster contain holes that seem to big to ",
-                "be filled... I'm filling the remainder with zero.",
-            )
-            alt_dem[alt_dem == nodata] = 0
+            holes = alt_dem == nodata
+            _report_unfilled_holes(holes, what, margin)
+            alt_dem[holes] = 0
             break
     if step:
         UI.vprint(2, "    Done.")
     return 1
+
+
+def _report_unfilled_holes(holes, what, margin):
+    """Say where the holes left after 20 rounds are (set to zero next).
+
+    The old WARNING named neither tile nor file, and it fired for every
+    tile next to a largely void neighbour: a void 36 x 36 margin corner
+    needs 36 rounds. Holes in the margin only shift the tile's edge
+    interpolation, so they are an INFO; holes in the tile stay a logged
+    WARNING.
+    """
+    total = int(holes.sum())
+    ny, nx = holes.shape
+    inside = int(holes[margin:ny - margin, margin:nx - margin].sum())
+    where = what or "elevation raster"
+    if inside:
+        UI.lvprint(
+            1,
+            f"    WARNING: {where}: {inside} elevation samples in holes too "
+            "big to fill -> set to zero altitude"
+            + (f" (and {total - inside} in the margin from neighbour tiles)."
+               if total > inside else "."),
+        )
+    else:
+        UI.vprint(
+            1,
+            f"    INFO: {where}: {total} void elevation samples in the "
+            f"{margin}-sample margin from neighbour tiles -> set to zero "
+            "altitude (the tile itself has no holes left).",
+        )
 
 ################################################################################
 def upsample(alt_dem):
