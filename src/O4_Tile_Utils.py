@@ -148,7 +148,9 @@ def download_textures(
     return 1
 
 ################################################################################
-def build_tile(tile):
+def build_tile(tile, white_retry_follows=False):
+    """Step 3. white_retry_follows: the caller retries once if imagery
+    came back partly white, so that alone is not reported as an ERROR."""
     if UI.is_working:
         return 0
     UI.is_working = 1
@@ -261,6 +263,10 @@ def build_tile(tile):
     download_workers = max_download_slots
     failed_downloads = []
     IMG.failed_conversions.clear()
+    # This run's white-filled textures only: an entry left by an earlier
+    # run (whose files were deleted then) must not fail this one.
+    tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
+    IMG.incomplete_imgs.pop(tile_coords, None)
     dsf_result = {"ok": 0}
 
     def _build_dsf():
@@ -334,6 +340,24 @@ def build_tile(tile):
         problems.append(
             f"{len(IMG.failed_conversions)} texture(s) not converted"
         )
+    white_imgs = IMG.incomplete_imgs.get(tile_coords, [])
+    white_problem = (
+        f"{len(white_imgs)} texture(s) partly white (imagery not obtained)"
+    )
+    if white_imgs:
+        problems.append(white_problem)
+        # The white JPEG and DDS would be reused by every later run (an
+        # existing DDS is never rebuilt), so the hole would stay for good.
+        # Removing them makes a rerun fetch them again. The list itself
+        # stays: the callers retry once when they see it.
+        _delete_white_files(tile, white_imgs)
+    if problems == [white_problem] and white_retry_follows:
+        UI.lvprint(
+            1, "Tile", tile_coords, "has", len(white_imgs),
+            "partly white texture(s); the DSF was not activated, retrying.",
+        )
+        UI.exit_message_and_bottom_line("")
+        return 0
     if problems:
         UI.lvprint(
             0, "ERROR: Tile", FNAMES.short_latlon(tile.lat, tile.lon),
@@ -380,27 +404,31 @@ def build_all(tile):
     if not MASK.build_masks(tile) or UI.red_flag:
         UI.exit_message_and_bottom_line("")
         return 0
-    ok = build_tile(tile)
+    ok = build_tile_retrying_white(tile)
+    if not ok or UI.red_flag:
+        UI.exit_message_and_bottom_line("")
+        return 0
+    UI.is_working = 0
+    return 1
+
+
+def build_tile_retrying_white(tile):
+    """Step 3, run once more if some imagery came back partly white.
+
+    build_tile does not activate such a tile and deletes the white files,
+    so the second run downloads them again. If they are still white, the
+    tile stays inactive and counts as failed.
+    """
+    ok = build_tile(tile, white_retry_follows=True)
     tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
-    if tile_coords in IMG.incomplete_imgs:
+    if not ok and not UI.red_flag and tile_coords in IMG.incomplete_imgs:
         UI.lvprint(
             1,
             f"Attempting to rebuild textures with white squares: "
             f"{IMG.incomplete_imgs[tile_coords]}",
         )
-        delete_incomplete_imgs(tile)
         ok = build_tile(tile)
-    if not ok or UI.red_flag:
-        UI.exit_message_and_bottom_line("")
-        return 0
-    UI.is_working = 0
-    if IMG.incomplete_imgs:
-        UI.lvprint(
-            0,
-            f"\nERROR: Parts of the following images could not be obtained "
-            f"and have been filled with white: {IMG.incomplete_imgs}",
-        )
-    return 1
+    return ok
 
 ################################################################################
 def build_tile_list(
@@ -457,7 +485,8 @@ def build_tile_list(
         UI.lvprint(
             0,
             f"\nERROR: Parts of the following images could not be obtained "
-            f"and have been filled with white: {IMG.incomplete_imgs}",
+            f"(tile not activated; run step 3 again to retry): "
+            f"{IMG.incomplete_imgs}",
         )
     return 0 if failed_tiles else 1
 
@@ -498,7 +527,6 @@ def _build_one_tile(
         tile.read_from_config()
     if do_osm or do_mesh or do_dsf:
         tile.make_dirs()
-    tile_coords = FNAMES.short_latlon(lat, lon)
     # A step failed if it returned 0 or raised red_flag; not every error
     # path raises the flag (e.g. Triangle4XP giving up in step 2).
     if do_osm:
@@ -511,15 +539,7 @@ def _build_one_tile(
         if not MASK.build_masks(tile) or UI.red_flag:
             return BATCH_STEPS[2]
     if do_dsf:
-        ok = build_tile(tile)
-        if tile_coords in IMG.incomplete_imgs:
-            UI.lvprint(
-                1,
-                f"Attempting to rebuild textures with white squares: "
-                f"{IMG.incomplete_imgs[tile_coords]}",
-            )
-            delete_incomplete_imgs(tile)
-            ok = build_tile(tile)
+        ok = build_tile_retrying_white(tile)
         if not ok or UI.red_flag:
             return BATCH_STEPS[3]
     if do_ovl:
@@ -568,7 +588,8 @@ def batch_worker(tile, flags):
         UI.lvprint(
             0,
             f"ERROR: Parts of the following images could not be obtained "
-            f"and have been filled with white: {IMG.incomplete_imgs}",
+            f"(tile not activated; run step 3 again to retry): "
+            f"{IMG.incomplete_imgs}",
         )
     return 0 if failed_step is None else 10 + BATCH_STEPS.index(failed_step)
 
@@ -750,28 +771,21 @@ def remove_unwanted_textures(tile):
             print("Removing obsolete texture", f)
             remove_if_exists(os.path.join(tile.build_dir, "textures", f))
 
-def delete_incomplete_imgs(tile):
-    """Delete orthophoto jpegs and dds that have white squares."""
-    tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
-    if tile_coords not in IMG.incomplete_imgs:
-        return
-    file_name_list = IMG.incomplete_imgs[tile_coords]
-    for file_name in file_name_list:
-        # Delete the orthophoto jpegs with white squares
-        for root, _, files in os.walk(FNAMES.Imagery_dir):
-            if file_name in files:
-                file_path = os.path.join(root, file_name)
-                os.remove(file_path)
-                UI.lvprint(1, f"Deleted: {file_name} in {file_path}")
-
-        # Delete the tile dds textures with white squares
-        # file_name has .jpg extension, so create a variable for .dds extension as well
-        base_name, _ = os.path.splitext(file_name)
-        file_name_dds = f"{base_name}.dds"
-        for root, _, files in os.walk(tile.build_dir):
-            if file_name_dds in files:
-                file_path = os.path.join(root, file_name_dds)
-                os.remove(file_path)
-                UI.lvprint(1, f"Deleted: {file_name_dds} in {file_path}")
-
-    IMG.incomplete_imgs.pop(tile_coords, None)
+def _delete_white_files(tile, file_names):
+    """Delete the orthophoto JPEGs with white squares and their DDS."""
+    # download_jpeg_ortho files them under the tile's own imagery folder
+    # (that folder's name is how incomplete_imgs is keyed), so only that
+    # folder is searched, not the whole imagery cache.
+    imagery_dir = os.path.join(
+        FNAMES.Imagery_dir, FNAMES.long_latlon(tile.lat, tile.lon)
+    )
+    for file_name in file_names:
+        file_name_dds = os.path.splitext(file_name)[0] + ".dds"
+        for (top, name) in ((imagery_dir, file_name),
+                            (tile.build_dir, file_name_dds)):
+            for root, _, files in os.walk(top):
+                if name in files:
+                    file_path = os.path.join(root, name)
+                    remove_if_exists(file_path)
+                    if not os.path.exists(file_path):
+                        UI.lvprint(1, f"Deleted: {name} in {file_path}")

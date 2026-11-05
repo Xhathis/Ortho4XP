@@ -698,7 +698,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception(e)
             return 0
         self.working_thread = threading.Thread(
-            target=TILE.build_tile, args=[tile]
+            target=TILE.build_tile_retrying_white, args=[tile]
         )
         self.working_thread.start()
 
