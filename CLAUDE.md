@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 164
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 169
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -401,7 +401,18 @@ Test results:
   122 mask files: ZL16 airport masks from cover_airports_with_highres
   for all airports; the 83 extra files were removed afterwards).
   `sim_dem_cli.py` needs the tile arguments when run on its own
-  (without them Ortho4XP.py opens the GUI and the sim hangs).
+  (without them Ortho4XP.py opens the GUI and the sim hangs), also
+  through sims_in_ws.py: `sim_dem_cli.py 55 12 Arc 17`.
+- First island batch (1182 tiles, St Helena, Ascension, Maldives,
+  Lesser Antilles, ...), 2026-11-05: +15-061 failed in step 1 (#40);
+  the user stopped the batch at 17:02 after 36 tiles of phase 1.
+  `fix/viewfinder-no-land` @ 2b01a2a (#40): 6 new unit tests (169
+  pass); real Viewfinder in a scratch folder: +15-061 and N16W061
+  recorded as sea, +15-061 flat, second read 0.2 s without download,
+  +15-062 (Dominica) max 1420 m. `test` @ a88ad77: regression PASS
+  (DSF, 17/17 masks, app log identical), sim_dem_failure 9/9,
+  sim_dem_cli exit 1 with the Elevation data ERROR, sim_batch dem as
+  designed, pyflakes 0.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -671,6 +682,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     logged WARNING. Filling unchanged. Note: Viewfinder leaves the sea
     void, so coastal tiles have many voids (+48-003: 29%, all in the
     Channel, bordered by 0 m): ">= 10000 voids -> zero" is right there.
+40. **FIXED** (`2b01a2a`): Viewfinder publishes no .hgt for a tile
+    without land, but Utils\world_tiles.png flags some sea tiles as
+    land (+15-061, open sea east of Dominica; also N16W061), so since
+    #24 such a tile stopped in step 1 ("would be flat") and each
+    neighbour downloaded the zone archive again. Now, when every
+    archive the zone has (404 = none) came and none holds the tile,
+    it is sea: zero altitude, one log line, listed in
+    Elevation_data\viewfinder_no_land.txt (delete it to check again;
+    a file put in place later wins). A failed request, or a zone with
+    no archive at all, still stops the tile. A 1" archive without the
+    tile now falls back to the 3" one.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -709,6 +731,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    produces a broken or incomplete tile; `dev` is the production
    version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
 8. ~~#39~~ — on `dev`; gui_smoke and test_parallel_batch run on it.
+9. ~~#40~~ — on `dev` (from the first island batch).
    No open issue left in this file.
 
 ## Coding style
