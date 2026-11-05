@@ -236,6 +236,35 @@ def test_sea_and_failure_return_failure(monkeypatch):
                                 1, 1, 0, 0, 0, 0) == 0
 
 
+def test_parallel_phase_counts_sea_apart(monkeypatch, tmp_path):
+    # Fake worker processes with fixed exit codes: 0 built, 3 sea, 10 +
+    # index for a failed step. Log files go to a temp Tmp_dir.
+    capture_log(monkeypatch)
+    monkeypatch.setattr(FNAMES, "Tmp_dir", str(tmp_path))
+    monkeypatch.setattr(TILE.time, "sleep", lambda s: None)
+    codes = {"1": 0, "2": TILE.SEA_EXIT_CODE, "3": 10}
+
+    class FakeProc:
+        def __init__(self, args, **kw):
+            self.code = codes[args[args.index("--batch-worker") + 1]]
+
+        def poll(self):
+            return self.code
+
+    monkeypatch.setattr(TILE.subprocess, "Popen", FakeProc)
+    UI.stop_requested = False
+    tile = type("T", (), {"custom_build_dir": ""})()
+    result = TILE._run_batch_phase(
+        tile, [(1, 0), (2, 0), (3, 0)], (1, 1, 0, 0, 0, 0), 3,
+        last_phase=False, context_file="",
+    )
+    assert sorted(result) == [
+        ("+02+000", TILE.SEA_SKIPPED), ("+03+000", TILE.BATCH_STEPS[0])]
+    # The sea tile's worker log is removed like a built one's; the
+    # failed tile's log is kept.
+    assert sorted(os.listdir(tmp_path)) == ["batch_+03+000.log"]
+
+
 def test_worker_exit_code(monkeypatch):
     monkeypatch.setattr(TILE, "_build_one_tile",
                         lambda tile, lat, lon, *f: TILE.SEA_SKIPPED)
