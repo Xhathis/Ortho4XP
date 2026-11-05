@@ -118,6 +118,9 @@ if __name__ == '__main__':
                 if UI.red_flag or not ok:
                     print("Build stopped, see Ortho4XP.log.")
                     sys.exit(1)
+                if step is VMAP.build_poly_file and ok == VMAP.SEA_ONLY:
+                    print("Open sea, nothing to build.")
+                    sys.exit(0)
             print("Bon vol!")
         except Exception:
             traceback.print_exc()

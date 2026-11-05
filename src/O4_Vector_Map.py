@@ -15,6 +15,54 @@ import O4_Airport_Utils as APT
 
 good_imagery_list = ()
 
+# build_poly_file's result for open sea (#41): nothing to build. Truthy, so
+# a caller that only tests for failure does not report one; the pipelines
+# (CLI, build_all, batches) stop the tile after step 1 on it.
+SEA_ONLY = 2
+
+
+################################################################################
+def sea_only_tile(tile):
+    """True when the tile is open sea, so a tile would add nothing to
+    X-Plane's own ocean: the default elevation source has no land for it
+    and OSM has no coastline in it.
+
+    Such a tile cost a full step 1 (several Overpass layers, all empty)
+    plus steps 2-3 for a DSF of flat water. Checked before any other
+    download, with one Overpass request (cached as the coastline layer,
+    which step 1 would download anyway). Any doubt means False: a custom
+    elevation source or custom coastline, elevation data with land, a
+    single coastline way. A failed request raises the red flag.
+    """
+    if tile.custom_dem not in ("", DEM.available_sources[1]):
+        return False
+    if os.path.isfile(FNAMES.custom_coastline(tile.lat, tile.lon)) or \
+            os.path.isdir(FNAMES.custom_coastline_dir(tile.lat, tile.lon)):
+        return False
+    if not DEM.default_source_has_no_land(tile.lat, tile.lon):
+        return False
+    sea_layer = OSM.OSM_layer()
+    if not OSM.OSM_queries_to_OSM_layer(
+        ['way["natural"="coastline"]'],
+        sea_layer,
+        tile.lat,
+        tile.lon,
+        [],
+        cached_suffix="coastline",
+    ):
+        return False
+    return OSM.OSM_to_MultiLineString(sea_layer, tile.lat, tile.lon).is_empty
+
+
+def _remove_empty_build_dir(tile):
+    # Only the empty folder that was made for this run goes: an old build
+    # of the tile is the user's to delete.
+    try:
+        os.rmdir(tile.build_dir)
+    except OSError:
+        pass
+
+
 ################################################################################
 def build_poly_file(tile):
     if UI.is_working:
@@ -45,6 +93,24 @@ def build_poly_file(tile):
     poly_file = FNAMES.input_poly_file(tile)
     vector_map = VECT.Vector_Map()
 
+    if UI.red_flag:
+        UI.exit_message_and_bottom_line()
+        return 0
+
+    if sea_only_tile(tile):
+        UI.lvprint(
+            0,
+            "   Tile", FNAMES.short_latlon(tile.lat, tile.lon),
+            "is open sea (no land in the elevation data, no OSM coastline):",
+            "nothing to build, skipped.",
+        )
+        _remove_empty_build_dir(tile)
+        UI.timings_and_bottom_line(timer)
+        UI.logprint(
+            "Step 1 for tile lat=", tile.lat, ", lon=", tile.lon,
+            ": sea only, skipped.",
+        )
+        return SEA_ONLY
     if UI.red_flag:
         UI.exit_message_and_bottom_line()
         return 0

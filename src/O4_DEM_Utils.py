@@ -752,6 +752,34 @@ def viewfinder_no_land(lat, lon):
     )
 
 
+def world_tile_has_land(lat, lon):
+    """The land flag of Utils\\world_tiles.png (coarse: some sea tiles are
+    flagged as land, see VIEW_NO_LAND_FILE)."""
+    world_tiles = numpy.array(
+        Image.open(os.path.join(FNAMES.Utils_dir, "world_tiles.png"))
+    )
+    return bool(world_tiles[89 - lat, (180 + lon) % 360])
+
+
+def default_source_has_no_land(lat, lon):
+    """True when the default elevation source gives the tile zero altitude
+    everywhere because it has no land: sea in world_tiles.png and no
+    Viewfinder file in the library, or in no Viewfinder archive (#40).
+
+    May download the tile's Viewfinder zone (as step 1 would anyway). False
+    when in doubt, e.g. when that download fails.
+    """
+    if os.path.exists(FNAMES.generic_tif(lat, lon)):
+        return False  # a user's own GeoTIFF is the default source then
+    if os.path.exists(FNAMES.viewfinderpanorama(lat, lon)):
+        return False
+    if not world_tile_has_land(lat, lon):
+        return True
+    if _ensure_viewfinder(lat, lon):
+        return False
+    return viewfinder_no_land(lat, lon)
+
+
 def _remember_no_land(name):
     try:
         os.makedirs(FNAMES.Elevation_dir, exist_ok=True)
