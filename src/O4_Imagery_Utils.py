@@ -2548,7 +2548,7 @@ def convert_texture(
                 geotag_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
                 env=UI.subprocess_env()
             ):
-                UI.vprint(
+                UI.lvprint(
                     1,
                     "ERROR: Could not geotag texture (gdal not present ?) ",
                     os.path.join(tile.build_dir, "textures", out_file_name),
@@ -2650,11 +2650,12 @@ def geotag(input_file_name):
             break
         tentative += 1
         if tentative == 10:
-            print(
-                "ERROR: Could not convert texture", out_file_name, "(10 tries)"
+            UI.lvprint(
+                0, "ERROR: Could not convert texture", out_file_name,
+                "(10 tries)",
             )
             break
-        print("WARNING: Could not convert texture", out_file_name)
+        UI.vprint(1, "WARNING: Could not convert texture", out_file_name)
         time.sleep(1)
 
 

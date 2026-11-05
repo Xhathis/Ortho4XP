@@ -836,7 +836,7 @@ def update_airport_boundaries(tile, dico_airports):
         with open(FNAMES.apt_file(tile), "wb") as outf:
             pickle.dump(dico_airports, outf)
     except (OSError, pickle.PicklingError):
-        UI.vprint(
+        UI.lvprint(
             1,
             "WARNING: Could not save airport info to file",
             FNAMES.apt_file(tile),

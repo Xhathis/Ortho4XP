@@ -123,7 +123,7 @@ def zone_list_to_ortho_dico(tile):
             dico_airports = pickle.load(f)
             f.close()
         except (OSError, EOFError, pickle.UnpicklingError):
-            UI.vprint(
+            UI.lvprint(
                 1,
                 "   WARNING: File",
                 FNAMES.apt_file(tile),
