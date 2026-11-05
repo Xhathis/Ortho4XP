@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 169
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 189
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -162,7 +162,10 @@ local mock servers; no real Overpass traffic), `sim_dem_failure.py
 downloads blocked), `sim_dem_cli.py` (CLI build without elevation
 data: step 1 must stop, exit 1), `sim_batch.py dem` (tile 2 of 3
 without elevation data is skipped) and `check_ned_names.py [--head]`
-(USGS NED names; --head asks USGS that the files exist). Unit sims set
+(USGS NED names; --head asks USGS that the files exist),
+`sim_sea_tile.py [lat lon ...]` (#41, through sims_in_ws.py; real
+network: CLI on -07+072 and +15-061 must exit 0 with "Open sea",
+no tile folder, only the coastline layer; not in `all`). Unit sims set
 `UI.log = False`: lvprint would otherwise append to the user's log.
 `sim_osm_layer_request.py <scratch>` (#26 against a mock server),
 `compare_layer_request.py <scratch> [lat lon]` (real Overpass:
@@ -413,6 +416,18 @@ Test results:
   (DSF, 17/17 masks, app log identical), sim_dem_failure 9/9,
   sim_dem_cli exit 1 with the Elevation data ERROR, sim_batch dem as
   designed, pyflakes 0.
+- In that batch 6 of the 35 tiles that reached step 1 were open sea
+  (empty coastline layer: -09-015, -07+072, -01+072, +01+072,
+  +12-061, +12-060; 5-29 min each in step 1). `fix/skip-sea-tiles` @
+  f16b079 + f4504d2 (#41): 20 new unit tests (189 pass);
+  sim_sea_tile -07+072 and +15-061 (real network): exit 0, ~34 s
+  each, no tile folder, only the coastline layer downloaded;
+  regression PASS, sims_in_ws all 14/14. `test` @ 1379f70:
+  regression PASS (DSF, 17/17 masks, app log identical), pyflakes 0.
+  Not run: gui_smoke, test_parallel_batch (the parallel parent's
+  exit code 3 path is unit-tested with fake workers). The 6 sea
+  tiles above still have their step 1-2 folders in Tiles (the user
+  deletes them).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -693,6 +708,22 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     a file put in place later wins). A failed request, or a zone with
     no archive at all, still stops the tile. A 1" archive without the
     tile now falls back to the 3" one.
+41. **DONE** (`f16b079`): open sea tiles are skipped. A tile is open
+    sea when custom_dem is empty (or Viewfinder), there is no generic
+    .tif or custom coastline, the default elevation has no land
+    (sea in world_tiles.png and no .hgt in the library, or #40's
+    no-land record) and OSM has no coastline way in it. build_poly_file
+    checks this before the airport layer (one Overpass request, cached
+    as the coastline layer) and returns VMAP.SEA_ONLY (= 2, truthy):
+    CLI exit 0 "Open sea, nothing to build.", build_all stops,
+    batches drop the tile from phase 2 and print "Tiles built: N,
+    skipped (open sea): K, failed: M." plus the list (the old line
+    when K = 0), a parallel worker exits 3 (SEA_EXIT_CODE), a batch
+    with only sea skips returns success. The empty build dir made for
+    the run is removed; an existing tile folder is left alone. Before:
+    every layer queried (all empty) and a flat-water DSF built that
+    only replaced X-Plane's own ocean (imagery was already ~0: sea
+    triangles get textures only under masks, i.e. near a coast).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -731,7 +762,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    produces a broken or incomplete tile; `dev` is the production
    version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
 8. ~~#39~~ — on `dev`; gui_smoke and test_parallel_batch run on it.
-9. ~~#40~~ — on `dev` (from the first island batch).
+9. ~~#40, #41~~ — on `dev` (from the first island batch).
    No open issue left in this file.
 
 ## Coding style
