@@ -414,6 +414,16 @@ def build_combined_raster(source, lat, lon, info_only):
                 base,
                 critical=verbose,
             )[-1]
+        elif source == "View" and viewfinder_no_land(
+            lat0, (lon0 + 180) % 360 - 180
+        ):
+            # In no Viewfinder archive: sea (see VIEW_NO_LAND_FILE).
+            if verbose:
+                UI.vprint(
+                    1, "   No Viewfinder elevation data for this tile (no land):",
+                    "zero altitude.",
+                )
+            tmparray = numpy.zeros((base, base), dtype=numpy.float32)
         elif verbose:
             raise DEMError(f"could not get {file_name} from source {source}")
         else:
@@ -716,13 +726,56 @@ def _remember_no_1s(zone):
         UI.vprint(1, "    WARNING: could not record", zone, f"({e.strerror})")
 
 
+# Viewfinder leaves tiles without land out of its zone archives, but
+# Utils\world_tiles.png flags some of them as land (e.g. +15-061, open sea
+# east of Dominica). Such a tile has no file to read and is sea: zero
+# altitude is right, as for a tile world_tiles calls sea. Tiles found so
+# far are listed here, so that later builds (and every neighbour) do not
+# download the zone archive again; delete the file to check again.
+VIEW_NO_LAND_FILE = "viewfinder_no_land.txt"
+
+
+def _no_land_tiles():
+    try:
+        with open(os.path.join(FNAMES.Elevation_dir, VIEW_NO_LAND_FILE)) as f:
+            return {line.strip() for line in f if line.strip()}
+    except OSError:
+        return set()
+
+
+def viewfinder_no_land(lat, lon):
+    """True when Viewfinder's archives were found not to hold this tile."""
+    target = FNAMES.viewfinderpanorama(lat, lon)
+    return (
+        not os.path.exists(target)
+        and os.path.basename(target) in _no_land_tiles()
+    )
+
+
+def _remember_no_land(name):
+    try:
+        os.makedirs(FNAMES.Elevation_dir, exist_ok=True)
+        # Append mode, like _remember_no_1s: parallel workers may add
+        # lines at the same time, a duplicate does no harm.
+        with open(os.path.join(FNAMES.Elevation_dir, VIEW_NO_LAND_FILE), "a") as f:
+            f.write(name + "\n")
+    except OSError as e:
+        UI.vprint(1, "    WARNING: could not record", name, f"({e.strerror})")
+
+
 def _ensure_viewfinder(lat, lon, verbose=True):
     """Make sure the Viewfinder .hgt of a tile is there, at the best
-    resolution Viewfinder publishes; return 1 if a file is available."""
+    resolution Viewfinder publishes; return 1 if a file is available.
+
+    0 means no file: a download failed, or no archive holds the tile
+    (then viewfinder_no_land() is True afterwards: the tile is sea)."""
     target = FNAMES.viewfinderpanorama(lat, lon)
     zone = viewfinder_zone(lat, lon)
     have = os.path.getsize(target) if os.path.exists(target) else 0
     resolutions = viewfinder_resolutions(lat, lon)
+    if not have and viewfinder_no_land(lat, lon):
+        UI.vprint(2, "   Viewfinder has no data (no land) for", target)
+        return 0
     if have:
         # A 1" file (or a finer custom one) is the best there is; a 3" one
         # is upgraded when the zone has a 1" archive.
@@ -734,6 +787,8 @@ def _ensure_viewfinder(lat, lon, verbose=True):
             UI.vprint(2, "   Recycling ", target)
             return 1
         resolutions = (1,)
+    without_tile = []  # archives that came but do not hold the tile
+    failed = False  # a request failed for another reason than a 404
     for resol in resolutions:
         url = VIEW_URL.format(resol, zone)
         UI.vprint(
@@ -743,25 +798,37 @@ def _ensure_viewfinder(lat, lon, verbose=True):
             f"from Viewfinderpanoramas (J. de Ferranti), {zone} at {resol}\".",
         )
         r = http_request(url, "View", verbose)
-        if r:
-            break
-        # Only a real 404 means there is no such archive: a server that
-        # is down must not make a zone look 3"-only for good.
-        if resol == 1 and getattr(http_request, "not_found", False):
-            _remember_no_1s(zone)
-    else:
-        if have:
-            UI.vprint(1, "    No 1\" archive for", zone, "- keeping", target)
+        if not r:
+            # Only a real 404 means there is no such archive: a server
+            # that is down must not make a zone look 3"-only for good.
+            if getattr(http_request, "not_found", False):
+                if resol == 1:
+                    _remember_no_1s(zone)
+            else:
+                failed = True
+            continue
+        _extract_viewfinder_zip(r.content)
+        if have or os.path.exists(target):
+            # With have, the archive replaced the file if it was finer.
             return 1
-        return 0
-    _extract_viewfinder_zip(r.content)
-    if not os.path.exists(target):
+        without_tile.append(f"dem{resol}/{zone}")
+    if have:
+        UI.vprint(1, "    No 1\" archive for", zone, "- keeping", target)
+        return 1
+    if without_tile and not failed:
+        # Every archive that exists came and none holds the tile.
         UI.lvprint(
-            1, "    WARNING: the Viewfinder archive", zone,
+            1, "    Viewfinder has no elevation data for",
+            os.path.basename(target), "(not in", ", ".join(without_tile) + "):",
+            "no land there, the tile is treated as sea (zero altitude).",
+        )
+        _remember_no_land(os.path.basename(target))
+    elif without_tile:
+        UI.lvprint(
+            1, "    WARNING: the Viewfinder archive", ", ".join(without_tile),
             "does not contain", os.path.basename(target),
         )
-        return 0
-    return 1
+    return 0
 
 
 def _extract_viewfinder_zip(content):

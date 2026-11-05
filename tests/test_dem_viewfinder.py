@@ -197,9 +197,76 @@ def test_server_down_is_not_remembered_as_no_1s(server):
     assert no_1s_zones() == set()  # but 1" is tried again next time
 
 
-def test_archive_without_the_tile(server):
-    server({"dem1/P22": {"n61w049.hgt": SIZE_1S}})
+def test_archive_without_the_tile_is_sea(server):
+    # The +15-061 case: open sea east of Dominica, which world_tiles.png
+    # flags as land; D20 has no dem1 and its dem3 lacks the tile.
+    fake = server({"dem3/D20": {"N15W062.hgt": SIZE_3S}})
+    assert DEM._ensure_viewfinder(15, -61) == 0
+    assert fake.requests == ["dem1/D20", "dem3/D20"]
+    assert DEM.viewfinder_no_land(15, -61)
+    assert not DEM.viewfinder_no_land(15, -62)
+    # Recorded: the tile (or a neighbour's margin) does not download D20
+    # again.
+    fake.requests.clear()
+    assert DEM._ensure_viewfinder(15, -61) == 0
+    assert fake.requests == []
+
+
+def test_1s_archive_without_the_tile_tries_3s(server):
+    fake = server({"dem1/P22": {"n61w049.hgt": SIZE_1S},
+                   "dem3/P22": {"N61W050.hgt": SIZE_3S}})
+    assert DEM._ensure_viewfinder(61, -50) == 1
+    assert fake.requests == ["dem1/P22", "dem3/P22"]
+    assert os.path.getsize(hgt(61, -50)) == SIZE_3S
+    assert not DEM.viewfinder_no_land(61, -50)
+
+
+def test_archive_without_the_tile_and_a_failed_request_is_not_sea(
+    server, monkeypatch
+):
+    # dem1 came without the tile, dem3 could not be asked: not proven sea.
+    fake = server({"dem1/P22": {"n61w049.hgt": SIZE_1S}})
+
+    def dem3_down(url, source, verbose=False):
+        if "/dem3/" in url:
+            DEM.http_request.not_found = False
+            return 0
+        return fake(url, source, verbose)
+
+    monkeypatch.setattr(DEM, "http_request", dem3_down)
     assert DEM._ensure_viewfinder(61, -50) == 0
+    assert not DEM.viewfinder_no_land(61, -50)
+
+
+def test_no_land_record_ignored_once_a_file_exists(server):
+    server({"dem3/D20": {"N15W062.hgt": SIZE_3S}})
+    assert DEM._ensure_viewfinder(15, -61) == 0
+    put(15, -61, SIZE_3S)  # e.g. a custom file added later
+    assert not DEM.viewfinder_no_land(15, -61)
+    assert DEM._ensure_viewfinder(15, -61) == 1
+
+
+def _world_with_land_at(monkeypatch, lat, lon):
+    world = DEM.numpy.zeros((180, 360), dtype=DEM.numpy.uint8)
+    world[89 - lat, (180 + lon) % 360] = 255
+    monkeypatch.setattr(DEM.Image, "open", lambda path: world)
+
+
+def test_combined_raster_sea_tile_is_zero(server, monkeypatch):
+    # The tile itself is in no archive: zero altitude, no DEMError (the
+    # neighbours are sea in this world_tiles).
+    server({"dem3/D20": {"N15W062.hgt": SIZE_3S}})
+    _world_with_land_at(monkeypatch, 15, -61)
+    alt = DEM.build_combined_raster("View", 15, -61, False)[-1]
+    assert alt.shape == (3673, 3673)
+    assert not alt.any()
+
+
+def test_combined_raster_failed_download_still_raises(server, monkeypatch):
+    server({}, down=True)
+    _world_with_land_at(monkeypatch, 15, -61)
+    with pytest.raises(DEM.DEMError):
+        DEM.build_combined_raster("View", 15, -61, False)
 
 
 def test_wellington_stays_3s(server):
