@@ -19,3 +19,7 @@ venv*/
 **/*.swp
 .last_gui_params.txt
 .DS_Store
+# The user's own files: global config (built from the GUI) and
+# Windows shortcuts made next to the scenery folders.
+/Ortho4XP.cfg
+*.lnk
