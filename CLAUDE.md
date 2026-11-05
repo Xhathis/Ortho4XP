@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 189
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 202
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -165,7 +165,11 @@ without elevation data is skipped) and `check_ned_names.py [--head]`
 (USGS NED names; --head asks USGS that the files exist),
 `sim_sea_tile.py [lat lon ...]` (#41, through sims_in_ws.py; real
 network: CLI on -07+072 and +15-061 must exit 0 with "Open sea",
-no tile folder, only the coastline layer; not in `all`). Unit sims set
+no tile folder, only the coastline layer; not in `all`),
+`sim_batch_cleaning.py seq|par` (#42, through sims_in_ws.py; batch
++55+012 and -07+072, steps 1-3 at cleaning_level 3: the mesh must
+still exist when the batch's cleanup starts and be gone after it, DSF
+equal to the baseline; one real Overpass request). Unit sims set
 `UI.log = False`: lvprint would otherwise append to the user's log.
 `sim_osm_layer_request.py <scratch>` (#26 against a mock server),
 `compare_layer_request.py <scratch> [lat lon]` (real Overpass:
@@ -196,7 +200,8 @@ Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, airport cover
 at ZL18 for all airports (cover_airports_with_highres=True,
 apt_smoothing_pix 8; was ICAO only, see .before-bushflying.bak), road_level 3,
-apt_curv_tol 0.5 / 2 km, XP12 water, batch_parallel_tiles 3, ...).
+apt_curv_tol 0.5 / 2 km, XP12 water, batch_parallel_tiles 3, ...;
+cleaning_level 3 since 2026-11-05 14:22, see #42).
 Never leave a test config in place. Ortho4XP.cfg and *.lnk are in
 .gitignore (the user's own files). The values before the 2026-11-03
 tuning are in Ortho4XP.cfg.before-tuning.bak
@@ -428,6 +433,16 @@ Test results:
   exit code 3 path is unit-tested with fake workers). The 6 sea
   tiles above still have their step 1-2 folders in Tiles (the user
   deletes them).
+- Readiness check 2026-11-05 evening: caches clean (no temp, empty or
+  broken files; the 181 OSM files of the island batch decompress
+  fully). The user switched to cleaning_level 3 at 14:22, which broke
+  #28 in batches (#42). `fix/batch-mesh-cleanup` @ 9542d07 (#42): 13
+  new unit tests (202 pass); sim_batch_cleaning seq and par (real
+  workers): mesh kept until the batch's cleanup, then mesh and .apt
+  gone, DSF byte-identical to the baseline, -07+072 skipped as open
+  sea in a real batch; regression PASS, sims_in_ws all 14/14.
+  `test` @ 891c932: regression PASS (DSF, 17/17 masks, app log
+  identical), pyflakes 0. Not run: gui_smoke, test_parallel_batch.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -437,8 +452,11 @@ SHA-256 checked, tools\verify_copy.py). Ortho4XP only renames within a
 folder, so junctions across drives are safe. Tiles and Overlays stay
 real folders on G: because X-Plane's scenery_packs.ini names them by
 absolute path. The originals on G: were deleted on 2026-11-05. The
-cached +43-065/-066/-067 data (Nova Scotia, no tiles) is input for
-test_batch_order and test_parallel_batch: keep it. Never delete a junction with a recursive delete
+user cleared Orthophotos and OSM_data around 14:19 on 2026-11-05 (the
+built tiles keep their DDS); since then OSM_data holds only the
+island batch's tiles, so the cached +43-065/-066/-067 Nova Scotia data
+for test_batch_order and test_parallel_batch is gone: their next run
+downloads it from Overpass again (Masks\+40-070 still exists). Never delete a junction with a recursive delete
 (it would empty the F: folder): remove only the link (`rmdir`).
 X-Plane 12 is at `E:\X-Plane 12`. `Ortho4XP.cfg` sets `custom_overlay_src` to
 its Global Scenery (read only: DSF rasters are copied to `tmp\`) and
@@ -724,6 +742,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     every layer queried (all empty) and a flat-water DSF built that
     only replaced X-Plane's own ocean (imagery was already ~0: sea
     triangles get textures only under masks, i.e. near a coast).
+42. **FIXED** (`9542d07`): cleaning_level > 2 deleted a tile's .mesh
+    and .apt at the end of its step 3, but in a batch's phase 2 the
+    neighbours' step 2.5 still reads that mesh (#28), so masks
+    depended on the build order again. Batches (sequential, and the
+    --batch-worker processes) set TILE.keep_mesh_after_step3 and the
+    batch deletes the files after the last phase
+    (_remove_meshes_after_batch): only for tiles built through step 3,
+    not next to a tile that really failed (its rerun needs them; log
+    line "Mesh kept ..."), not after Stop. Single builds unchanged.
+    No tile was affected: the switch to level 3 came after the
+    Greenland batch, and the island batch stopped in phase 1.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -762,7 +791,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    produces a broken or incomplete tile; `dev` is the production
    version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
 8. ~~#39~~ — on `dev`; gui_smoke and test_parallel_batch run on it.
-9. ~~#40, #41~~ — on `dev` (from the first island batch).
+9. ~~#40, #41, #42~~ — on `dev` (from the first island batch).
    No open issue left in this file.
 
 ## Coding style
