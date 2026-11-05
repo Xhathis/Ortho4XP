@@ -655,123 +655,147 @@ def read_elevation_from_file(
 ##############################################################################
 
 ##############################################################################
-def ensure_elevation(source, lat, lon, verbose=True):
-    if source == "View":
-        # Viewfinderpanorama grouping of files and resolutions is a 
-        # bit complicated...
-        deferranti_nbr = 31 + lon // 6
-        if deferranti_nbr < 10:
-            deferranti_nbr = "0" + str(deferranti_nbr)
-        else:
-            deferranti_nbr = str(deferranti_nbr)
-        alphabet = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        deferranti_letter = (
-            alphabet[lat // 4] if lat >= 0 else alphabet[(-1 - lat) // 4]
-        )
-        if lat < 0:
-            deferranti_letter = "S" + deferranti_letter
-        if deferranti_letter + deferranti_nbr in (
-                "L31",
-                "L32",
-                "L33",
-                "K32",
-                "O31",
-                "P31",
-                "N32",
-                "O32",
-                "P32",
-                "Q32",
-                "N33",
-                "O33",
-                "P33",
-                "Q33",
-                "R33",
-                "O34",
-                "P34",
-                "Q34",
-                "R34",
-                "O35",
-                "P35",
-                "Q35",
-                "R35",
-                "P36",
-                "Q36",
-                "R36",
-                # New Zealand
-                "SL58",
-                "SI59",
-                "SJ59",
-                "SK59",
-                "SL59",
-                "SI60",
-                "SJ60",
-                "SK60",
-                "SL60",
-            ):
-                resol = 1
-        else:
-            resol = 3
-        # Wellington Intl has missing elevation data in 1" resolution
-        if (lat, lon) == (-42, 174):
-            resol = 3
-        url = (
-            "http://viewfinderpanoramas.org/dem"
-            + str(resol)
-            + "/"
-            + deferranti_letter
-            + deferranti_nbr
-            + ".zip"
-        )
-        # if os.path.exists(FNAMES.viewfinderpanorama(lat, lon)) and (
-        #     resol == 3
-        #     or os.path.getsize(FNAMES.viewfinderpanorama(lat, lon)) >= 25934402
-        # ):
-        #  Removed check for resol and file size as this was causing issues with using custom_dems
-        if os.path.exists(FNAMES.viewfinderpanorama(lat, lon)):
-            UI.vprint(2, "   Recycling ", FNAMES.viewfinderpanorama(lat, lon))
+# Viewfinder Panoramas (J. de Ferranti) publishes 1" (dem1) and 3" (dem3)
+# archives per zone. Ortho4XP used to pick one from a hard-coded list of
+# 1" zones and never tried the other: a zone published only at 1" (e.g.
+# P22, south-west Greenland) gave a 404 and the tile failed, and zones
+# published at both were downloaded at 3" outside the list.
+VIEW_URL = "http://viewfinderpanoramas.org/dem{}/{}.zip"
+VIEW_1S_SIZE = 3601 * 3601 * 2  # bytes of a 1" .hgt
+# Zones that have no 1" archive (the server said 404), so that a 3" file
+# is not checked for an upgrade at every build. Delete the file to check
+# again.
+VIEW_NO_1S_FILE = "viewfinder_no_dem1.txt"
+
+
+def viewfinder_zone(lat, lon):
+    """Name of the Viewfinder archive holding a 1x1 degree tile, e.g. P22.
+
+    One letter per 4 degrees of latitude (S prefix in the south), one
+    number per 6 degrees of longitude, as on the Viewfinder maps.
+    """
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    letter = alphabet[lat // 4] if lat >= 0 else "S" + alphabet[(-1 - lat) // 4]
+    return f"{letter}{31 + lon // 6:02d}"
+
+
+def viewfinder_resolutions(lat, lon):
+    """Viewfinder resolutions to try, best first."""
+    # Wellington Intl has missing elevation data in 1" resolution
+    if (lat, lon) == (-42, 174):
+        return (3,)
+    return (1, 3)
+
+
+def _no_1s_zones():
+    try:
+        with open(os.path.join(FNAMES.Elevation_dir, VIEW_NO_1S_FILE)) as f:
+            return {line.strip() for line in f if line.strip()}
+    except OSError:
+        return set()
+
+
+def _remember_no_1s(zone):
+    try:
+        os.makedirs(FNAMES.Elevation_dir, exist_ok=True)
+        # One short line in append mode: parallel batch workers can add
+        # zones at the same time; a duplicate line does no harm.
+        with open(os.path.join(FNAMES.Elevation_dir, VIEW_NO_1S_FILE), "a") as f:
+            f.write(zone + "\n")
+    except OSError as e:
+        UI.vprint(1, "    WARNING: could not record", zone, f"({e.strerror})")
+
+
+def _ensure_viewfinder(lat, lon, verbose=True):
+    """Make sure the Viewfinder .hgt of a tile is there, at the best
+    resolution Viewfinder publishes; return 1 if a file is available."""
+    target = FNAMES.viewfinderpanorama(lat, lon)
+    zone = viewfinder_zone(lat, lon)
+    have = os.path.getsize(target) if os.path.exists(target) else 0
+    resolutions = viewfinder_resolutions(lat, lon)
+    if have:
+        # A 1" file (or a finer custom one) is the best there is; a 3" one
+        # is upgraded when the zone has a 1" archive.
+        if (
+            have >= VIEW_1S_SIZE
+            or 1 not in resolutions
+            or zone in _no_1s_zones()
+        ):
+            UI.vprint(2, "   Recycling ", target)
             return 1
+        resolutions = (1,)
+    for resol in resolutions:
+        url = VIEW_URL.format(resol, zone)
         UI.vprint(
             1,
-            "    Downloading ",
-            FNAMES.viewfinderpanorama(lat, lon),
-            "from Viewfinderpanoramas (J. de Ferranti).",
+            "    Downloading" if not have else "    Upgrading to 1\":",
+            target,
+            f"from Viewfinderpanoramas (J. de Ferranti), {zone} at {resol}\".",
         )
-        r = http_request(url, source, verbose)
-        if not r:
-            return 0
-        with zipfile.ZipFile(io.BytesIO(r.content), "r") as zip_ref:
-            for f in zip_ref.filelist:
-                fname = os.path.basename(f.filename)
-                if not fname:
-                    continue
-                try:
-                    lat0 = int(fname[1:3])
-                    lon0 = int(fname[4:7])
-                except ValueError:
-                    UI.vprint(
-                        2,
-                        "      Archive contains the unknown file name",
-                        fname,
-                        "which is skipped.",
-                    )
-                    continue
-                if ("S" in fname) or ("s" in fname):
-                    lat0 *= -1
-                if ("W" in fname) or ("w" in fname):
-                    lon0 *= -1
-                out_filename = FNAMES.viewfinderpanorama(lat0, lon0)
-                # we don't wish to overwrite a 1" version by downloading 
-                # the whole archive of a nearby 3" one
-                if (
-                    not os.path.exists(out_filename)
-                    or os.path.getsize(out_filename) <= f.file_size
-                ):
-                    os.makedirs(os.path.dirname(out_filename), exist_ok=True)
-                    UI.vprint(2, "      Extracting", out_filename)
-                    tmp_filename = FNAMES.temp_path_for(out_filename)
-                    with open(tmp_filename, "wb") as out:
-                        out.write(zip_ref.open(f, "r").read())
-                    FNAMES.finish_temp_file(tmp_filename, out_filename)
+        r = http_request(url, "View", verbose)
+        if r:
+            break
+        # Only a real 404 means there is no such archive: a server that
+        # is down must not make a zone look 3"-only for good.
+        if resol == 1 and getattr(http_request, "not_found", False):
+            _remember_no_1s(zone)
+    else:
+        if have:
+            UI.vprint(1, "    No 1\" archive for", zone, "- keeping", target)
+            return 1
+        return 0
+    _extract_viewfinder_zip(r.content)
+    if not os.path.exists(target):
+        UI.lvprint(
+            1, "    WARNING: the Viewfinder archive", zone,
+            "does not contain", os.path.basename(target),
+        )
+        return 0
+    return 1
+
+
+def _extract_viewfinder_zip(content):
+    with zipfile.ZipFile(io.BytesIO(content), "r") as zip_ref:
+        for f in zip_ref.filelist:
+            fname = os.path.basename(f.filename)
+            if not fname:
+                continue
+            try:
+                lat0 = int(fname[1:3])
+                lon0 = int(fname[4:7])
+            except ValueError:
+                UI.vprint(
+                    2,
+                    "      Archive contains the unknown file name",
+                    fname,
+                    "which is skipped.",
+                )
+                continue
+            if ("S" in fname) or ("s" in fname):
+                lat0 *= -1
+            if ("W" in fname) or ("w" in fname):
+                lon0 *= -1
+            out_filename = FNAMES.viewfinderpanorama(lat0, lon0)
+            # Only a smaller (coarser) file is replaced: a 1" or custom
+            # finer file is not overwritten by a 3" archive, and a file
+            # already at this resolution is left as it is (a zone archive
+            # holds up to ~50 tiles, most of them already in the library).
+            if (
+                not os.path.exists(out_filename)
+                or os.path.getsize(out_filename) < f.file_size
+            ):
+                os.makedirs(os.path.dirname(out_filename), exist_ok=True)
+                UI.vprint(2, "      Extracting", out_filename)
+                tmp_filename = FNAMES.temp_path_for(out_filename)
+                with open(tmp_filename, "wb") as out:
+                    out.write(zip_ref.open(f, "r").read())
+                FNAMES.finish_temp_file(tmp_filename, out_filename)
+
+
+##############################################################################
+def ensure_elevation(source, lat, lon, verbose=True):
+    if source == "View":
+        return _ensure_viewfinder(lat, lon, verbose)
     elif source in ("SRTM", "ALOS"):
         if os.path.exists(FNAMES.elevation_data(source, lat, lon)):
             UI.vprint(
@@ -871,6 +895,9 @@ def ensure_elevation(source, lat, lon, verbose=True):
 
 ################################################################################
 def http_request(url, source, verbose=False):
+    # Tells a caller that a 0 return was a real 404 (the file does not
+    # exist), not a server that is down or a lost connection.
+    http_request.not_found = False
     s = requests.Session()
     tentative = 0
     while True:
@@ -882,6 +909,7 @@ def http_request(url, source, verbose=False):
             elif "[40" in status_code or "[30" in status_code:
                 if verbose:
                     UI.vprint(2, "    Server said 'Not Found'")
+                http_request.not_found = r.status_code == 404
                 return 0
             elif "[5" in status_code:
                 if verbose:
