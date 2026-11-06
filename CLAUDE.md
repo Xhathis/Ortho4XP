@@ -443,6 +443,17 @@ Test results:
   sea in a real batch; regression PASS, sims_in_ws all 14/14.
   `test` @ 891c932: regression PASS (DSF, 17/17 masks, app log
   identical), pyflakes 0. Not run: gui_smoke, test_parallel_batch.
+- Iceland batch on `dev` bd49dd9 (40 tiles +63..+66 / -025..-014, 3
+  parallel, steps 1-3 + overlays, fresh caches), 2026-11-05/06: 40
+  built, 0 failed, 7h34m, no WARNING; meshes removed after the batch
+  (#42). The next batch (185 tiles, Denmark/Poland, 2026-11-06) lost
+  +54+015 in step 1 to #43 and was then abandoned by the user.
+  `fix/worker-output-encoding` @ 24bec0c (#43): 7 new unit tests (209
+  pass; a real child process with the old environment exits 1 on
+  "ł", with _worker_env writes it intact); regression PASS (DSF,
+  17/17 masks, app log identical); sim_batch_cleaning par (real
+  workers) and sim_batch error as designed. `test` @ 2142c51 (same
+  tree as 24bec0c on dev): 209 unit tests, pyflakes 0.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -753,6 +764,18 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     line "Mesh kept ..."), not after Stop. Single builds unchanged.
     No tile was affected: the switch to level 3 came after the
     Greenland batch, and the island batch stopped in phase 1.
+43. **FIXED** (`24bec0c`, Windows only): a --batch-worker's stdout
+    goes to its tmp log (opened as UTF-8), but redirected output is
+    encoded in cp1252 on Windows; printing a Polish airport name ("ł",
+    +54+015, Denmark/Poland batch 2026-11-06) raised
+    UnicodeEncodeError and failed step 1. Every name with a letter
+    outside cp1252 (Polish, Czech, Baltic, ...) did; Icelandic and
+    Danish letters are in cp1252. Workers now get
+    PYTHONIOENCODING=utf-8:backslashreplace (_worker_env), the CLI
+    escapes such characters on a redirected stdout/stderr
+    (UI.safe_console_streams), and logprint escapes them instead of
+    silently dropping the line (Ortho4XP.log stays in the ANSI code
+    page). The GUI writes to its own window and was not affected.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -792,7 +815,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
 8. ~~#39~~ — on `dev`; gui_smoke and test_parallel_batch run on it.
 9. ~~#40, #41, #42~~ — on `dev` (from the first island batch).
-   No open issue left in this file.
+10. ~~#43~~ — on `dev` (from the Denmark/Poland batch).
+    No open issue left in this file.
 
 ## Coding style
 
