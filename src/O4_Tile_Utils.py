@@ -799,6 +799,20 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     return 0 if _real_failures(failed_tiles) else 1
 
 
+def _worker_env():
+    """Environment of a --batch-worker process.
+
+    The worker's output goes to its tmp log, which _run_batch_phase opens
+    as UTF-8; without PYTHONIOENCODING the worker would write it in the
+    ANSI code page and crash on names it cannot encode (a Polish airport
+    in +54+015 failed step 1).
+    """
+    return dict(
+        UI.subprocess_env(), PYTHONUNBUFFERED="1",
+        PYTHONIOENCODING="utf-8:backslashreplace",
+    )
+
+
 def _run_batch_phase(
     tile, list_lat_lon, flags, nbr_slots, last_phase, context_file,
     built=None,
@@ -816,7 +830,7 @@ def _run_batch_phase(
     creationflags = (
         subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     )
-    env = dict(UI.subprocess_env(), PYTHONUNBUFFERED="1")
+    env = _worker_env()
     todo = list(list_lat_lon)
     running = {}  # proc -> (lat, lon, coords, log path, log file, start)
     failed_tiles = []

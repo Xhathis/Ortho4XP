@@ -33,6 +33,7 @@ import O4_Config_Utils as CFG  # CFG imported last because it can modify other m
 cmd_line = "USAGE: Ortho4XP.py lat lon imagery zl (won't read a tile config)\n  OR:  Ortho4XP.py lat lon (with existing tile config file)"
 
 if __name__ == '__main__':
+    UI.safe_console_streams()
     if not os.path.isdir(FNAMES.Utils_dir):
         print("Missing ", FNAMES.Utils_dir, "directory, check your install. Exiting.")
         sys.exit()
