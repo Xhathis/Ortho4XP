@@ -27,6 +27,23 @@ def subprocess_env():
 
 
 ################################################################################
+def safe_console_streams():
+    """Make printing to stdout/stderr never raise UnicodeEncodeError.
+
+    When the output is redirected (a parallel batch worker's tmp log, a CLI
+    run piped to a file), Python encodes it with the Windows ANSI code page
+    (cp1252), which has no letter like the Polish "ł": printing an OSM name
+    with one (an airport in step 1) crashed the step. Such characters are
+    now written as \\uXXXX escapes instead. The GUI replaces sys.stdout with
+    its own window and is not affected.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        # None under pythonw; a replaced stream may lack reconfigure().
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
+################################################################################
 def progress_bar(nbr, percentage, message=None):
     if gui:
         gui.pgrbv[nbr].set(percentage)
@@ -41,7 +58,12 @@ def vprint(min_verbosity, *args):
 ################################################################################
 def logprint(*args):
     try:
-        f = open(FNAMES.resource_path("Ortho4XP.log"), "a")
+        # Same (locale) encoding as before, so the log stays one encoding;
+        # a character it lacks is escaped instead of losing the whole line.
+        f = open(
+            FNAMES.resource_path("Ortho4XP.log"), "a",
+            errors="backslashreplace",
+        )
         f.write(
             time.strftime("%c")
             + " | "
