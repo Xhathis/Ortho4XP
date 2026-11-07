@@ -131,14 +131,15 @@ try:
     f.close()
 except FileNotFoundError:
     # Create a new global config file using default values
-    with open(global_cfg_file, "w") as file:
-        for var, value in cfg_global_tile_vars.items():
-            # Remove global_ prefix from cfg_global_tile_vars since that's not
-            # how they are stored in the global config file
-            _var = var.replace(global_prefix, "")
-            file.write(_var + "=" + str(value["default"]) + "\n")
-        for var, value in cfg_app_vars.items():
-            file.write(var + "=" + str(value["default"]) + "\n")
+    lines = []
+    for var, value in cfg_global_tile_vars.items():
+        # Remove global_ prefix from cfg_global_tile_vars since that's not
+        # how they are stored in the global config file
+        _var = var.replace(global_prefix, "")
+        lines.append(_var + "=" + str(value["default"]) + "\n")
+    for var, value in cfg_app_vars.items():
+        lines.append(var + "=" + str(value["default"]) + "\n")
+    FNAMES.write_text_atomic(global_cfg_file, "".join(lines))
     _LOGGER.info("No global config file found. New config created using defaults.")
 except Exception as e:
     _LOGGER.error("Error accessing global config file: %s", e)
@@ -272,11 +273,7 @@ class Tile:
         # so write_to_config(path) raised UnboundLocalError.
         config_file_bak = config_file + ".bak"
         try:
-            os.replace(config_file, config_file_bak)
-        except OSError:
-            pass
-        try:
-            f = open(config_file, "w")
+            lines = []
             for var in list_tile_vars:
                 tile_zones = []
                 lat = self.lat
@@ -292,10 +289,13 @@ class Tile:
                         tile_zones.append(zone)
                         _LOGGER.debug("Zones in tile found: %s", tile_zones)
                 if var == "zone_list":
-                    f.write(var + "=" + str(tile_zones) + "\n")
+                    lines.append(var + "=" + str(tile_zones) + "\n")
                 else:
-                    f.write(var + "=" + str(eval("self." + var)) + "\n")
-            f.close()
+                    lines.append(var + "=" + str(eval("self." + var)) + "\n")
+            # The old file is kept as .bak.
+            FNAMES.write_text_atomic(
+                config_file, "".join(lines), backup=config_file_bak
+            )
             return 1
         except Exception as e:
             UI.vprint(2, e)
@@ -1122,36 +1122,37 @@ class Ortho4XP_Config(tk.Toplevel):
         except OSError:
             self.popup("ERROR", "Cannot write into " + str(build_dir))
             return 0
-        # Make a backup of the existing tile config file
-        if os.path.isfile(tile_cfg_file):
-            tile_cfg_file_bak = tile_cfg_file + ".bak"
-            try:
-                os.replace(tile_cfg_file, tile_cfg_file_bak)
-            except OSError:
-                pass
-        with open(tile_cfg_file, "w") as f:
-            # Required for when the config window is left open to make sure
-            # we retain any zone modifications
-            self.v_["zone_list"].set(str(globals()["zone_list"]))
-            # Apply changes to update global variables
-            self.apply_changes("tile")
-            # Get zones only for the tile
-            tile_zones = []
-            if lat < 0:
-                lat = lat + 1
-            if lon < 0:
-                lon = lon + 1
-            for zone in globals()["zone_list"]:
-                _zone_list = [int(coord) for coord in zone[0]]
-                _zone_list = set(_zone_list)
-                if lat in _zone_list and lon in _zone_list:
-                    tile_zones.append(zone)
-                    _LOGGER.debug("Zones saved for tile at %s %s: %s", lat, lon, tile_zones)
-            for var in list_tile_vars:
-                if var == "zone_list":
-                    f.write(var + "=" + str(tile_zones) + "\n")
-                else:
-                    f.write(var + "=" + self.v_[var].get() + "\n")
+        # Required for when the config window is left open to make sure
+        # we retain any zone modifications
+        self.v_["zone_list"].set(str(globals()["zone_list"]))
+        # Apply changes to update global variables
+        self.apply_changes("tile")
+        # Get zones only for the tile
+        tile_zones = []
+        if lat < 0:
+            lat = lat + 1
+        if lon < 0:
+            lon = lon + 1
+        for zone in globals()["zone_list"]:
+            _zone_list = [int(coord) for coord in zone[0]]
+            _zone_list = set(_zone_list)
+            if lat in _zone_list and lon in _zone_list:
+                tile_zones.append(zone)
+                _LOGGER.debug("Zones saved for tile at %s %s: %s", lat, lon, tile_zones)
+        lines = []
+        for var in list_tile_vars:
+            if var == "zone_list":
+                lines.append(var + "=" + str(tile_zones) + "\n")
+            else:
+                lines.append(var + "=" + self.v_[var].get() + "\n")
+        # The old file is kept as .bak.
+        try:
+            FNAMES.write_text_atomic(
+                tile_cfg_file, "".join(lines), backup=tile_cfg_file + ".bak"
+            )
+        except OSError as e:
+            self.popup("ERROR", f"Cannot write {tile_cfg_file}: {e}")
+            return 0
         self.load_tile_cfg()
         self.tile_cfg_status()
         UI.vprint(
@@ -1195,9 +1196,6 @@ class Ortho4XP_Config(tk.Toplevel):
         """Write global configuration settings to Ortho4XP.cfg."""
         self.apply_changes("global")
         try:
-            # Make a copy of the existing global config file
-            if (os.path.exists(global_cfg_file)):
-                os.replace(global_cfg_file, global_cfg_bak_file)
             # Get current GUI global tile settings as a dict
             # Remove global prefix since the cfg file doesn't use it
             current_config = {
@@ -1206,14 +1204,19 @@ class Ortho4XP_Config(tk.Toplevel):
             }
             # Get current GUI app settings and add to the dict
             current_config.update({var: self.v_[var].get() for var in list_app_vars})
-            # Get settings in existing config file returned as a dict
-            config_file = self.cfg_to_dict(global_cfg_bak_file)
+            # Get settings in existing config file returned as a dict (read
+            # from the file itself: it stays in place until the new one
+            # replaces it; the copy in .bak is made on writing)
+            config_file = (
+                self.cfg_to_dict(global_cfg_file)
+                if os.path.exists(global_cfg_file) else {}
+            )
             # Update existing file with current app settings
             config_file.update(current_config)
             # Write to new configuration file
-            with open(global_cfg_file, 'w') as file:
-                for key, value in config_file.items():
-                    file.write(f"{key}={value}\n")
+            self.dict_to_cfg(
+                global_cfg_file, config_file, backup=global_cfg_bak_file
+            )
             # Load the tile config since it now exists
             if not self.parent.tile_cfg_exists.get():
                 self.parent.load_tile_cfg(
@@ -1266,14 +1269,14 @@ class Ortho4XP_Config(tk.Toplevel):
             current_config[var] = self.v_[var].get()
         try:
             if (os.path.exists(global_cfg_file)):
-                # Make a backup of the existing global config file
-                os.replace(global_cfg_file, global_cfg_bak_file)
                 # Get settings in existing config file returned as a dict
-                config_file = self.cfg_to_dict(global_cfg_bak_file)
+                config_file = self.cfg_to_dict(global_cfg_file)
                 # Update existing file with current app settings
                 config_file.update(current_config)
-                # Write to new configuration file
-                self.dict_to_cfg(global_cfg_file, config_file)
+                # Write to new configuration file, the old one to .bak
+                self.dict_to_cfg(
+                    global_cfg_file, config_file, backup=global_cfg_bak_file
+                )
             else:
                 self.dict_to_cfg(global_cfg_file, current_config)
 
@@ -1573,17 +1576,20 @@ class Ortho4XP_Config(tk.Toplevel):
         if cfg_vars[var]["type"] == list:
             return ast.literal_eval(value)
 
-    def dict_to_cfg(self, file:str, cfg_dict: dict) -> None:
+    def dict_to_cfg(self, file: str, cfg_dict: dict, backup=None) -> None:
         """
         Convert dictionary to key=value format and write to file.
 
         :param str file: path to config file
         :param dict cfg_dict: dictionary to write to file
+        :param str backup: where to copy the old file first (optional)
         :return: None
         """
-        with open(file, 'w') as file:
-            for key, value in cfg_dict.items():
-                file.write(f"{key}={value}\n")
+        FNAMES.write_text_atomic(
+            file,
+            "".join(f"{key}={value}\n" for key, value in cfg_dict.items()),
+            backup=backup,
+        )
 
     def cfg_to_dict(self, file: str) -> dict:
         """

@@ -784,8 +784,8 @@ class Ortho4XP_GUI(tk.Tk):
             if result == "cancel":
                 return        
         try:
-            f = open(FNAMES.resource_path(".last_gui_params.txt"), "w")
-            f.write(
+            FNAMES.write_text_atomic(
+                FNAMES.resource_path(".last_gui_params.txt"),
                 self.lat.get()
                 + " "
                 + self.lon.get()
@@ -794,9 +794,8 @@ class Ortho4XP_GUI(tk.Tk):
                 + " "
                 + self.default_zl.get()
                 + "\n"
+                + self.custom_build_dir.get(),
             )
-            f.write(self.custom_build_dir.get())
-            f.close()
         except OSError:
             pass
         self.after_cancel(self.callback_pgrb)
