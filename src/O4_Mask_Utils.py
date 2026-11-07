@@ -212,8 +212,21 @@ def build_masks(tile, for_imagery=False):
         masks_queue.put(key)
     dico_progress = {"done": 0, "bar": 1}
 
-    parallel_execute(build_mask, masks_queue, masks_build_slots,
-                     progress=dico_progress)
+    masks_ok = parallel_execute(build_mask, masks_queue, masks_build_slots,
+                                progress=dico_progress)
+    if UI.red_flag:
+        UI.exit_message_and_bottom_line()
+        return 0
+    if not masks_ok:
+        # A mask that raised (out of memory, disk full, ...) is missing:
+        # step 3 would give hard water edges there. The ERROR above names it.
+        UI.exit_message_and_bottom_line(
+            "\nERROR: Some masks of tile "
+            + FNAMES.short_latlon(tile.lat, tile.lon)
+            + " could not be built, see above."
+        )
+        UI.red_flag = True
+        return 0
 
     UI.progress_bar(1, 100)
     UI.timings_and_bottom_line(timer)
