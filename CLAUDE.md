@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 225
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 240
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -468,6 +468,20 @@ Test results:
   600 s wait) -> sim changed (error fails both tries, new
   error-once), both as designed, the other 13 as before. `test` @
   65d99b8: 225 unit tests, pyflakes 0.
+- Iceland rerun on `dev` e2fdc9f (the 9 tiles, 2026-11-07): 9
+  built, 0 failed, 1h12m, no WARNING; the 14 meshes kept next to
+  them stayed (#45). `fix/kept-mesh-cleanup` @ 81c7e6b (#45): 7 new
+  unit tests (5 fail on dev). `fix/overpass-retry-probe` @ e9e40c5
+  (#46): 8 new unit tests; one real check: DE answered (44 s).
+  sim_batch now stubs OSM.overpass_answers. `test` @ 35a0e4d: 240
+  unit tests, pyflakes 0, regression PASS (DSF, 17/17 masks, app log
+  identical), sims_in_ws all 15/15 (with error-once), sim_batch_
+  cleaning seq/par as designed; then on dev in G:\Ortho4XP:
+  gui_smoke 7/7 (66 tiles on the map), test_parallel_batch compare
+  (83/83 masks, 3 DSFs identical; seq 1087 s with all downloads,
+  par 140 s), context, fail, stop all ok. The Nova Scotia OSM, DEM
+  and GO2 imagery were downloaded again for it and stay cached;
+  Masks\+40-070 was removed and Ortho4XP.log restored afterwards.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -805,6 +819,25 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     IPv6 addresses tried last failed at once with WinError 10051
     "unreachable network", which hid the IPv4 timeouts in every ERROR
     line.
+45. **FIXED** (`81c7e6b`): the meshes a batch keeps next to a failed
+    tile (#42, "Mesh kept ...") stayed for good: the rerun is a new
+    batch that only cleans its own tiles (14 meshes, 1.9 GB after the
+    Iceland rerun of 2026-11-07; the user deleted them by hand). After
+    its own cleanup a batch now also removes the mesh and .apt of a
+    neighbour of a tile it built (_remove_meshes_kept_earlier) when
+    that neighbour has a DSF not older than its mesh and none of its
+    own neighbours failed now or still awaits step 2.5 (a tile folder
+    without DSF, or with a mesh newer than the DSF). Log line
+    "Cleaning: removed the mesh kept by an earlier batch of: ...".
+46. **DONE** (`e9e40c5`): #44's retry came 10 min after the last
+    failure, but the outages of 2026-11-06 lasted 1.5-3.5 h, so in a
+    batch whose phase ends sooner the retry fell into the same outage.
+    After the 10 min pause the batch now asks every configured server
+    for the nodes of an empty box (OSM.overpass_answers) every 5 min
+    (overpass_probe_interval) and starts the retry once one answers,
+    at most overpass_wait_max (6 h), then tries anyway. Still one
+    retry; Stop works throughout. A real check took 44 s for DE's
+    empty answer (2026-11-07), hence its 60 s read timeout.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -846,6 +879,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 9. ~~#40, #41, #42~~ — on `dev` (from the first island batch).
 10. ~~#43, #44~~ — on `dev` (from the Denmark/Poland and Iceland
     batches).
+11. ~~#45, #46~~ — on `dev` (from the Iceland rerun); gui_smoke and
+    test_parallel_batch run on it.
     No open issue left in this file.
 
 ## Coding style
