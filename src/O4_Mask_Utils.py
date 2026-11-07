@@ -117,7 +117,10 @@ def build_masks(tile, for_imagery=False):
     
     # Record water tris form mesh (and portions of nearby meshes)
     UI.vprint(1, "-> Reading mesh data")
-    (dico_sea, dico_inland) = record_water_tris(tile, )
+    water_tris = record_water_tris(tile)
+    if water_tris is None:  # Stop pressed while reading the meshes
+        return 0
+    (dico_sea, dico_inland) = water_tris
 
     UI.vprint(1, "-> Construction of the masks")
 
@@ -414,6 +417,10 @@ def build_custom_pre_mask(til_x, til_y, sea_level, tile):
 
 ################################################################################
 def record_water_tris(tile):
+    # (dico_sea, dico_inland), or None when Stop was pressed: it returned 0,
+    # which build_masks unpacked, so Stop during this step raised a
+    # TypeError (#53). step_stones is at least 1: a mesh with fewer than
+    # 100 triangles divided by zero.
     mesh_list = []
     for close_lat in range(tile.lat - 1, tile.lat + 2):
         for close_lon in range(tile.lon - 1, tile.lon + 2):
@@ -468,7 +475,7 @@ def record_water_tris(tile):
         for i in range(0, 2):  # skip 2 lines
             f_mesh.readline()
         nbr_tri_in = int(f_mesh.readline())  # read nbr of tris
-        step_stones = nbr_tri_in // 100
+        step_stones = max(nbr_tri_in // 100, 1)
         percent = -1
         UI.vprint(
             2,
@@ -482,7 +489,7 @@ def record_water_tris(tile):
                 UI.progress_bar(1, int(percent * 5 / 10))
                 if UI.red_flag:
                     UI.exit_message_and_bottom_line()
-                    return 0
+                    return None
             (n1, n2, n3, tri_type) = [
                 int(x) - 1 for x in f_mesh.readline().split()[:4]
             ]
@@ -605,7 +612,7 @@ def record_water_tris(tile):
             for i in range(0, 2 * nbr_pt_in + 5):
                 f_mesh.readline()
             nbr_tri_in = int(f_mesh.readline())  # read nbr of tris
-            step_stones = nbr_tri_in // 100
+            step_stones = max(nbr_tri_in // 100, 1)
             percent = -1
             for i in range(0, nbr_tri_in):
                 if i % step_stones == 0:
@@ -613,7 +620,7 @@ def record_water_tris(tile):
                     UI.progress_bar(1, int(percent * 5 / 10))
                     if UI.red_flag:
                         UI.exit_message_and_bottom_line()
-                        return 0
+                        return None
                 (n1, n2, n3, tri_type) = [
                     int(x) - 1 for x in f_mesh.readline().split()[:4]
                 ]
