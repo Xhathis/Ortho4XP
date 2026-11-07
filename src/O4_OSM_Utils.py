@@ -33,6 +33,50 @@ layer_request_tentatives = max_osm_tentatives // 2
 # After an HTTP 429 the server wants us to slow down; retrying within a few
 # seconds (2, 4, 8 s) got the connection reset by overpass-api.de.
 overpass_rate_limit_wait = 60  # seconds, at least
+# Set when a layer stopped the build because Overpass gave no answer after
+# all tentatives (and reset by the batch before each step 1): a batch puts
+# such a tile aside and tries it again later, since Overpass outages are
+# usually temporary (2026-11-06: 21 tiles lost in ~3.5 h).
+overpass_gave_up = False
+
+
+def _no_ipv6_route():
+    """True when this machine cannot reach the IPv6 internet at all.
+
+    Connecting a UDP socket sends nothing; it only asks the OS for a route.
+    """
+    import socket
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        s.connect(("2001:4860:4860::8888", 53))
+        return False
+    except OSError:
+        return True
+    finally:
+        if s is not None:
+            s.close()
+
+
+def _prefer_ipv4_without_ipv6_route():
+    """Use only IPv4 addresses when there is no IPv6 route.
+
+    requests tries every address of a host and reports the last failure.
+    overpass-api.de lists its IPv4 addresses first, then IPv6; without an
+    IPv6 route the IPv6 ones fail at once with "unreachable network"
+    (WinError 10051), which then hid the real cause (the IPv4 servers
+    timing out) in every error line.
+    """
+    if getattr(_prefer_ipv4_without_ipv6_route, "done", False):
+        return
+    _prefer_ipv4_without_ipv6_route.done = True
+    try:
+        import urllib3.util.connection as urllib3_connection
+    except ImportError:  # requests always ships urllib3; be safe anyway
+        return
+    if urllib3_connection.HAS_IPV6 and _no_ipv6_route():
+        urllib3_connection.HAS_IPV6 = False
+        UI.vprint(2, "      No IPv6 route: connecting over IPv4 only.")
 
 
 def _lock_file(f):
@@ -568,6 +612,8 @@ def OSM_queries_to_OSM_layer(
                 cached_suffix or "OSM",
                 "layer would be incomplete, stopping.",
             )
+            global overpass_gave_up
+            overpass_gave_up = True
             UI.red_flag = True
             return 0
         osm_layer.update_dicosm(response, input_tags, target_tags)
@@ -664,6 +710,7 @@ def get_overpass_data(
     if not overpass_servers:
         UI.lvprint(1, "No overpass servers configured. Check overpass_servers.txt.")
         return 0
+    _prefer_ipv4_without_ipv6_route()
     s = requests.Session()
     s.headers.update(
         {"User-Agent": f"Ortho4XP/{O4XP_VERSION} (https://github.com/shred86/Ortho4XP)"}

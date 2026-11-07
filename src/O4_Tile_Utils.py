@@ -12,6 +12,7 @@ import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
 import O4_Imagery_Utils as IMG
 import O4_Vector_Map as VMAP
+import O4_OSM_Utils as OSM
 import O4_Mesh_Utils as MESH
 import O4_Mask_Utils as MASK
 import O4_DSF_Utils as DSF
@@ -517,37 +518,63 @@ def _build_tile_list_sequential(tile, list_lat_lon, flags):
         if len(phases) > 1:
             UI.vprint(0, f"Batch phase {p + 1}/{len(phases)}: {name}")
         last_phase = p == len(phases) - 1
-        for (k, (lat, lon)) in enumerate(todo, 1):
-            tile_coords = FNAMES.short_latlon(lat, lon)
-            UI.vprint(1, "Dealing with tile ", k, "/", len(todo), ":",
-                      tile_coords)
-            failed_step = _build_one_tile(tile, lat, lon, *steps)
-            if failed_step == SEA_SKIPPED:
-                # Open sea, nothing to build (#41): not a failure, but
-                # no later phase either.
-                failed_tiles.append((tile_coords, SEA_SKIPPED))
-                UI.is_working = False
-                _remove_from_todo_map(lat, lon)
-                continue
-            if failed_step:
-                if UI.stop_requested:
-                    # The user pressed Stop: end the whole batch, as before.
+        pending = todo
+        # Tiles whose step 1 lost to an Overpass outage get one more pass
+        # at the end of the phase (retry_left), after a pause.
+        retry_left = 1
+        while pending:
+            retry = []
+            last_overpass_failure = 0.0
+            for (k, (lat, lon)) in enumerate(pending, 1):
+                tile_coords = FNAMES.short_latlon(lat, lon)
+                UI.vprint(1, "Dealing with tile ", k, "/", len(pending), ":",
+                          tile_coords)
+                failed_step = _build_one_tile(tile, lat, lon, *steps)
+                if failed_step == SEA_SKIPPED:
+                    # Open sea, nothing to build (#41): not a failure, but
+                    # no later phase either.
+                    failed_tiles.append((tile_coords, SEA_SKIPPED))
+                    UI.is_working = False
+                    _remove_from_todo_map(lat, lon)
+                    continue
+                if failed_step:
+                    if UI.stop_requested:
+                        # The user pressed Stop: end the whole batch.
+                        UI.exit_message_and_bottom_line()
+                        return 0
+                    UI.red_flag = False
+                    UI.is_working = False
+                    if retry_left and _failed_on_overpass(failed_step):
+                        UI.lvprint(
+                            0, "Tile", tile_coords, "failed in step",
+                            failed_step, "(no answer from Overpass) - it "
+                            "will be tried again at the end of this phase.",
+                        )
+                        retry.append((lat, lon))
+                        last_overpass_failure = time.time()
+                        continue
+                    # An error in this tile: the step has already reported
+                    # it and left the previous files in place. Skip the
+                    # tile so a long unattended batch still builds the
+                    # others.
+                    UI.lvprint(
+                        0, "ERROR: Tile", tile_coords, "failed in step",
+                        failed_step, "- skipped, continuing with the next "
+                        "tile.",
+                    )
+                    failed_tiles.append((tile_coords, failed_step))
+                    continue
+                if last_phase:
+                    _remove_from_todo_map(lat, lon)
+                    built.append((lat, lon))
+            pending = []
+            if retry:
+                retry_left -= 1
+                if not _wait_for_overpass_retry(retry, last_overpass_failure):
+                    UI.lvprint(0, "Batch stopped while waiting for Overpass.")
                     UI.exit_message_and_bottom_line()
                     return 0
-                # An error in this tile: the step has already reported it
-                # and left the previous files in place. Skip the tile so a
-                # long unattended batch still builds the others.
-                UI.lvprint(
-                    0, "ERROR: Tile", tile_coords, "failed in step",
-                    failed_step, "- skipped, continuing with the next tile.",
-                )
-                failed_tiles.append((tile_coords, failed_step))
-                UI.red_flag = False
-                UI.is_working = False
-                continue
-            if last_phase:
-                _remove_from_todo_map(lat, lon)
-                built.append((lat, lon))
+                pending = retry
         failed = {coords for (coords, _) in failed_tiles}
         todo = [(lat, lon) for (lat, lon) in todo
                 if FNAMES.short_latlon(lat, lon) not in failed]
@@ -572,10 +599,47 @@ BATCH_STEPS = (
 # that no later phase runs, but counted apart and not an error (#41).
 SEA_SKIPPED = "sea only"
 SEA_EXIT_CODE = 3  # a batch worker's exit code for SEA_SKIPPED
+# A batch worker's exit code when step 1 failed only because Overpass gave
+# no answer (OSM.overpass_gave_up): the batch tries such tiles once more.
+OVERPASS_EXIT_CODE = 4
+# Overpass outages are usually temporary, so a tile that lost step 1 to one
+# is put aside and built once more at the end of the phase, at least this
+# long after the last such failure (seconds).
+overpass_retry_wait = 600
 
 
 def _real_failures(not_built):
     return [(c, s) for (c, s) in not_built if s != SEA_SKIPPED]
+
+
+def _failed_on_overpass(failed_step):
+    """True if a tile's step 1 stopped because Overpass gave no answer."""
+    return (
+        failed_step == BATCH_STEPS[0]
+        and OSM.overpass_gave_up
+        and not UI.stop_requested
+    )
+
+
+def _wait_for_overpass_retry(retry, last_failure):
+    """Announce the retry of the tiles in retry and wait for it.
+
+    Waits until overpass_retry_wait seconds after last_failure (time.time()
+    of the last Overpass failure). Returns False if Stop was pressed.
+    """
+    wait = max(0.0, overpass_retry_wait - (time.time() - last_failure))
+    UI.lvprint(
+        0, f"Overpass gave no answer for {len(retry)} tile(s):",
+        " ".join(FNAMES.short_latlon(lat, lon) for (lat, lon) in retry)
+        + ". Trying them once more"
+        + (f" in {UI.nicer_timer(wait)}." if wait >= 1 else "."),
+    )
+    end = time.time() + wait
+    while time.time() < end:
+        if UI.stop_requested:
+            return False
+        time.sleep(min(1.0, max(0.0, end - time.time())))
+    return not UI.stop_requested
 
 
 def _batch_phases(flags):
@@ -633,6 +697,7 @@ def _build_one_tile_steps(
     # path raises the flag (e.g. Triangle4XP giving up in step 2).
     if do_osm:
         current[0] = BATCH_STEPS[0]
+        OSM.overpass_gave_up = False
         step1 = VMAP.build_poly_file(tile)
         if not step1 or UI.red_flag:
             return BATCH_STEPS[0]
@@ -691,8 +756,9 @@ def batch_worker(tile, flags):
     """Build one tile for a parallel batch, in its own process.
 
     flags is the "0"/"1" string of (osm, mesh, mask, dsf, ovl, override).
-    Returns the exit code: 0 when built, SEA_EXIT_CODE for open sea, 10 +
-    index in BATCH_STEPS when a step failed.
+    Returns the exit code: 0 when built, SEA_EXIT_CODE for open sea,
+    OVERPASS_EXIT_CODE when step 1 failed for want of an Overpass answer,
+    10 + index in BATCH_STEPS when a step failed otherwise.
     """
     UI.red_flag = 0
     UI.stop_requested = False
@@ -713,6 +779,8 @@ def batch_worker(tile, flags):
         return 0
     if failed_step == SEA_SKIPPED:
         return SEA_EXIT_CODE
+    if _failed_on_overpass(failed_step):
+        return OVERPASS_EXIT_CODE
     if failed_step in BATCH_STEPS:
         return 10 + BATCH_STEPS.index(failed_step)
     return 1  # "tile setup": the parent reports the exit code
@@ -776,14 +844,33 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
         for (k, (name, steps)) in enumerate(phases):
             if len(phases) > 1:
                 UI.vprint(0, f"Batch phase {k + 1}/{len(phases)}: {name}")
+            retry = {}  # (lat, lon) -> time of its Overpass failure
             result = _run_batch_phase(
                 tile, todo, steps, nbr_slots,
                 last_phase=(k == len(phases) - 1),
                 context_file=context_file,
                 built=built,
+                retry=retry,
             )
             if result is None:  # Stop button
                 return 0
+            if retry:
+                # One more pass for the tiles that lost step 1 to an
+                # Overpass outage, in batch order; failing again is final.
+                again = [t for t in todo if t in retry]
+                if not _wait_for_overpass_retry(again, max(retry.values())):
+                    UI.lvprint(0, "Batch stopped while waiting for Overpass.")
+                    UI.exit_message_and_bottom_line()
+                    return 0
+                result_again = _run_batch_phase(
+                    tile, again, steps, nbr_slots,
+                    last_phase=(k == len(phases) - 1),
+                    context_file=context_file,
+                    built=built,
+                )
+                if result_again is None:  # Stop button
+                    return 0
+                result += result_again
             failed_tiles += result
             failed = {coords for (coords, _) in result}
             todo = [(lat, lon) for (lat, lon) in todo
@@ -815,12 +902,14 @@ def _worker_env():
 
 def _run_batch_phase(
     tile, list_lat_lon, flags, nbr_slots, last_phase, context_file,
-    built=None,
+    built=None, retry=None,
 ):
     """Run one worker per tile, nbr_slots at a time.
 
     Returns the list of (coords, failed step), or None after Stop. In the
-    last phase, built tiles are added to built (when given).
+    last phase, built tiles are added to built (when given). With a retry
+    dict, a tile whose step 1 found no Overpass answer goes there (with the
+    time) instead of into the list; without one it is a step 1 failure.
     """
     script = FNAMES.resource_path("Ortho4XP.py")
     # A frozen (PyInstaller) build is its own interpreter and script.
@@ -894,7 +983,17 @@ def _run_batch_phase(
                 except OSError:
                     pass
                 continue
-            if 10 <= code < 10 + len(BATCH_STEPS):
+            if code == OVERPASS_EXIT_CODE and retry is not None:
+                UI.lvprint(
+                    0, "Tile", coords, "failed in step", BATCH_STEPS[0],
+                    "(no answer from Overpass) - it will be tried again at "
+                    "the end of this phase, see", log_path,
+                )
+                retry[(lat, lon)] = time.time()
+                continue
+            if code == OVERPASS_EXIT_CODE:
+                step = BATCH_STEPS[0]
+            elif 10 <= code < 10 + len(BATCH_STEPS):
                 step = BATCH_STEPS[code - 10]
             else:
                 step = f"? (worker exit code {code})"
