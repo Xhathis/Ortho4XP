@@ -160,7 +160,14 @@ def build_curv_tol_weight_map(tile, weight_array):
             weight_array[rowmin : rowmax + 1, colmin : colmax + 1] = (
                 tile.curvature_tol / tile.apt_curv_tol
             )
-    if tile.coast_curv_tol != tile.curvature_tol:
+    # The coastline can only change the map where its ratio is above the
+    # current weight (numpy.maximum below). With a coast_curv_tol at or
+    # above curvature_tol it usually changes nothing, and loading (or
+    # downloading) the coastline in every step 2 was wasted (#55).
+    if (
+        tile.coast_curv_tol > 0
+        and tile.curvature_tol / tile.coast_curv_tol > weight_array.min()
+    ):
         UI.vprint(
             1,
             "-> Modifying curv_tol weight map according to coastline location.",
@@ -198,6 +205,10 @@ def build_curv_tol_weight_map(tile, weight_array):
                 tags_of_interest,
                 cached_suffix="coastline",
             ):
+                UI.lvprint(
+                    0, "   ERROR: Could not get the coastline for the",
+                    "coast_curv_tol weight map, stopping.",
+                )
                 return 0
         for nodeid in sea_layer.dicosmn:
             (lonp, latp) = [float(x) for x in sea_layer.dicosmn[nodeid]]
@@ -225,7 +236,7 @@ def build_curv_tol_weight_map(tile, weight_array):
     # editing from PIL import Image
     # Image.fromarray((weight_array!=1).astype(numpy.uint8)*255).save(
     # 'weight.png')
-    return
+    return 1
 
 
 ################################################################################
@@ -656,7 +667,11 @@ def build_mesh(tile):
     )
 
     weight_array = numpy.ones((1001, 1001), dtype=numpy.float32)
-    build_curv_tol_weight_map(tile, weight_array)
+    if not build_curv_tol_weight_map(tile, weight_array):
+        # Meshing on without it ignored coast_curv_tol silently (#55).
+        UI.exit_message_and_bottom_line("")
+        UI.red_flag = True
+        return 0
     weight_array.tofile(weight_file)
     del weight_array
 
