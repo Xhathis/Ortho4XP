@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import traceback
 
 import O4_File_Names as FNAMES
 
@@ -116,6 +117,34 @@ def timings_and_bottom_line(tinit):
         + "____________________________________"
     )
     is_working = False
+
+
+################################################################################
+def run_guarded(func, *args):
+    """Thread target for the GUI's work buttons (#52).
+
+    A step that raised used to end its thread with is_working still set:
+    every later button was ignored without a word until Ortho4XP was
+    restarted, and the error went only to the console.
+    """
+    global is_working
+    try:
+        return func(*args)
+    except Exception as e:
+        lvprint(
+            0, "ERROR:", getattr(func, "__name__", "step"),
+            f"stopped on an unexpected error: {type(e).__name__}: {e}",
+        )
+        details = traceback.format_exc()
+        vprint(1, details)
+        if log:
+            logprint(details)
+        print(
+            "_____________________________________________________________"
+            + "____________________________________"
+        )
+        is_working = False
+        return 0
 
 
 ################################################################################
