@@ -843,6 +843,8 @@ def indexed_difference(idx_pol1, dico_pol1, idx_pol2, dico_pol2):
 
 ################################################################################
 def coastline_to_MultiPolygon(coastline, lat, lon, custom_source=False):
+    # None when the coastline cannot be closed into sea polygons (the cause
+    # is logged): the tile would get no sea at all (#51).
     def encode_to_next(coord, new_way, remove_coords):
         UI.vprint(3, "Computing next  coord for", coord)
         if coord in inits:
@@ -919,7 +921,7 @@ def coastline_to_MultiPolygon(coastline, lat, lon, custom_source=False):
             "ERROR in OSM coastline data. Coastline abruptly stops at",
             osm_badpoints,
         )
-        return geometry.MultiPolygon()
+        return None
     bdcoords = sorted(ends + inits)
     UI.vprint(3, "bdcoords=", bdcoords)
     UI.vprint(3, "inits=", ends)
@@ -941,7 +943,7 @@ def coastline_to_MultiPolygon(coastline, lat, lon, custom_source=False):
                     "ERROR is OSM coastline data, probably caused by a ",
                     "coastline way with wrong orientation.",
                 )
-                return geometry.MultiPolygon()
+                return None
         bdpolys.append(new_way)
         for coord in remove_coords:
             try:
@@ -956,7 +958,7 @@ def coastline_to_MultiPolygon(coastline, lat, lon, custom_source=False):
                     " lon=",
                     str(x + lon),
                 )
-                return geometry.MultiPolygon()
+                return None
     if not bdpolys:  # and islands:
         bdpolys.append([(0, 0), (0, 1), (1, 1), (1, 0)])
     outpol = ops.unary_union(

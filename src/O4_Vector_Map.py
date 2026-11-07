@@ -510,11 +510,22 @@ def include_sea(vector_map, tile):
         coastline = geometry.MultiLineString(
             list(remainder.geoms) + list(loops.geoms)
         )
-        sea_area = VECT.ensure_MultiPolygon(
-            VECT.coastline_to_MultiPolygon(
-                coastline, tile.lat, tile.lon, custom_source
-            )
+        sea_area = VECT.coastline_to_MultiPolygon(
+            coastline, tile.lat, tile.lon, custom_source
         )
+        if sea_area is None:
+            # Building on gave a tile without any sea that a batch counted
+            # as built; only the ERROR line above told (#51).
+            UI.lvprint(
+                0, "   ERROR: The coastline of tile",
+                FNAMES.short_latlon(tile.lat, tile.lon),
+                "cannot be closed (OSM data, or the custom coastline), the",
+                "tile would have no sea, stopping. A custom coastline file",
+                "can work around broken OSM data.",
+            )
+            UI.red_flag = True
+            return 0
+        sea_area = VECT.ensure_MultiPolygon(sea_area)
         if sea_area.geoms:
             UI.vprint(
                 1, "      Found ", len(sea_area.geoms), "contiguous patch(es)."
