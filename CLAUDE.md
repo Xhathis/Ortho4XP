@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 202
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 225
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -115,7 +115,7 @@ new folder (they refuse to overwrite). `--overlay <src_dir>` builds
 `<commit>` with that folder's O4_*.py copied over it (uncommitted code
 in a fix worktree), restored afterwards.
 `sims_in_ws.py <commit> [--overlay <src_dir>] all` runs the 10 CLI
-sims and the 4 batch sims in the same worktree (~20 min),
+sims and the 5 batch sims in the same worktree (~20 min),
 each after a fresh reset from the frozen inputs, and checks each
 one's exit code and specific message (FAILURES: 0 = all as designed;
 logs in `G:\Ortho4XP_tests\sims_<sha>\`). A texture
@@ -143,7 +143,9 @@ build with a simulated Overpass failure on the water layer) and
 `sim_water_geometry_failure.py` (CLI build where cleaning the inland
 water geometry fails), `sim_mask_dem_failure.py` (CLI build where the
 DEM for masks fails in step 2.5), `sim_batch.py error|stop` (batch
-of 3, steps 1-2.5, with an error or a Stop on tile 2) and
+of 3, steps 1-2.5, with an error or a Stop on tile 2; since #44 the
+Overpass error fails tile 2 and its retry, `error-once` only the
+first try, so the retry builds it) and
 `gui_smoke.py` (scripted run of the real GUI: Earth and config
 windows, tile selection; no downloads, no Custom Scenery links; back
 up .last_gui_params.txt around it) and `cache_roundtrip.py
@@ -454,6 +456,18 @@ Test results:
   17/17 masks, app log identical); sim_batch_cleaning par (real
   workers) and sim_batch error as designed. `test` @ 2142c51 (same
   tree as 24bec0c on dev): 209 unit tests, pyflakes 0.
+- 66-tile batch on `dev` 30f01d1 (Iceland, 2026-11-06): 21 tiles
+  lost step 1 to an Overpass outage (11:23-14:47; DE's IPv4
+  65.109.112.52 timed out, the shown error was the IPv6 WinError
+  10051); the user's next 66-tile batch (15:43, 10h06m): 57 built,
+  9 failed the same way (16:23-18:03). `fix/overpass-batch-retry` @
+  fd127ab (#44): 16 new unit tests (225 pass); a real request with
+  no IPv6 route goes out over IPv4 only; regression PASS (DSF, 17/17
+  masks, app log identical); sims_in_ws all 14: sim_batch error
+  "failed" only because the retry now builds tile 2 (12 min with the
+  600 s wait) -> sim changed (error fails both tries, new
+  error-once), both as designed, the other 13 as before. `test` @
+  65d99b8: 225 unit tests, pyflakes 0.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -776,6 +790,21 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (UI.safe_console_streams), and logprint escapes them instead of
     silently dropping the line (Ortho4XP.log stays in the ANSI code
     page). The GUI writes to its own window and was not affected.
+44. **DONE** (`fd127ab`): an Overpass outage failed tiles for the
+    whole batch: 2026-11-06 11:23-14:47 overpass-api.de (one of its
+    two IPv4 addresses dead, the other failing) and KU (read timeouts)
+    cost 21 of 66 tiles their step 1 after 8 tentatives each. Now a
+    tile whose step 1 stopped for want of an Overpass answer
+    (OSM.overpass_gave_up, reset before each batch step 1; parallel
+    worker exit code 4 = OVERPASS_EXIT_CODE) is put aside and built
+    once more at the end of the phase, at least overpass_retry_wait
+    (600 s) after the last such failure; failing again is final,
+    Stop works while waiting, other step 1 errors are not retried.
+    Also: without an IPv6 route (this PC: no IPv6 gateway) requests
+    connect over IPv4 only (urllib3 HAS_IPV6 = False); before, the
+    IPv6 addresses tried last failed at once with WinError 10051
+    "unreachable network", which hid the IPv4 timeouts in every ERROR
+    line.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -815,7 +844,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
    version (run from G:\Ortho4XP on `dev`, fixes in worktrees).
 8. ~~#39~~ — on `dev`; gui_smoke and test_parallel_batch run on it.
 9. ~~#40, #41, #42~~ — on `dev` (from the first island batch).
-10. ~~#43~~ — on `dev` (from the Denmark/Poland batch).
+10. ~~#43, #44~~ — on `dev` (from the Denmark/Poland and Iceland
+    batches).
     No open issue left in this file.
 
 ## Coding style
