@@ -25,6 +25,8 @@ def lines(monkeypatch):
     monkeypatch.setattr(UI, "exit_message_and_bottom_line", lambda *a: None)
     monkeypatch.setattr(TILE, "overpass_retry_wait", 0)
     monkeypatch.setattr(OSM, "overpass_gave_up", False)
+    # Never ask the real Overpass from a test (#46).
+    monkeypatch.setattr(OSM, "overpass_answers", lambda: True)
     UI.is_working = False
     UI.stop_requested = False
     UI.red_flag = False
@@ -122,6 +124,118 @@ def test_wait_ends_on_stop(lines, monkeypatch):
 
     monkeypatch.setattr(TILE.time, "sleep", sleep)
     assert TILE._wait_for_overpass_retry([(64, -14)], TILE.time.time()) is False
+
+
+# --- waiting until Overpass answers (#46) --------------------------------------
+def fake_clock(monkeypatch, on_sleep=None):
+    clock = [1000.0]
+    monkeypatch.setattr(TILE.time, "time", lambda: clock[0])
+
+    def sleep(s):
+        clock[0] += s
+        if on_sleep:
+            on_sleep(clock[0])
+
+    monkeypatch.setattr(TILE.time, "sleep", sleep)
+    return clock
+
+
+def answers(monkeypatch, replies):
+    asked = []
+
+    def probe():
+        asked.append(1)
+        return replies[min(len(asked), len(replies)) - 1]
+
+    monkeypatch.setattr(OSM, "overpass_answers", probe)
+    return asked
+
+
+def test_wait_until_overpass_answers(lines, monkeypatch):
+    clock = fake_clock(monkeypatch)
+    asked = answers(monkeypatch, [False, False, True])
+    monkeypatch.setattr(TILE, "overpass_retry_wait", 600)
+    monkeypatch.setattr(TILE, "overpass_probe_interval", 300)
+    assert TILE._wait_for_overpass_retry([(64, -14)], 1000.0)
+    assert len(asked) == 3
+    assert clock[0] == pytest.approx(1000.0 + 600 + 2 * 300)
+    assert any("checking again every" in l for l in lines)
+    assert "answers again after" in lines[-1]
+
+
+def test_no_message_when_overpass_answers_at_once(lines, monkeypatch):
+    fake_clock(monkeypatch)
+    answers(monkeypatch, [True])
+    assert TILE._wait_for_overpass_retry([(64, -14)], 0.0)
+    assert len(lines) == 1 and "as soon as Overpass answers" in lines[0]
+
+
+def test_wait_gives_up_after_max(lines, monkeypatch):
+    clock = fake_clock(monkeypatch)
+    asked = answers(monkeypatch, [False])
+    monkeypatch.setattr(TILE, "overpass_probe_interval", 300)
+    monkeypatch.setattr(TILE, "overpass_wait_max", 900)
+    assert TILE._wait_for_overpass_retry([(64, -14)], 1000.0)
+    assert len(asked) == 4  # at 0, 300, 600 and 900 s
+    assert clock[0] == pytest.approx(1900.0)
+    assert "trying anyway" in lines[-1]
+
+
+def test_stop_while_checking(lines, monkeypatch):
+    def press_stop(now):
+        if now >= 1600:
+            UI.stop_requested = True
+
+    fake_clock(monkeypatch, press_stop)
+    answers(monkeypatch, [False])
+    monkeypatch.setattr(TILE, "overpass_probe_interval", 300)
+    assert TILE._wait_for_overpass_retry([(64, -14)], 1000.0) is False
+
+
+class FakeResponse:
+    def __init__(self, status, content=b""):
+        self.status_code, self.content = status, content
+
+
+def fake_session(monkeypatch, replies):
+    """replies: per server URL, a FakeResponse or an exception to raise."""
+    asked = []
+
+    class Session:
+        headers = {}
+
+        def get(self, url, timeout):
+            asked.append(url)
+            reply = replies[url.split("?")[0]]
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+    monkeypatch.setattr(OSM.requests, "Session", Session)
+    monkeypatch.setattr(OSM, "overpass_servers",
+                        {k: k for k in replies})
+    return asked
+
+
+OSM_EMPTY = b'<?xml version="1.0"?>\n<osm version="0.6">\n</osm>\n'
+
+
+@pytest.mark.parametrize("first, second, expected", [
+    (OSM.requests.ConnectionError("down"), FakeResponse(200, OSM_EMPTY), True),
+    (FakeResponse(200, OSM_EMPTY), OSM.requests.ConnectionError("x"), True),
+    (OSM.requests.ConnectTimeout("t"), FakeResponse(504, b"Gateway"), False),
+    (FakeResponse(200, b"<html>busy</html>"), OSM.requests.ReadTimeout("r"),
+     False),
+])
+def test_overpass_answers(monkeypatch, first, second, expected):
+    monkeypatch.setattr(UI, "vprint", lambda *a: None)
+    monkeypatch.setattr(OSM, "_prefer_ipv4_without_ipv6_route", lambda: None)
+    asked = fake_session(monkeypatch, {"http://a": first, "http://b": second})
+    assert OSM.overpass_answers() is expected
+    # A tiny query, and the second server only when the first fails.
+    assert all(u.endswith("?data=node(0,0,0,0);out;") for u in asked)
+    assert len(asked) == (1 if first.__class__ is FakeResponse
+                          and expected else 2)
 
 
 def test_step1_resets_flag(lines, monkeypatch):

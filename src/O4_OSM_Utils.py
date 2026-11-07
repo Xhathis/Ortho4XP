@@ -696,6 +696,38 @@ def _pick_overpass_server(tentative: int, server_keys: list) -> str:
     return overpass_server_choice
 
 
+def overpass_answers() -> bool:
+    """True if some configured Overpass server answers a tiny query now.
+
+    Used by a batch to wait out an outage before it tries the tiles that
+    lost step 1 to it again (#46): the query asks for the nodes of an
+    empty box, so it costs the server nothing.
+    """
+    _prefer_ipv4_without_ipv6_route()
+    s = requests.Session()
+    s.headers.update(
+        {"User-Agent": f"Ortho4XP/{O4XP_VERSION} (https://github.com/shred86/Ortho4XP)"}
+    )
+    for (key, url) in overpass_servers.items():
+        slot = _acquire_overpass_slot()
+        if slot is None:
+            return False
+        try:
+            try:
+                r = s.get(url + "?data=node(0,0,0,0);out;",
+                          timeout=(overpass_timeout[0], 60))
+            finally:
+                _release_overpass_slot(slot)
+        except requests.RequestException as e:
+            UI.vprint(2, f"      Overpass check: {key}: {type(e).__name__}")
+            continue
+        if r.status_code == 200 and b"</osm>" in r.content[-20:]:
+            UI.vprint(2, f"      Overpass check: {key} answers.")
+            return True
+        UI.vprint(2, f"      Overpass check: {key}: HTTP {r.status_code}")
+    return False
+
+
 def get_overpass_data(
     query: str, bbox: tuple, tentatives: int = 0, server_timeout: int = 0
 ) -> bytes:
