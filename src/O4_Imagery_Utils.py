@@ -1052,6 +1052,10 @@ def http_request_to_image(width, height, url, request_headers, http_session):
             ):
                 try:
                     small_image = Image.open(io.BytesIO(r.content))
+                    # open() reads only the header; decode now, so that a
+                    # truncated or corrupt image is retried here instead of
+                    # failing later in paste() (#48).
+                    small_image.load()
                     return (1, small_image)
                 except Exception:
                     UI.vprint(
