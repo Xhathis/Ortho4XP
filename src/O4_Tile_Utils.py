@@ -169,6 +169,29 @@ def _convert_task(tile, *attrs):
     return 1
 
 
+def _remove_stale_temp_files(folder, min_age=3600):
+    """Remove FNAMES.temp_path_for files a killed run left in folder.
+
+    A DDS is converted under such a name (#49); Stop in a parallel batch
+    kills the converter and leaves it. Only old ones go: in a grouped build
+    dir another worker may be writing one right now.
+    """
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    now = time.time()
+    for name in names:
+        if not name.startswith(".tmp"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            if now - os.path.getmtime(path) >= min_age:
+                os.remove(path)
+        except OSError:
+            pass
+
+
 ################################################################################
 def build_tile(tile, white_retry_follows=False):
     """Step 3. white_retry_follows: the caller retries once if imagery
@@ -245,6 +268,7 @@ def build_tile(tile, white_retry_follows=False):
             )
         if not os.path.isdir(os.path.join(tile.build_dir, "textures")):
             os.makedirs(os.path.join(tile.build_dir, "textures"))
+        _remove_stale_temp_files(os.path.join(tile.build_dir, "textures"))
         if UI.cleaning_level > 1 and not tile.grouped:
             for f in os.listdir(os.path.join(tile.build_dir, "textures")):
                 if f[-4:] != ".png":

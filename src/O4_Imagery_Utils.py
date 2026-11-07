@@ -2474,13 +2474,19 @@ def convert_texture(
         file_to_convert = os.path.join(file_dir, jpeg_file_name)
     # eventually the dds conversion
     if type == "dds":
+        # Written under a temporary name and moved into place after a
+        # successful run (#49): a DDS cut off mid-write (Stop in a parallel
+        # batch kills nvcompress, a crash) used to stay, and an existing
+        # DDS is reused by every later run.
+        dds_target = os.path.join(tile.build_dir, "textures", out_file_name)
+        dds_tmp = FNAMES.temp_path_for(dds_target)
         if not dxt5:
             if "dar" in sys.platform:
                 conv_cmd = [
                     dds_convert_cmd,
                     "--png2dxt1",
                     file_to_convert,
-                    os.path.join(tile.build_dir, "textures", out_file_name)
+                    dds_tmp
                 ]
             else:
                 conv_cmd = [
@@ -2488,7 +2494,7 @@ def convert_texture(
                     "-bc1",
                     "-fast",
                     file_to_convert,
-                    os.path.join(tile.build_dir, "textures", out_file_name)
+                    dds_tmp
                 ]
         else:
             if "dar" in sys.platform:
@@ -2496,7 +2502,7 @@ def convert_texture(
                     dds_convert_cmd,
                     "--png2dxt5",
                     file_to_convert,
-                    os.path.join(tile.build_dir, "textures", out_file_name)
+                    dds_tmp
                 ]
             else:
                 conv_cmd = [
@@ -2504,7 +2510,7 @@ def convert_texture(
                     "-bc3",
                     "-fast",
                     file_to_convert,
-                    os.path.join(tile.build_dir, "textures", out_file_name)
+                    dds_tmp
                 ]
     else:
         (latmax, lonmin) = GEO.gtile_to_wgs84(til_x_left, til_y_top, zoomlevel)
@@ -2582,11 +2588,13 @@ def convert_texture(
                 os.path.join(FNAMES.Geotiff_dir, out_file_name),
             ]
     tentative = 0
+    converted = False
     while True:
         if not subprocess.call(
             conv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
             env=UI.subprocess_env()
         ):
+            converted = True
             break
         tentative += 1
         if tentative == 10:
@@ -2605,6 +2613,28 @@ def convert_texture(
             os.path.join(tile.build_dir, "textures", out_file_name),
         )
         time.sleep(1)
+    if type == "dds":
+        try:
+            if converted:
+                os.replace(dds_tmp, dds_target)
+            else:
+                os.remove(dds_tmp)
+        except FileNotFoundError:
+            if converted:  # the converter said it worked, but wrote nothing
+                UI.lvprint(1, "ERROR: Converter wrote no file for", dds_target)
+                failed_conversions.append(out_file_name)
+        except OSError as e:
+            # Most likely the old DDS is open elsewhere; keeping it would
+            # leave a texture that does not match this build.
+            UI.lvprint(
+                1, "ERROR: Could not move the new texture into place",
+                dds_target, f"({e.strerror or e}).",
+            )
+            failed_conversions.append(out_file_name)
+            try:
+                os.remove(dds_tmp)
+            except OSError:
+                pass
     if erase_tmp_png:
         try:
             os.remove(os.path.join(FNAMES.resource_path("tmp"), png_file_name))
