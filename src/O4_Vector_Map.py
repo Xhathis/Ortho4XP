@@ -758,17 +758,21 @@ def include_patches(vector_map, tile):
         UI.vprint(1, "   Patching", pfile_name)
         patch_layer = OSM.OSM_layer()
         try:
-            patch_layer.update_dicosm(
+            if not patch_layer.update_dicosm(
                 os.path.join(patch_dir, pfile_name),
                 input_tags=None,
                 target_tags=None,
-            )
+            ):
+                raise ValueError("unreadable, or no closing </osm> tag")
         except Exception as e:
             # User-made patch file: any parse error only skips this patch.
-            UI.vprint(
-                1, "     Error in treating", pfile_name,
+            # It used to say "skipped" and then apply the part read so far
+            # (#54). Logged: the tile then lacks what the patch asked for.
+            UI.lvprint(
+                1, "   WARNING: Error in patch", pfile_name,
                 f"({type(e).__name__}: {e}), skipped.",
             )
+            continue
         patches_list.append(pfile_name[:-10])
         dw = patch_layer.dicosmw
         dn = patch_layer.dicosmn
