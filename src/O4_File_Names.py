@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import threading
 from math import floor
@@ -31,6 +32,33 @@ def finish_temp_file(tmp_path, path):
         if not os.path.isfile(path):
             raise
         os.remove(tmp_path)
+
+
+def write_text_atomic(path, text, backup=None):
+    """Write a small text file (a config) so it is never left empty or cut.
+
+    The config writers used to move the old file to .bak and then open the
+    real name for writing: an error or a crash in between (disk full, a
+    locked file, the GUI killed) left no config, or half of one. Now the
+    old file is copied to backup (a failed copy is not fatal), the text is
+    written under a temporary name and moved over the old file in one step.
+    """
+    if backup and os.path.isfile(path):
+        try:
+            shutil.copyfile(path, backup)
+        except OSError:
+            pass
+    tmp = temp_path_for(path)
+    try:
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def resource_path(relative_path):
