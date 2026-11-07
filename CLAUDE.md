@@ -62,11 +62,11 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 240
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 279
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
-#38 (fake server, in-memory zips). tests/conftest.py switches
+#38 (fake server, in-memory zips) and the fixes from #45 on. tests/conftest.py switches
 to an empty temp folder in pytest_collection, before any O4 module is
 imported (FNAMES paths and CFG's Ortho4XP.cfg come from the cwd), so
 they never touch the user's data. Run them before every commit; add a
@@ -482,6 +482,16 @@ Test results:
   par 140 s), context, fail, stop all ok. The Nova Scotia OSM, DEM
   and GO2 imagery were downloaded again for it and stay cached;
   Masks\+40-070 was removed and Ortho4XP.log restored afterwards.
+- Nova Scotia batch on `dev` 74e0c12 (24 tiles, 2026-11-07): 24
+  built, no ERROR or WARNING, no mesh left. Then a full code review:
+  #47-#56, each `fix/<name>` from dev 74e0c12 with unit tests (39 new;
+  where testable they fail on dev). `test` @ abc9914 (one conflict in
+  O4_Tile_Utils: #47 and #49 added helpers at the same place, both
+  kept): 279 unit tests, pyflakes 0, regression PASS (DSF, 17/17
+  masks, app log identical; it reuses its DDS files), sims_in_ws all
+  15/15; sim_step3_failures convert/white/white-once ran nvcompress
+  for real through the temp name, no .tmp left in textures.
+  Not run: gui_smoke, test_parallel_batch (G:\Ortho4XP).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -838,6 +848,66 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     at most overpass_wait_max (6 h), then tries anyway. Still one
     retry; Stop works throughout. A real check took 44 s for DE's
     empty answer (2026-11-07), hence its 60 s read timeout.
+    Full code review 2026-11-07 (all live modules): #47-#52 could make
+    a broken tile count as built or leave the GUI stuck, #53-#56 are
+    medium; the low items, speedups and water-quality options found are
+    under "Open (low priority)" in the planned order of work.
+47. **FIXED** (`013242a`): a task that raised in an O4_Parallel_Utils
+    worker killed that worker silently; the queue then drained with
+    fewer workers and the caller never knew. Used for masks (a mask
+    missing, tile counted as built), step 3 conversions (DSF activated
+    without the DDS) and imagery pieces. The worker now logs ERROR
+    with the task's arguments, counts the task failed (result 0) and
+    goes on; build_masks fails the tile when any mask failed; step 3
+    wraps convert_texture (_convert_task) so an exception lands in
+    IMG.failed_conversions (#20).
+48. **FIXED** (`23cf6c9`): PIL opens lazily, so a cut or corrupt
+    imagery response passed http_request_to_image and only raised
+    later in paste() (outside the retry). Now load()ed inside the try:
+    retried like any bad answer.
+49. **FIXED** (`8896889`, nvcompress.exe call): the DDS was written
+    under its final name; a converter killed by Stop (parallel batch
+    taskkill) or a crash left a cut DDS that every later run reused
+    (an existing DDS is never rebuilt). Now written under
+    FNAMES.temp_path_for and os.replace'd only after a success;
+    build_tile removes temp files older than 1 h from the textures
+    folder (_remove_stale_temp_files).
+50. **FIXED** (`90ba0d8`): when the Global Scenery DSF could not be
+    copied or un-7z'd, extract_elevation_and_bathymetry_data called
+    exit_message_and_bottom_line and returned nothing; build_dsf went
+    on without XP12 rasters and the tile counted as built. Now None
+    (ERROR) stops build_dsf; no custom_overlay_src or no Global
+    Scenery DSF for the tile stays allowed with a WARNING (rasters
+    empty, as before).
+51. **FIXED** (`035b7bd`): a coastline that cannot be closed into
+    polygons (broken OSM data) made include_sea treat the tile as
+    having no sea: built as land. Now coastline_to_MultiPolygon
+    returns None on its 3 error paths and step 1 stops with an ERROR
+    naming the tile (a custom coastline file works around it).
+52. **FIXED** (`1fbf22f`): a GUI step button (steps 1-3, build all,
+    geotiffs, obj export, tile list) whose function raised left
+    UI.is_working set: the GUI refused all work until restarted.
+    The threads now run through UI.run_guarded (ERROR, traceback,
+    is_working cleared; SystemExit/KeyboardInterrupt pass).
+53. **FIXED** (`50b9caf`): Stop while step 2.5 read the meshes made
+    record_water_tris return 0, and build_masks crashed unpacking it;
+    a mesh under 100 triangles divided by zero (step_stones 0).
+54. **FIXED** (`5139c61`): a patch file that failed to parse (e.g. no
+    </osm>) was partly applied (the ways read so far); now skipped
+    with a logged WARNING naming the file.
+55. **FIXED** (`a58ca0a`): build_curv_tol_weight_map loaded the
+    coastline layer for every tile (an Overpass query when not
+    cached) even when coast_curv_tol >= curvature_tol cannot refine
+    anything (the user's 10 vs 1.0, see the cfg note above), and a
+    failed query was ignored (mesh built without coast refinement).
+    Now only loaded when the ratio exceeds the lowest weight; a failed
+    load stops step 2.
+56. **FIXED** (`75f7e40`): tile config, global config (config window,
+    app settings, default creation) and .last_gui_params.txt were
+    written by moving the old file to .bak, then opening the real name:
+    a failure in between left no config or a cut one.
+    FNAMES.write_text_atomic copies the old file to .bak, writes a
+    temp file and os.replace()s it.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -881,7 +951,22 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     batches).
 11. ~~#45, #46~~ — on `dev` (from the Iceland rerun); gui_smoke and
     test_parallel_batch run on it.
-    No open issue left in this file.
+12. ~~#47-#56~~ — from the full code review of 2026-11-07.
+    Open (low priority, from that review; none breaks a tile):
+    - O4_Vector_Map patch shapes test `.all()` where `.any()` is meant;
+      OBJ8 patch file handle not closed; the large-lake log line
+      swaps lat and lon.
+    - MESH.sort_mesh starts its tool without wait().
+    - Ortho4XP.py: exit 0 on bad CLI arguments, 3 bare `except:`.
+    - Dead code: O4_Recut_Water.py, split_polygon, indexed_difference,
+      ensure_ccw, point_to_segment_distance, convolve_periodic,
+      are_encroached_old.
+    - Providers GeoPunt2012/GeoPunt2015/IAU2008 name extents that do
+      not exist.
+    - Speedups: DEM elevation lookup with numpy fancy indexing (7x,
+      byte-identical, measured), insert_edge, blur_mask.
+    - Water quality options: repair invalid OSM polygons instead of
+      dropping them; treat empty relation roles as outer.
 
 ## Coding style
 
