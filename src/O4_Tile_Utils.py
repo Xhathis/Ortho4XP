@@ -606,6 +606,12 @@ OVERPASS_EXIT_CODE = 4
 # is put aside and built once more at the end of the phase, at least this
 # long after the last such failure (seconds).
 overpass_retry_wait = 600
+# After that pause the batch asks Overpass a tiny query every
+# overpass_probe_interval seconds and starts the retry once it answers
+# (#46): the outages of 2026-11-06 lasted 1.5-3.5 hours, longer than a
+# small batch's phase. After overpass_wait_max it tries them anyway.
+overpass_probe_interval = 300
+overpass_wait_max = 6 * 3600
 
 
 def _real_failures(not_built):
@@ -625,16 +631,51 @@ def _wait_for_overpass_retry(retry, last_failure):
     """Announce the retry of the tiles in retry and wait for it.
 
     Waits until overpass_retry_wait seconds after last_failure (time.time()
-    of the last Overpass failure). Returns False if Stop was pressed.
+    of the last Overpass failure), then until Overpass answers a tiny
+    query (OSM.overpass_answers), at most overpass_wait_max. Returns False
+    if Stop was pressed.
     """
     wait = max(0.0, overpass_retry_wait - (time.time() - last_failure))
     UI.lvprint(
         0, f"Overpass gave no answer for {len(retry)} tile(s):",
         " ".join(FNAMES.short_latlon(lat, lon) for (lat, lon) in retry)
         + ". Trying them once more"
-        + (f" in {UI.nicer_timer(wait)}." if wait >= 1 else "."),
+        + (f" in {UI.nicer_timer(wait)}" if wait >= 1 else "")
+        + ", as soon as Overpass answers.",
     )
-    end = time.time() + wait
+    if not _sleep_unless_stop(wait):
+        return False
+    start = time.time()
+    checks = 0
+    while not OSM.overpass_answers():
+        if UI.stop_requested:
+            return False
+        if time.time() - start >= overpass_wait_max:
+            UI.lvprint(
+                0, "Overpass still gives no answer after",
+                UI.nicer_timer(time.time() - start) + ": trying anyway.",
+            )
+            return True
+        if not checks:
+            UI.lvprint(
+                0, "Overpass gives no answer yet: checking again every",
+                UI.nicer_timer(overpass_probe_interval),
+                f"(at most {UI.nicer_timer(overpass_wait_max)}).",
+            )
+        checks += 1
+        if not _sleep_unless_stop(overpass_probe_interval):
+            return False
+    if checks:
+        UI.lvprint(
+            0, "Overpass answers again after",
+            UI.nicer_timer(time.time() - start) + ".",
+        )
+    return not UI.stop_requested
+
+
+def _sleep_unless_stop(seconds):
+    """Sleep, checking the Stop button every second; False if pressed."""
+    end = time.time() + seconds
     while time.time() < end:
         if UI.stop_requested:
             return False
