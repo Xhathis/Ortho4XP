@@ -360,7 +360,23 @@ def create_terrain_file(
 
 ################################################################################
 def extract_elevation_and_bathymetry_data(lat, lon):
+    """The XP12 raster atoms (names, elevation/bathymetry) of the tile's
+    Global Scenery DSF, as (bDEMN, bDEMS).
+
+    (b"", b"") when the Global Scenery has no DSF for this tile: the DSF is
+    then built without rasters, with a logged WARNING. None when the DSF
+    exists but cannot be read, or no Global Scenery folder is set: the tile
+    must fail (#50). Both used to give a DSF without rasters that was
+    activated and counted as built, with only an ERROR line in the log.
+    """
     UI.vprint(1, "     Extracting some rasters from X-Plane's Global Scenery")
+    if not (OVL.custom_overlay_src or OVL.custom_overlay_src_alternate):
+        UI.lvprint(
+            0, "   ERROR: No Global Scenery folder set (custom_overlay_src):",
+            "the DSF of", FNAMES.short_latlon(lat, lon),
+            "would lack X-Plane 12's elevation and bathymetry rasters.",
+        )
+        return None
     global_scenery_dsf = os.path.join(
         OVL.custom_overlay_src,
         "Earth nav data",
@@ -373,11 +389,11 @@ def extract_elevation_and_bathymetry_data(lat, lon):
         FNAMES.long_latlon(lat, lon) + ".dsf",
         )
     if not os.path.exists(global_scenery_dsf):
-        UI.exit_message_and_bottom_line(
-            "   ERROR: file ",
-            global_scenery_dsf,
-            "absent. Global Scenery directory needs to be set in the config ",
-            "window first.",
+        UI.lvprint(
+            0, "   WARNING: The Global Scenery has no DSF for",
+            FNAMES.short_latlon(lat, lon) + ":",
+            "the tile is built without X-Plane 12's elevation and",
+            "bathymetry rasters.",
         )
         return (b"", b"")
     tmp_file = os.path.join(
@@ -387,12 +403,12 @@ def extract_elevation_and_bathymetry_data(lat, lon):
     try:
         shutil.copy(global_scenery_dsf, tmp_file)
     except OSError as e:
-        UI.exit_message_and_bottom_line(
-            "     ERROR: could not copy it",
+        UI.lvprint(
+            0, "     ERROR: could not copy", global_scenery_dsf,
             f"({e.strerror or e}). Disk full, write permissions,",
             " erased tmp dir ?",
         )
-        return (b"", b"")
+        return None
 
     f = open(tmp_file, "rb")
     dsfid = f.read(2).decode("ascii")
@@ -411,25 +427,29 @@ def extract_elevation_and_bathymetry_data(lat, lon):
             if result.returncode or not os.path.isfile(tmp_file):
                 raise OSError(f"7z exited with code {result.returncode}")
         except OSError as e:
-            UI.exit_message_and_bottom_line(
-                "     ERROR: could not uncompress the Global Scenery DSF",
-                f"({e.strerror or e}).",
+            UI.lvprint(
+                0, "     ERROR: could not uncompress the Global Scenery DSF",
+                global_scenery_dsf, f"({e.strerror or e}).",
             )
             for leftover in (tmp_file, tmp_file + ".7z"):
                 try:
                     os.remove(leftover)
                 except OSError:
                     pass
-            return (b"", b"")
+            return None
         os.remove(tmp_file + ".7z")
     file_len = os.path.getsize(tmp_file)
     f = open(tmp_file, "rb")
     # read filetype cookie
     dsfid = f.read(8).decode("ascii")
     if dsfid != "XPLNEDSF":
-        UI.exit_message_and_bottom_line("     ERROR: Corrupted DSF file.")
+        f.close()
+        UI.lvprint(
+            0, "     ERROR: Corrupted Global Scenery DSF", global_scenery_dsf
+        )
         os.remove(tmp_file)
-        return (b"", b"")
+        return None
+    bDEMN = bDEMS = b""
     # skip format number
     f.read(4)
     # read atoms
@@ -1110,7 +1130,10 @@ def build_dsf(tile, download_queue):
         bPROP += b"sim/creation_agent\0Patched by Ortho4XP\0"
 
     # Transfer DEM and bathymetry raster from Global Scenery tiles
-    (bDEMN, bDEMS) = extract_elevation_and_bathymetry_data(tile.lat, tile.lon)
+    rasters = extract_elevation_and_bathymetry_data(tile.lat, tile.lon)
+    if rasters is None:
+        return 0
+    (bDEMN, bDEMS) = rasters
 
     # Computation of intermediate and of total length
     size_of_head_atom = 16 + len(bPROP)
