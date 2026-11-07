@@ -149,6 +149,27 @@ def download_textures(
     return 1
 
 ################################################################################
+def _convert_task(tile, *attrs):
+    """One DDS conversion of step 3; an exception counts as a failed one.
+
+    convert_texture records only a converter that fails 10 times. Anything
+    else (an unreadable cached JPEG, a full disk, a bad mask PNG) raised in
+    the worker, and the DSF was then activated without that texture.
+    """
+    try:
+        IMG.convert_texture(tile, *attrs)
+    except Exception as e:
+        name = FNAMES.dds_file_name_from_attributes(*attrs)
+        UI.lvprint(
+            0, "ERROR: Could not convert texture", name,
+            f"({type(e).__name__}: {e}).",
+        )
+        UI.vprint(1, traceback.format_exc())
+        IMG.failed_conversions.append(name)
+    return 1
+
+
+################################################################################
 def build_tile(tile, white_retry_follows=False):
     """Step 3. white_retry_follows: the caller retries once if imagery
     came back partly white, so that alone is not reported as an ERROR."""
@@ -307,7 +328,7 @@ def build_tile(tile, white_retry_follows=False):
             )
             dico_conv_progress = {"done": 0, "bar": 3}
             convert_workers = parallel_launch(
-                IMG.convert_texture,
+                _convert_task,
                 convert_queue,
                 max_convert_slots,
                 progress=dico_conv_progress,
