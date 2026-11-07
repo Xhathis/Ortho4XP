@@ -423,11 +423,7 @@ def _remove_meshes_after_batch(tile, built, not_built, do_dsf):
     removed, kept = 0, []
     for (lat, lon) in built:
         coords = FNAMES.short_latlon(lat, lon)
-        neighbours = {
-            FNAMES.short_latlon(lat + dlat, (lon + dlon + 180) % 360 - 180)
-            for dlat in (-1, 0, 1) for dlon in (-1, 0, 1)
-        } - {coords}
-        if neighbours & failed:
+        if {FNAMES.short_latlon(*n) for n in _neighbours(lat, lon)} & failed:
             kept.append(coords)
             continue
         _remove_mesh_files(
@@ -439,6 +435,70 @@ def _remove_meshes_after_batch(tile, built, not_built, do_dsf):
         UI.lvprint(
             0, "   Mesh kept (next to a failed tile, for its rerun):",
             " ".join(kept),
+        )
+    _remove_meshes_kept_earlier(tile, built, failed)
+
+
+def _neighbours(lat, lon):
+    """The 8 tiles around (lat, lon), across the antimeridian too."""
+    return [
+        (lat + dlat, (lon + dlon + 180) % 360 - 180)
+        for dlat in (-1, 0, 1) for dlon in (-1, 0, 1) if dlat or dlon
+    ]
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
+
+
+def _awaits_masks(tile, lat, lon):
+    """True if the tile's folder holds a build that has not reached step 3:
+    no DSF (e.g. step 1 failed), or a mesh newer than the DSF (steps 1-2
+    run again). Its step 2.5 will want the neighbours' meshes."""
+    build_dir = FNAMES.build_dir(lat, lon, tile.custom_build_dir)
+    if not os.path.isdir(build_dir):
+        return False
+    dsf = _mtime(FNAMES.dsf_file(build_dir, lat, lon))
+    mesh = _mtime(FNAMES.mesh_file(build_dir, lat, lon))
+    return dsf is None or (mesh is not None and mesh > dsf)
+
+
+def _remove_meshes_kept_earlier(tile, built, failed):
+    """Remove the meshes an earlier batch kept next to tiles built now.
+
+    A batch keeps a built tile's mesh next to a tile that failed ("Mesh
+    kept ...", #42), for that tile's rerun. The rerun is a new batch that
+    knows only its own tiles, so those meshes stayed for good (14 meshes,
+    1.9 GB after the Iceland rerun of 2026-11-07). Such a neighbour of a
+    tile built now loses its mesh when it is built itself (DSF not older
+    than the mesh) and none of its own neighbours still awaits step 2.5.
+    """
+    in_batch = set(built)
+    candidates = {
+        n for (lat, lon) in built for n in _neighbours(lat, lon)
+    } - in_batch
+    removed = []
+    for (lat, lon) in sorted(candidates):
+        build_dir = FNAMES.build_dir(lat, lon, tile.custom_build_dir)
+        mesh = _mtime(FNAMES.mesh_file(build_dir, lat, lon))
+        dsf = _mtime(FNAMES.dsf_file(build_dir, lat, lon))
+        if mesh is None or dsf is None or mesh > dsf:
+            continue
+        if any(
+            FNAMES.short_latlon(*n) in failed
+            or (n not in in_batch and _awaits_masks(tile, *n))
+            for n in _neighbours(lat, lon)
+        ):
+            continue
+        _remove_mesh_files(build_dir, lat, lon)
+        removed.append(FNAMES.short_latlon(lat, lon))
+    if removed:
+        UI.lvprint(
+            0, "   Cleaning: removed the mesh kept by an earlier batch of:",
+            " ".join(removed),
         )
 
 

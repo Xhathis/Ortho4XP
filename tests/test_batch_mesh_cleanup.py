@@ -105,6 +105,110 @@ def test_antimeridian_neighbour(env):
     assert os.path.exists(mesh(tile, 0, 179))
 
 
+# --- meshes kept by an earlier batch -------------------------------------------
+def dsf(tile, lat, lon):
+    return FNAMES.dsf_file(build_dir(tile, lat, lon), lat, lon)
+
+
+def make_dsf(tile, lat, lon, age=0):
+    """A built tile: DSF written after the mesh (age > 0: before it)."""
+    os.makedirs(os.path.dirname(dsf(tile, lat, lon)), exist_ok=True)
+    open(dsf(tile, lat, lon), "w").close()
+    m = os.path.getmtime(mesh(tile, lat, lon)) if os.path.exists(
+        mesh(tile, lat, lon)) else 1_000_000
+    os.utime(dsf(tile, lat, lon), (m + 10 - age, m + 10 - age))
+
+
+CENTER = (11, 21)
+RING = [t for t in GRID if t != CENTER]
+
+
+def earlier_batch_kept_ring(tile):
+    """The ring was built by an earlier batch, which kept its meshes
+    because the center failed in step 1 (folder, no mesh, no DSF)."""
+    for t in RING:
+        make_mesh(tile, *t)
+        make_dsf(tile, *t)
+    os.makedirs(build_dir(tile, *CENTER), exist_ok=True)
+
+
+def test_rerun_removes_meshes_kept_by_earlier_batch(env):
+    tile, lines = env
+    earlier_batch_kept_ring(tile)
+    make_mesh(tile, *CENTER)  # the rerun built the center
+    TILE._remove_meshes_after_batch(tile, [CENTER], [], True)
+    for t in GRID:
+        assert not os.path.exists(mesh(tile, *t)), t
+        assert not os.path.exists(apt(tile, *t)), t
+    for t in RING:
+        assert os.path.exists(dsf(tile, *t))  # only mesh and .apt go
+    assert any("kept by an earlier batch" in l and "+10+020" in l
+               for l in lines)
+
+
+def test_kept_mesh_stays_next_to_another_unbuilt_tile(env):
+    tile, _ = env
+    earlier_batch_kept_ring(tile)
+    os.makedirs(build_dir(tile, 12, 23), exist_ok=True)  # also failed
+    make_mesh(tile, *CENTER)
+    TILE._remove_meshes_after_batch(tile, [CENTER], [], True)
+    for t in RING:
+        assert os.path.exists(mesh(tile, *t)) == (t in {(11, 22), (12, 22)}), t
+
+
+def test_kept_mesh_stays_next_to_a_tile_awaiting_masks(env):
+    # (12, 23) ran steps 1-2 again after its DSF: its step 2.5 is ahead.
+    tile, _ = env
+    earlier_batch_kept_ring(tile)
+    make_mesh(tile, 12, 23)
+    make_dsf(tile, 12, 23, age=20)
+    make_mesh(tile, *CENTER)
+    TILE._remove_meshes_after_batch(tile, [CENTER], [], True)
+    assert os.path.exists(mesh(tile, 11, 22))
+    assert os.path.exists(mesh(tile, 12, 22))
+    assert not os.path.exists(mesh(tile, 10, 20))
+
+
+def test_kept_mesh_of_unbuilt_or_rebuilt_tile_stays(env):
+    tile, _ = env
+    earlier_batch_kept_ring(tile)
+    os.remove(dsf(tile, 10, 20))          # never got its DSF
+    make_dsf(tile, 10, 22, age=20)        # mesh newer than its DSF
+    make_mesh(tile, *CENTER)
+    TILE._remove_meshes_after_batch(tile, [CENTER], [], True)
+    assert os.path.exists(mesh(tile, 10, 20))
+    assert os.path.exists(mesh(tile, 10, 22))
+    assert not os.path.exists(mesh(tile, 12, 21))
+
+
+def test_kept_mesh_stays_next_to_a_tile_failed_now(env):
+    tile, _ = env
+    earlier_batch_kept_ring(tile)
+    make_mesh(tile, *CENTER)
+    TILE._remove_meshes_after_batch(
+        tile, [CENTER], [("+12+023", TILE.BATCH_STEPS[0])], True)
+    assert os.path.exists(mesh(tile, 12, 22))
+    assert os.path.exists(mesh(tile, 11, 22))
+    assert not os.path.exists(mesh(tile, 10, 21))
+
+
+def test_meshes_farther_away_are_not_touched(env):
+    tile, _ = env
+    make_mesh(tile, 15, 25)
+    make_dsf(tile, 15, 25)
+    make_mesh(tile, *CENTER)
+    TILE._remove_meshes_after_batch(tile, [CENTER], [], True)
+    assert os.path.exists(mesh(tile, 15, 25))
+
+
+def test_kept_meshes_stay_below_level_3(env, monkeypatch):
+    tile, _ = env
+    monkeypatch.setattr(UI, "cleaning_level", 2)
+    earlier_batch_kept_ring(tile)
+    TILE._remove_meshes_after_batch(tile, [CENTER], [], True)
+    assert all(os.path.exists(mesh(tile, *t)) for t in RING)
+
+
 # --- sequential batch -----------------------------------------------------------
 def fake_steps(tile, seen, monkeypatch, fail=()):
     """Phase 1 writes the mesh; phase 2 records the neighbour meshes its
