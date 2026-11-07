@@ -617,7 +617,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception(e)
             return 0
         self.working_thread = threading.Thread(
-            target=VMAP.build_poly_file, args=[tile]
+            target=UI.run_guarded, args=[VMAP.build_poly_file, tile]
         )
         self.working_thread.start()
 
@@ -633,7 +633,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception("Exception on build_mesh")
             return 0
         self.working_thread = threading.Thread(
-            target=MESH.build_mesh, args=[tile]
+            target=UI.run_guarded, args=[MESH.build_mesh, tile]
         )
         self.working_thread.start()
 
@@ -649,7 +649,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception("Exception on sort_mesh")
             return 0
         self.working_thread = threading.Thread(
-            target=MESH.sort_mesh, args=[tile]
+            target=UI.run_guarded, args=[MESH.sort_mesh, tile]
         )
         self.working_thread.start()
 
@@ -665,7 +665,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception("Exception on community_mesh")
             return 0
         self.working_thread = threading.Thread(
-            target=MESH.community_mesh, args=[tile]
+            target=UI.run_guarded, args=[MESH.community_mesh, tile]
         )
         self.working_thread.start()
 
@@ -682,7 +682,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception(e)
             return 0
         self.working_thread = threading.Thread(
-            target=MASK.build_masks, args=[tile, for_imagery]
+            target=UI.run_guarded, args=[MASK.build_masks, tile, for_imagery]
         )
         self.working_thread.start()
 
@@ -698,7 +698,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception(e)
             return 0
         self.working_thread = threading.Thread(
-            target=TILE.build_tile_retrying_white, args=[tile]
+            target=UI.run_guarded, args=[TILE.build_tile_retrying_white, tile]
         )
         self.working_thread.start()
 
@@ -722,7 +722,7 @@ class Ortho4XP_GUI(tk.Tk):
             _LOGGER.exception(e)
             return 0
         self.working_thread = threading.Thread(
-            target=TILE.build_all, args=[tile]
+            target=UI.run_guarded, args=[TILE.build_all, tile]
         )
         self.working_thread.start()
 
@@ -1348,7 +1348,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
         IMG.initialize_local_combined_providers_dict(tile)
         fargs_build_geotiffs = [tile, texture_attributes_list]
         build_geotiffs_thread = threading.Thread(
-            target=IMG.build_geotiffs, args=fargs_build_geotiffs
+            target=UI.run_guarded, args=[IMG.build_geotiffs] + fargs_build_geotiffs
         )
         build_geotiffs_thread.start()
         return
@@ -1382,7 +1382,7 @@ class Ortho4XP_Custom_ZL(tk.Toplevel):
             provider_code,
         ]
         extract_mesh_thread = threading.Thread(
-            target=MESH.extract_mesh_to_obj, args=fargs_extract_mesh
+            target=UI.run_guarded, args=[MESH.extract_mesh_to_obj] + fargs_extract_mesh
         )
         extract_mesh_thread.start()
         return
@@ -2237,7 +2237,9 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             self.v_["Extract overlays"].get(),
             self.v_["Override tile configs"].get(),
         ]
-        threading.Thread(target=TILE.build_tile_list, args=args).start()
+        threading.Thread(
+            target=UI.run_guarded, args=[TILE.build_tile_list] + args
+        ).start()
         return
 
     def scroll_start(self, event):
