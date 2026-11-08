@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 304
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 314
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -85,13 +85,15 @@ checked against a **baseline**:
 
 Reference tile: `+55+012` (lat 55, lon 12 — Zealand / Copenhagen, Denmark).
 Provider `Arc` (Esri World Imagery, `Providers/Global/Arc.lay`), ZL 17.
-Baseline (since the Triangle4XP stack fix #32, 2026-11-04):
-`G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-702e768_frozen\` — `inputs\`
+Baseline (since the airport smoothing fix #73, 2026-11-08):
+`G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-4fa5e9f_frozen\` — `inputs\`
 (4 OSM layers of the old baseline, DEM N54-N56 E011-E013 = the user's
 library .hgt files, X-Plane 12 Global Scenery +55+012.dsf, the old
 baseline's Ortho4XP.cfg), `expected\` (DSF, dsf2text, 17 masks, logs),
-`SHA256SUMS`, `BASELINE.txt`. Mesh 1,094,388 triangles at min_angle 10,
-no WARNING. Same inputs, previous baseline
+`SHA256SUMS`, `BASELINE.txt`. Mesh 1,094,356 triangles at min_angle 10,
+no WARNING. Same inputs (copied from the previous baseline, hash-checked),
+older baselines: `+55+012_Arc_ZL17_test-702e768_frozen` (#32 to #72:
+1,094,388 triangles; same 17 masks) and
 `+55+012_Arc_ZL17_dev-c85e958_frozen` (before #32: Triangle4XP crashed
 and fell back to min_angle 2, 869,192 triangles; master 3cff870 gives
 that one byte for byte).
@@ -134,7 +136,7 @@ saves the mesh command to tmp\mesh_cmd.json; `pe_stack.py <exe>
 [<MB> <out.exe>]` shows or sets an exe's stack reserve.
 The older `master-3cff870*` baselines (not reproducible, or invalid
 by #7/#9) and the old result folders were deleted on 2026-11-05;
-`G:\Ortho4XP_baseline` holds only the two `_frozen` baselines.
+`G:\Ortho4XP_baseline` holds only the three `_frozen` baselines.
 Test builds go to `G:\Ortho4XP_tests\<tile>_<provider>_<ZL>_<branch>-<sha>\`.
 Test helpers (venv Python; the sims below through sims_in_ws.py) are in
 `G:\Ortho4XP_tests\tools\`: `run_masks.py` (step 2.5 only, optional
@@ -510,6 +512,24 @@ Test results:
   each), `fix/tile-config-bad-value`. `test` @ 2afd392: 304 unit
   tests, pyflakes 0, regression PASS (DSF, 17/17 masks, app log
   identical), sims_in_ws all 15/15, sim_overlay 7/7 (tmp clean on every path).
+- #73 `fix/airport-smoothing-step` @ b2be126 and #74
+  `fix/zones-in-tile` @ 9e26a65 (10 new unit tests; #73's fail on
+  dev: window one column east and one row south). `test` @ 4fa5e9f:
+  314 unit tests, pyflakes 0; regression vs test-702e768_frozen FAIL
+  as expected: masks 17/17 and app log identical, mesh 1,094,356 vs
+  1,094,388 triangles from the same 269,909 input vertices, DSF
+  differs. Explained with the frozen .apt and .mesh: 2,410 moved and
+  3,300 re-elevated vertices, all within 1.3 km of the 10 airports
+  (the intended change); 7,899 re-elevated farther away, median
+  0.012 m (one DSF elevation step), all on water (5,086 of the 5,088
+  that match a .mesh node are water-triangle vertices, the rest are
+  step 3's XP12 water recut nodes). Cause: build_mesh smooths inland
+  water 10 passes over a Python set of triangles; 16 fewer vertices
+  renumber the mesh, so the set order and the sequential means change
+  everywhere. New baseline test-4fa5e9f_frozen (inputs copied from
+  test-702e768_frozen, 15 files hash-checked), DSF 38,698,067 bytes,
+  same hash as the first 4fa5e9f run; repeat run PASS;
+  sims_in_ws all 15/15.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -999,6 +1019,21 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     known setting ("true", "abc") was skipped silently (tile built
     with the value from before); now a logged WARNING. Unknown keys
     stay quiet. The user's 90 tile configs have none.
+73. **FIXED** (`b2be126`, CHANGES OUTPUT, new baseline):
+    smooth_raster_over_airports used (x1 - x0) / nxdem as the DEM
+    sample spacing; the DEM has nxdem samples from x0 to x1 inclusive
+    (DEM.alt_vec divides by nxdem - 1). The smoothing window and the
+    airport image in it sat up to one sample east and south of the
+    airport (a full sample at the tile's east/north edge). Every tile
+    with an airport gets a slightly different DEM there; tiles built
+    before keep the old placement until rebuilt (not worth a rebuild).
+74. **FIXED** (`9e26a65`): the GUI saved a zone in a tile's config
+    when the tile's lat and lon were both among the zone's vertex
+    coordinates truncated to integers (3 copies in O4_Config_Utils):
+    a zone covering the tile with all vertices outside it was lost
+    for the CLI and batch workers, and lat/lon were not told apart.
+    Now zones_in_tile(): polygon overlap with non-zero area. The
+    user's 90 tile configs have no zones.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1057,20 +1092,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
       and blur_mask (~13 s per tile) are each ~1% of a real batch
       (the 66-tile Iceland batch: 10 h, bound by Overpass and imagery
       downloads); both would change mesh or mask bytes.
-13. ~~#64-#72~~ — second review, 2026-11-08. Found and NOT done:
-    - Airport smooth_raster_over_airports steps by (x1-x0)/nxdem
-      instead of /(nxdem-1): the smoothed area is shifted by up to
-      one DEM sample at the east/north edge (small next to the
-      apt_smoothing_pix margin around each airport). Changes the DSF
-      of every tile with an airport (new baseline); the user decides.
-    - Config: the GUI keeps a zone in a tile's config only when the
-      tile's lat and lon both appear among the zone's vertex
-      coordinates truncated to integers (three copies of that test in
-      O4_Config_Utils): a zone covering the tile with all vertices
-      outside it is not saved there, and lat/lon are not told apart
-      (a zone at +12+055 can match tile +55+012). Matters only for
-      zones larger than a tile; the CLI and a batch worker read the
-      tile config.
+13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
+    items left for the user, done the same day (#73 with a new
+    baseline). Noted, not changed: build_mesh's inline water
+    smoothing depends on set order (see the #73 result); making it
+    order-independent would change every tile with inland water.
 
 ## Coding style
 
