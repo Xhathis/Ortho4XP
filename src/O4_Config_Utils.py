@@ -9,6 +9,8 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import E, N, S, W, filedialog, messagebox
 
+from shapely import geometry
+
 import O4_DEM_Utils as DEM
 import O4_File_Names as FNAMES
 import O4_Imagery_Utils as IMG
@@ -88,6 +90,30 @@ def config_compatibility(value) -> str:
     if value and value[-1] in ('"', "'"):
         value = value[:-1]
     return value
+
+
+def zones_in_tile(zones, lat, lon):
+    """The zones (GUI zone_list entries) whose polygon overlaps the tile.
+
+    A zone is [[lat0, lon0, lat1, lon1, ...], zoomlevel, provider]. The
+    old test kept a zone when the tile's lat and lon were both among its
+    vertex coordinates truncated to integers: a zone covering the tile
+    with every vertex outside it was not saved in the tile config, and
+    lat and lon were not told apart (#74). A zone only touching the tile
+    along an edge or at a corner is not in it.
+    """
+    tile_box = geometry.box(lon, lat, lon + 1, lat + 1)
+    found = []
+    for zone in zones:
+        coords = zone[0]
+        polygon = geometry.Polygon(zip(coords[1::2], coords[::2]))
+        if not polygon.is_valid:
+            # A self-crossing zone drawn in the GUI.
+            polygon = polygon.buffer(0)
+        if polygon.intersection(tile_box).area > 0:
+            found.append(zone)
+    return found
+
 
 ################################################################################
 # Initialization to default values
@@ -286,20 +312,11 @@ class Tile:
         config_file_bak = config_file + ".bak"
         try:
             lines = []
+            tile_zones = zones_in_tile(
+                globals()["zone_list"], self.lat, self.lon
+            )
+            _LOGGER.debug("Zones in tile found: %s", tile_zones)
             for var in list_tile_vars:
-                tile_zones = []
-                lat = self.lat
-                lon = self.lon
-                if lat < 0:
-                    lat = lat + 1
-                if lon < 0:
-                    lon = lon + 1
-                for zone in globals()["zone_list"]:
-                    _zone_list = [int(coord) for coord in zone[0]]
-                    _zone_list = set(_zone_list)
-                    if lat in _zone_list and lon in _zone_list:
-                        tile_zones.append(zone)
-                        _LOGGER.debug("Zones in tile found: %s", tile_zones)
                 if var == "zone_list":
                     lines.append(var + "=" + str(tile_zones) + "\n")
                 else:
@@ -984,16 +1001,7 @@ class Ortho4XP_Config(tk.Toplevel):
         except TypeError:
             return 0
         # Find all the zones for the active tile
-        tile_zones = []
-        if lat < 0:
-            lat = lat + 1
-        if lon < 0:
-            lon = lon + 1
-        for zone in globals()["zone_list"]:
-            _zone_list = [int(coord) for coord in zone[0]]
-            _zone_list = set(_zone_list)
-            if lat in _zone_list and lon in _zone_list:
-                tile_zones.append(zone)
+        tile_zones = zones_in_tile(globals()["zone_list"], lat, lon)
         if tile_zones:
             response = messagebox.askyesnocancel("Confirmation", "Save tile zones?", parent=self)
             if response is None:
@@ -1140,17 +1148,8 @@ class Ortho4XP_Config(tk.Toplevel):
         # Apply changes to update global variables
         self.apply_changes("tile")
         # Get zones only for the tile
-        tile_zones = []
-        if lat < 0:
-            lat = lat + 1
-        if lon < 0:
-            lon = lon + 1
-        for zone in globals()["zone_list"]:
-            _zone_list = [int(coord) for coord in zone[0]]
-            _zone_list = set(_zone_list)
-            if lat in _zone_list and lon in _zone_list:
-                tile_zones.append(zone)
-                _LOGGER.debug("Zones saved for tile at %s %s: %s", lat, lon, tile_zones)
+        tile_zones = zones_in_tile(globals()["zone_list"], lat, lon)
+        _LOGGER.debug("Zones saved for tile at %s %s: %s", lat, lon, tile_zones)
         lines = []
         for var in list_tile_vars:
             if var == "zone_list":
