@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 279
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 291
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -494,6 +494,10 @@ Test results:
   Then on dev a3f5bc7 in G:\Ortho4XP: gui_smoke 7/7 (85 tiles on the
   map, 0 callback errors; cfg, .last_gui_params.txt and log
   unchanged). Not run: test_parallel_batch.
+- Low items #57-#62, each `fix/<name>` from dev 3ddeb72. `test` @
+  ba5bb4b: 291 unit tests, pyflakes 0, regression PASS (DSF, 17/17
+  masks, app log identical), sims_in_ws all 15/15. CLI usage errors
+  checked by hand: "55", "55 x", "55 12 Arc", "55 12 Arc zz" exit 2.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -910,6 +914,32 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     a failure in between left no config or a cut one.
     FNAMES.write_text_atomic copies the old file to .bak, writes a
     temp file and os.replace()s it.
+57. **FIXED** (`23c54cc`): an altitude_high/altitude_low patch
+    polygon counted as closed when its ends differed in one coordinate
+    only ((a != b).all(), now .any()); an OBJ8 patch file without
+    ANCHOR stayed open; the large-lake log line swapped lat and lon.
+58. **FIXED** (`be2be64`, moulinette.exe call): sort_mesh (GUI
+    Shift-click on step 2) never wait()ed for moulinette and logged
+    "Moulinette applied" whatever happened; now ERROR with the exit
+    code, a missing tool is reported.
+59. **FIXED** (`3172b4e`): CLI usage errors (missing or non-numeric
+    lat/lon/zoomlevel) exited 0; now 2 (as argparse). Missing Utils
+    folder or an uncreatable data folder exits 1. No bare except left
+    in Ortho4XP.py.
+60. **DONE** (`3a3ad44`): dead code removed: split_polygon,
+    indexed_difference, ensure_ccw, point_to_segment_distance,
+    convolve_periodic, Vector_Map.are_encroached_old (no caller; some
+    broken under shapely 2) and O4_Recut_Water.py (never imported, an
+    older copy of O4_Bathymetry.recut_water_tris).
+61. **FIXED** (`b69107c`): GeoPunt2012/2015 named extent GeoPunt,
+    IAU2008 extent IdF; neither exists. GeoPunt -> Vlanderen; IAU2008
+    (in_GUI=False) has no extent line now (global). A unit test checks
+    every .lay extent exists.
+62. **DONE** (`2115b84`): DEM.alt_vec_nostrict picks its samples by
+    numpy fancy indexing instead of per-point list comprehensions;
+    byte-identical (unit test against the old code), 6x faster for
+    200,000 nodes, but step 1 of +55+012 is unchanged (32.6 vs 32.9 s):
+    elevation lookups are a small part of it.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -953,22 +983,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     batches).
 11. ~~#45, #46~~ — on `dev` (from the Iceland rerun); gui_smoke and
     test_parallel_batch run on it.
-12. ~~#47-#56~~ — from the full code review of 2026-11-07.
-    Open (low priority, from that review; none breaks a tile):
-    - O4_Vector_Map patch shapes test `.all()` where `.any()` is meant;
-      OBJ8 patch file handle not closed; the large-lake log line
-      swaps lat and lon.
-    - MESH.sort_mesh starts its tool without wait().
-    - Ortho4XP.py: exit 0 on bad CLI arguments, 3 bare `except:`.
-    - Dead code: O4_Recut_Water.py, split_polygon, indexed_difference,
-      ensure_ccw, point_to_segment_distance, convolve_periodic,
-      are_encroached_old.
-    - Providers GeoPunt2012/GeoPunt2015/IAU2008 name extents that do
-      not exist.
-    - Speedups: DEM elevation lookup with numpy fancy indexing (7x,
-      byte-identical, measured), insert_edge, blur_mask.
-    - Water quality options: repair invalid OSM polygons instead of
-      dropping them; treat empty relation roles as outer.
+12. ~~#47-#62~~ — from the full code review of 2026-11-07.
+    Open (none breaks a tile; each changes the output, so each needs
+    a new baseline):
+    - Speedups: Vector_Utils insert_edge/are_encroached (~30 s of step
+      1's ~33 s; pure-float version may change float results) and
+      Mask blur_mask (~13 s per tile; a cumsum box filter may change
+      pixels by 1).
+    - Water quality options: repair invalid OSM water polygons
+      (make_valid) instead of dropping them; treat empty relation
+      member roles as outer (as OSM/JOSM do; 22 log lines in the
+      user's batches).
 
 ## Coding style
 
