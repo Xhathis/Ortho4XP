@@ -223,33 +223,12 @@ def attach_surfaces_to_airports(airport_layer, dico_airports):
             if closest_apt and closest_dist < 3500:
                 dico_airports[closest_apt][surface_type].append(wayid)
             else:
-                try:
-                    name = airport_layer.dicosmtags["w"][wayid]["name"]
-                    dico_airports[name] = {
-                        "key_type": "name",
-                        "repr_node": pt_check,
-                        "name": name,
-                        "runway": [],
-                        "runway_as_rel": [],
-                        "taxiway": [],
-                        "apron": [],
-                        "hangar": [],
-                        "boundary": None,
-                    }
-                    dico_airports[name][surface_type].append(wayid)
-                except KeyError:
-                    dico_airports[pt_check] = {
-                        "key_type": "repr_node",
-                        "repr_node": pt_check,
-                        "name": "****",
-                        "runway": [],
-                        "runway_as_rel": [],
-                        "taxiway": [],
-                        "apron": [],
-                        "hangar": [],
-                        "boundary": None,
-                    }
-                    dico_airports[pt_check][surface_type].append(wayid)
+                key = _add_far_airport(
+                    dico_airports,
+                    airport_layer.dicosmtags["w"][wayid].get("name"),
+                    pt_check,
+                )
+                dico_airports[key][surface_type].append(wayid)
     for relid in (
         x
         for x in airport_layer.dicosmr
@@ -296,34 +275,41 @@ def attach_surfaces_to_airports(airport_layer, dico_airports):
         if closest_apt and closest_dist < 3500:
             dico_airports[closest_apt]["runway_as_rel"].append(relid)
         else:
-            try:
-                name = airport_layer.dicosmtags["r"][relid]["name"]
-                dico_airports[name] = {
-                    "key_type": "name",
-                    "repr_node": pt_check,
-                    "name": name,
-                    "runway": [],
-                    "runway_as_rel": [],
-                    "taxiway": [],
-                    "apron": [],
-                    "hangar": [],
-                    "boundary": None,
-                }
-                dico_airports[name]["runway_as_rel"].append(relid)
-            except KeyError:
-                dico_airports[pt_check] = {
-                    "key_type": "repr_node",
-                    "repr_node": pt_check,
-                    "name": "****",
-                    "runway": [],
-                    "runway_as_rel": [],
-                    "taxiway": [],
-                    "apron": [],
-                    "hangar": [],
-                    "boundary": None,
-                }
-                dico_airports[pt_check]["runway_as_rel"].append(relid)
+            key = _add_far_airport(
+                dico_airports,
+                airport_layer.dicosmtags["r"][relid].get("name"),
+                pt_check,
+            )
+            dico_airports[key]["runway_as_rel"].append(relid)
     return
+
+
+################################################################################
+def _add_far_airport(dico_airports, name, pt_check):
+    """Key of a new airport entry for a runway far from all known airports.
+
+    Keyed by the runway's name when it has one that is not a key yet, else
+    by its representative point. A name that already was a key (two
+    airstrips called "Airstrip", or a name equal to another one's ICAO
+    code) used to replace that airport's entry, dropping its surfaces.
+    """
+    if name is not None and name not in dico_airports:
+        key, key_type = name, "name"
+    else:
+        key, key_type = pt_check, "repr_node"
+    dico_airports[key] = {
+        "key_type": key_type,
+        "repr_node": pt_check,
+        "name": name if name is not None else "****",
+        "runway": [],
+        "runway_as_rel": [],
+        "taxiway": [],
+        "apron": [],
+        "hangar": [],
+        "boundary": None,
+    }
+    return key
+
 
 ################################################################################
 def sort_and_reconstruct_runways(tile, airport_layer, dico_airports):
@@ -418,7 +404,6 @@ def sort_and_reconstruct_runways(tile, airport_layer, dico_airports):
                     )
                 else:
                     UI.logprint(
-                        1,
                         "Bad runway (geometry invalid or going back over ",
                         "itself) close to",
                         airport,
@@ -518,7 +503,6 @@ def sort_and_reconstruct_runways(tile, airport_layer, dico_airports):
                 )
             else:
                 UI.logprint(
-                    1,
                     "Bad runway (geometry invalid or going back over itself) ",
                     "close to",
                     airport,
@@ -1184,7 +1168,9 @@ def encode_runways_taxiways_and_aprons(
                         # only; the others still define its outline.
                         pass
                 abscissae = sorted(set(abscissae))
-                way = numpy.round(
+                # Not `way`: that is the centerline, still needed for the
+                # next piece of a runway cut by the tile edge.
+                outline = numpy.round(
                     numpy.array(
                         [
                             boundary.interpolate(x).coords[0]
@@ -1196,11 +1182,11 @@ def encode_runways_taxiways_and_aprons(
                 alti_way = numpy.array(
                     [
                         VECT.weighted_alt(node, alt_idx, alt_dico, tile.dem)
-                        for node in way
+                        for node in outline
                     ]
-                ).reshape((len(way), 1))
+                ).reshape((len(outline), 1))
                 vector_map.insert_way(
-                    numpy.hstack([way, alti_way]), "RUNWAY", check=True
+                    numpy.hstack([outline, alti_way]), "RUNWAY", check=True
                 )
                 for (abs1, abs2) in traverses:
                     trav = numpy.round(
@@ -1305,7 +1291,7 @@ def encode_runways_taxiways_and_aprons(
                 )
                 way = numpy.round(VECT.refine_way(way, 15), 7)
                 apron_pol = geometry.Polygon(way)
-                if not apron_pol.is_empty and runway_pol.is_valid:
+                if not apron_pol.is_empty and apron_pol.is_valid:
                     alti_way = numpy.array(
                         [
                             VECT.weighted_alt(node, alt_idx, alt_dico, tile.dem)
