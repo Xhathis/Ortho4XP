@@ -36,7 +36,7 @@ if __name__ == '__main__':
     UI.safe_console_streams()
     if not os.path.isdir(FNAMES.Utils_dir):
         print("Missing ", FNAMES.Utils_dir, "directory, check your install. Exiting.")
-        sys.exit()
+        sys.exit(1)
     for directory in (FNAMES.Preview_dir, FNAMES.Provider_dir, FNAMES.Extent_dir, FNAMES.Filter_dir, FNAMES.OSM_dir,
                       FNAMES.Mask_dir, FNAMES.Imagery_dir, FNAMES.Elevation_dir, FNAMES.Geotiff_dir, FNAMES.Patch_dir,
                       FNAMES.Tile_dir, FNAMES.Tmp_dir):
@@ -44,9 +44,9 @@ if __name__ == '__main__':
             try:
                 os.makedirs(directory)
                 print("Creating missing directory", directory)
-            except:
-                print("Could not create required directory", directory, ". Exit.")
-                sys.exit()
+            except OSError as e:
+                print("Could not create required directory", directory, f"({e}). Exit.")
+                sys.exit(1)
     IMG.initialize_extents_dict()
     IMG.initialize_color_filters_dict()
     IMG.initialize_providers_dict()
@@ -78,13 +78,15 @@ if __name__ == '__main__':
             print("Crash!")
             sys.exit(2)
     else:  # sequel is only concerned with command line
+        # A usage error exits 2 (as argparse does): it used to exit 0, so a
+        # script driving builds took a typo for a successful build.
         if len(sys.argv) < 3:
-            print(cmd_line); sys.exit()
+            print(cmd_line); sys.exit(2)
         try:
             lat = int(sys.argv[1])
             lon = int(sys.argv[2])
-        except:
-            print(cmd_line); sys.exit()
+        except ValueError:
+            print(cmd_line); sys.exit(2)
         if len(sys.argv) == 3:
             # This form builds from the tile's own config. Tile() alone only
             # holds the global defaults (no provider, no zoom level), which
@@ -104,8 +106,8 @@ if __name__ == '__main__':
                 tile = CFG.Tile(lat, lon, '')
                 tile.default_website = provider_code
                 tile.default_zl = zoomlevel
-            except:
-                print(cmd_line); sys.exit()
+            except (IndexError, ValueError):
+                print(cmd_line); sys.exit(2)
         try:
             # Each step raises UI.red_flag when it fails or is interrupted;
             # don't run the next step on top of missing or stale data, and
