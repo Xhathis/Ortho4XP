@@ -579,9 +579,9 @@ def include_water(vector_map, tile):
                 1,
                 "      * ",
                 "Some large OSM water patch close to lat=",
-                "{:.2f}".format(pt[1] + tile.lon),
+                "{:.2f}".format(pt[1] + tile.lat),
                 "lon=",
-                "{:.2f}".format(pt[0] + tile.lat),
+                "{:.2f}".format(pt[0] + tile.lon),
                 "will be masked due to its large area of",
                 area,
                 "km^2.",
@@ -819,7 +819,7 @@ def include_patches(vector_map, tile):
                         )
                 elif "altitude_high" in wtags:
                     cplx_way = True
-                    if len(way) != 5 or (way[0] != way[-1]).all():
+                    if len(way) != 5 or (way[0] != way[-1]).any():
                         UI.vprint(
                             1,
                             "    Wrong number of nodes or non closed way for ",
@@ -951,19 +951,18 @@ def include_patches(vector_map, tile):
         for pfile_name in os.listdir(os.path.join(patch_dir, pdir_name)):
             pfile_namelong = os.path.join(patch_dir, pdir_name, pfile_name)
             try:
-                pfile = open(pfile_namelong, "r")
+                with open(pfile_namelong, "r") as pfile:
+                    firstline = pfile.readline()
             except OSError:
                 continue
-            firstline = pfile.readline()
-            if not "ANCHOR" in firstline:
+            if "ANCHOR" not in firstline:
                 UI.vprint(
                     1,
                     "     Object ",
                     pfile_name,
-                    " is missing and ANCHOR in first line, skipping it.",
+                    " is missing an ANCHOR in its first line, skipping it.",
                 )
                 continue
-            pfile.close()
             try:
                 (lon_anchor, lat_anchor, alt_anchor, heading_anchor) = [
                     float(x) for x in firstline.split()[1:]
