@@ -69,14 +69,13 @@ def community_mesh(tile):
     UI.vprint(0, "Querying", url, "...")
     try:
         r = requests.get(url, timeout=30)
-        if "[200]" in str(r):
+        if r.status_code == 200:
             UI.vprint(0, "We've got something !")
-            f = open(
+            with open(
                 FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon) + ".7z",
                 "wb",
-            )
-            f.write(r.content)
-            f.close()
+            ) as f:
+                f.write(r.content)
             if subprocess.call(
                 [
                     unzip_cmd.strip(),
@@ -97,13 +96,13 @@ def community_mesh(tile):
             )
             UI.timings_and_bottom_line(timer)
             return 1
-        elif "[40" in str(r):
+        elif 400 <= r.status_code < 500:
             UI.exit_message_and_bottom_line(
                 "\nSORRY: Community server does not propose that mesh: "
                 + str(r)
             )
             return 0
-        elif "[50" in str(r):
+        elif r.status_code >= 500:
             UI.exit_message_and_bottom_line(
                 "\nSORRY: Community server seems to be down or struggling: "
                 + str(r)
@@ -603,10 +602,12 @@ def build_mesh(tile):
                 )
                 return 0
         except Exception as e:
-            print(e)
+            # The cause used to go to the console only (print), not to
+            # Ortho4XP.log: a parallel batch deletes a worker's console log.
             UI.exit_message_and_bottom_line(
                 "\nERROR: Could not determine the appropriate source. Please ",
                 "check your custom_dem entry.",
+                f"({type(e).__name__}: {e})",
             )
             return 0
     else:
@@ -632,10 +633,12 @@ def build_mesh(tile):
                 )
                 tile.dem.write_to_file(FNAMES.alt_file(tile))
         except Exception as e:
-            print(e)
+            # The cause used to go to the console only (print), not to
+            # Ortho4XP.log: a parallel batch deletes a worker's console log.
             UI.exit_message_and_bottom_line(
                 "\nERROR: Could not determine the appropriate source. Please ",
                 "check your custom_dem entry.",
+                f"({type(e).__name__}: {e})",
             )
             return 0
     try:
