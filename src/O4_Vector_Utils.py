@@ -118,6 +118,7 @@ class Vector_Map:
     def insert_edge(self, id0, id1, marker, check=True):
         if not check:
             self.create_edge(id0, id1, marker)
+            return
         if self.update_edge(id0, id1, marker):
             return
         weight_list = []
@@ -574,8 +575,16 @@ def MultiPolygon_to_Indexed_Polygons(multipol, merge_overlappings=True):
                 [dico_pol[polid] for polid in ids_to_merge] + [pol]
             )
         except Exception as e:
+            # The polygon is left out (e.g. a lake missing from the mesh):
+            # say so in the log, with where it is, not only on the console.
             UI.bug_report()
-            UI.vprint(2, e)
+            (xmin, ymin, xmax, ymax) = pol.bounds
+            UI.lvprint(
+                1, "WARNING: a polygon could not be merged with its",
+                "neighbours and is left out (tile-relative bounds",
+                f"{xmin:.4f}, {ymin:.4f} - {xmax:.4f}, {ymax:.4f};",
+                f"{type(e).__name__}: {e}).",
+            )
             return id_pol
         for polid in ids_to_merge:
             idx_pol.delete(polid, dico_pol[polid].bounds)
