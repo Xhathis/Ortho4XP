@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 314
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 325
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -201,11 +201,17 @@ Tiles\zOrtho4XP_+55+012, one of their 9 test tiles (+54..+56 /
 and log. Use sims_in_ws.py. Only test_batch_order, test_parallel_batch
 and gui_smoke still run in G:\Ortho4XP (other tiles; see their notes).
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
-settings (curvature_tol 1.0, limit_tris 4, mask_zl 15, airport cover
-at ZL18 for all airports (cover_airports_with_highres=True,
-apt_smoothing_pix 8; was ICAO only, see .before-bushflying.bak), road_level 3,
-apt_curv_tol 0.5 / 2 km, XP12 water, batch_parallel_tiles 3, ...;
-cleaning_level 3 since 2026-11-05 14:22, see #42).
+settings; on 2026-11-08: curvature_tol 1.0, limit_tris 5, mesh_zl 19,
+min_angle 10, mask_zl 16, airport cover at ZL18 for all airports
+(cover_airports_with_highres=True, cover_extent 3 km, apt_smoothing_pix
+8; was ICAO only, see .before-bushflying.bak), road_level 4,
+apt_curv_tol 0.5 / 2 km, coast_curv_tol 1.0 (= curvature_tol, so no
+effect, #55), XP12 water, use_decal_on_terrain False,
+distance_masks_too False, batch_parallel_tiles 3, cleaning_level 3
+(since 2026-11-05 14:22, see #42). All 90 tile configs equal it; the
+GUI gives GO2 at ZL16. Tile configs win over the global one: a changed
+global setting reaches an existing tile only when its tile config is
+changed too (or deleted before the rebuild).
 Never leave a test config in place. Ortho4XP.cfg and *.lnk are in
 .gitignore (the user's own files). The values before the 2026-11-03
 tuning are in Ortho4XP.cfg.before-tuning.bak
@@ -530,6 +536,12 @@ Test results:
   test-702e768_frozen, 15 files hash-checked), DSF 38,698,067 bytes,
   same hash as the first 4fa5e9f run; repeat run PASS;
   sims_in_ws all 15/15.
+- Third pass 2026-11-08 (config review for low-level flying): #75
+  `fix/mesh-cap-warning` @ e82d50c, #76 `fix/decal-land-only` @
+  5534d9c (11 new unit tests; #76's fail on dev). `test` @ 2125eb4:
+  325 unit tests, pyflakes 0, regression PASS against
+  test-4fa5e9f_frozen (DSF, 17/17 masks, app log identical: no
+  WARNING), sim_mesh_failure as designed.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1034,6 +1046,16 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     for the CLI and batch workers, and lat/lon were not told apart.
     Now zones_in_tile(): polygon overlap with non-zero area. The
     user's 90 tile configs have no zones.
+75. **FIXED** (`e82d50c`, log only): limit_tris goes to Triangle4XP as
+    a cap on Steiner points (-S); at the cap Triangle stops refining
+    silently, so parts of the mesh stay coarser than curvature_tol.
+    build_mesh now logs a WARNING (steiner_cap_reached; the bundled
+    triangle.exe adds exactly int(S) points, checked by a test). None
+    of the user's 90 tiles came near it (largest DSF 67 MB, ~1.9 M
+    triangles; cap ~5.2 M at limit_tris 5).
+76. **FIXED** (`5534d9c`): use_decal_on_terrain put the decal on
+    masked sea terrain too (tri_type != 1); now land only, as the
+    option is documented. No effect with the option off.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1092,6 +1114,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
       and blur_mask (~13 s per tile) are each ~1% of a real batch
       (the 66-tile Iceland batch: 10 h, bound by Overpass and imagery
       downloads); both would change mesh or mask bytes.
+14. ~~#75, #76~~ — third pass with the config review, 2026-11-08.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
