@@ -1017,6 +1017,22 @@ def has_data(
 
 ################################################################################
 def http_request_to_image(width, height, url, request_headers, http_session):
+    # Sessions made here after a connection failure belong to this call and
+    # are closed when it ends (with their sockets); the one passed in is
+    # shared by all the download threads of the texture and stays open.
+    own_sessions = []
+    try:
+        return _http_request_to_image(
+            width, height, url, request_headers, http_session, own_sessions
+        )
+    finally:
+        for session in own_sessions:
+            session.close()
+
+
+def _http_request_to_image(
+    width, height, url, request_headers, http_session, own_sessions
+):
     UI.vprint(
         3, "HTTP request issued :", url, "\nRequest headers :", request_headers
     )
@@ -1098,6 +1114,7 @@ def http_request_to_image(width, height, url, request_headers, http_session):
                 break
             # trying a new session ?
             http_session = requests.Session()
+            own_sessions.append(http_session)
             time.sleep(2)
             if UI.red_flag:
                 return (0, "Stopped")
@@ -1378,9 +1395,12 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
     else:
         max_threads = 16
     # and finally activate them
-    success = parallel_execute(
-        get_and_paste_wmts_part, download_queue, max_threads, progress
-    )
+    try:
+        success = parallel_execute(
+            get_and_paste_wmts_part, download_queue, max_threads, progress
+        )
+    finally:
+        http_session.close()
     # once out big_image has been filled and we return it
     return (success, big_image)
 
@@ -1516,14 +1536,17 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
         max_threads = int(provider["max_threads"])
     else:
         max_threads = 16
-    if provider["request_type"] == "wms":
-        success = parallel_execute(
-            get_and_paste_wms_part, download_queue, max_threads
-        )
-    elif provider["request_type"] in ["wmts", "tms", "local_tms"]:
-        success = parallel_execute(
-            get_and_paste_wmts_part, download_queue, max_threads
-        )
+    try:
+        if provider["request_type"] == "wms":
+            success = parallel_execute(
+                get_and_paste_wms_part, download_queue, max_threads
+            )
+        elif provider["request_type"] in ["wmts", "tms", "local_tms"]:
+            success = parallel_execute(
+                get_and_paste_wmts_part, download_queue, max_threads
+            )
+    finally:
+        http_session.close()
     # We modify big_image if necessary
     if warp_needed:
         UI.vprint(3, "Warp needed")
