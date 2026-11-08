@@ -779,6 +779,18 @@ def build_mesh(tile):
         UI.exit_message_and_bottom_line()
         return 0
 
+    if steiner_cap_reached(len(vertices) // 6, input_nodes, max_steiner):
+        # Triangle4XP stops inserting points at the -S cap without a word:
+        # the refinement is then cut short wherever it had not got to yet,
+        # so parts of the tile are coarser than curvature_tol asks.
+        UI.lvprint(
+            0, "WARNING: Triangle4XP stopped refining tile",
+            FNAMES.short_latlon(tile.lat, tile.lon),
+            f"at the limit_tris cap ({tile.limit_tris} M triangles):",
+            "parts of the mesh are coarser than curvature_tol asks.",
+            "Raise limit_tris or curvature_tol for this tile.",
+        )
+
     write_mesh_file(tile, vertices)
     #
     to_delete = []
@@ -903,6 +915,17 @@ def triangulate(name, path_to_Ortho4XP_dir):
         print("\nERROR: triangle crashed, check osm mask data.\n")
         return 0
     return 1
+
+
+##############################################################################
+def steiner_cap_reached(final_vertices, input_vertices, max_steiner):
+    """True when Triangle4XP used up its -S budget of Steiner points.
+
+    Triangle adds exactly int(S) points when the cap stops it (checked with
+    the bundled triangle.exe); duplicate input vertices it drops make the
+    count a little lower, hence the 0.1 % slack.
+    """
+    return final_vertices - input_vertices >= 0.999 * int(max_steiner)
 
 
 ##############################################################################
