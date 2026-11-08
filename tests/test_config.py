@@ -57,12 +57,23 @@ def test_read_tile_config_types(tile):
     assert tile.custom_dem == ""
 
 
-def test_read_tile_config_skips_bad_lines(tile):
+def test_read_tile_config_skips_bad_lines(tile, monkeypatch):
+    logged = []
+    monkeypatch.setattr(CFG.UI, "lvprint", lambda level, *a: logged.append(a))
     before = tile.curvature_tol
-    _write_cfg(tile, "no_equals_sign\nunknown_key=1\ncurvature_tol=abc\ndefault_zl=18\n")
+    before_bool = tile.use_masks_for_inland
+    _write_cfg(tile, "no_equals_sign\nunknown_key=1\ncurvature_tol=abc\n"
+               "use_masks_for_inland=true\ndefault_zl=18\n")
     assert tile.read_from_config() == 1
     assert tile.curvature_tol == before  # bad value: kept the old one
+    assert tile.use_masks_for_inland == before_bool
     assert tile.default_zl == 18
+    # #72: a known setting with a bad value is a logged WARNING, an unknown
+    # key or a line without "=" is not.
+    text = [" ".join(map(str, a)) for a in logged]
+    assert len(text) == 2
+    assert "curvature_tol=abc" in text[0] and "WARNING" in text[0]
+    assert "use_masks_for_inland=true" in text[1]
 
 
 def test_read_old_style_config(tile):

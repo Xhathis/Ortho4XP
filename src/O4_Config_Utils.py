@@ -242,9 +242,21 @@ class Tile:
                             exec("self." + line)
                         except Exception:
                             pass
+                    elif line.split("=", 1)[0] in cfg_vars:
+                        # A known setting with a value that cannot be used
+                        # (e.g. "true" for a bool): the build goes on with
+                        # the value from before, and the tile config wins
+                        # over the GUI, so say so (#72).
+                        key = line.split("=", 1)[0]
+                        UI.lvprint(
+                            1, "WARNING: tile config", config_file,
+                            "has an invalid line:", line,
+                            f"({type(e).__name__}: {e}); keeping",
+                            key + "=" + repr(getattr(self, key, None)) + ".",
+                        )
                     else:
+                        # Unknown key (older or newer version) or no "=".
                         UI.vprint(2, e)
-                        pass
             f.close()
             return 1
         except (OSError, UnicodeDecodeError):
