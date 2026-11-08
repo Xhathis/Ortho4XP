@@ -516,6 +516,33 @@ class OSM_layer:
         return 1
 
 
+################################################################################
+def read_custom_osm_dir(osm_layer, src_dir, merged_file):
+    """Read every OSM file of a custom coastline/water folder into osm_layer.
+
+    The merged result is written to merged_file once, after all files were
+    read (it was rewritten after each one), and only when every file could
+    be read: the merged file is used instead of the folder from then on, so
+    a cut or broken input file would have been cached for good. Returns
+    True when all files were read.
+    """
+    for osm_file in os.listdir(src_dir):
+        UI.vprint(2, "      ", osm_file)
+        if not osm_layer.update_dicosm(
+            os.path.join(src_dir, osm_file), input_tags=None, target_tags=None
+        ):
+            UI.lvprint(
+                0, "   ERROR: Could not read the custom OSM file",
+                os.path.join(src_dir, osm_file) + ", stopping.",
+            )
+            return False
+    if not osm_layer.write_to_file(merged_file):
+        # The layer itself is complete; only the shortcut for the next run
+        # is missing.
+        UI.lvprint(1, "WARNING: Could not write", merged_file)
+    return True
+
+
 def OSM_queries_to_OSM_layer(
     queries,
     osm_layer,

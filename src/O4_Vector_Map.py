@@ -455,14 +455,10 @@ def include_sea(vector_map, tile):
             "    * User defined custom coastline data detected ",
             "(multiple files).",
         )
-        for osm_file in os.listdir(custom_coastline_dir):
-            UI.vprint(2, "      ", osm_file)
-            sea_layer.update_dicosm(
-                os.path.join(custom_coastline_dir, osm_file),
-                input_tags=None,
-                target_tags=None,
-            )
-            sea_layer.write_to_file(custom_coastline)
+        if not OSM.read_custom_osm_dir(
+            sea_layer, custom_coastline_dir, custom_coastline
+        ):
+            return 0
         custom_source = True
     else:
         queries = ['way["natural"="coastline"]']
@@ -601,14 +597,10 @@ def include_water(vector_map, tile):
         UI.vprint(
             1, "    * User defined custom water data detected (multiple files)."
         )
-        for osm_file in os.listdir(custom_water_dir):
-            UI.vprint(2, "      ", osm_file)
-            water_layer.update_dicosm(
-                os.path.join(custom_water_dir, osm_file),
-                input_tags=None,
-                target_tags=None,
-            )
-            water_layer.write_to_file(custom_water)
+        if not OSM.read_custom_osm_dir(
+            water_layer, custom_water_dir, custom_water
+        ):
+            return 0
     else:
         queries = [
             'rel["natural"="water"]',

@@ -185,14 +185,10 @@ def build_curv_tol_weight_map(tile, weight_array):
                 "    * User defined custom coastline data detected ",
                 "(multiple files).",
             )
-            for osm_file in os.listdir(custom_coastline_dir):
-                UI.vprint(2, "      ", osm_file)
-                sea_layer.update_dicosm(
-                    os.path.join(custom_coastline_dir, osm_file),
-                    input_tags=None,
-                    target_tags=None,
-                )
-                sea_layer.write_to_file(custom_coastline)
+            if not OSM.read_custom_osm_dir(
+                sea_layer, custom_coastline_dir, custom_coastline
+            ):
+                return 0
         else:
             queries = ['way["natural"="coastline"]']
             tags_of_interest = []
