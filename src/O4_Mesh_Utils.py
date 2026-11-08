@@ -831,15 +831,31 @@ def sort_mesh(tile):
     ]
     UI.vprint(1, "-> Reorganizing mesh triangles.")
     timer = time.time()
-    moulinette = subprocess.Popen(
-        sort_mesh_cmd_list, stdout=subprocess.PIPE, bufsize=0, env=UI.subprocess_env()
-    )
+    try:
+        moulinette = subprocess.Popen(
+            sort_mesh_cmd_list, stdout=subprocess.PIPE, bufsize=0,
+            env=UI.subprocess_env(),
+        )
+    except OSError as e:
+        UI.exit_message_and_bottom_line(
+            "\nERROR: Could not start moulinette:", e
+        )
+        return 0
     while True:
         line = moulinette.stdout.readline()
         if not line:
             break
         else:
-            print(line.decode("utf-8")[:-1])
+            print(line.decode("utf-8", errors="replace")[:-1])
+    # The pipe closes when the tool ends, but its exit code is only known
+    # after wait(); a crash used to be reported as "Moulinette applied".
+    if moulinette.wait() != 0:
+        UI.exit_message_and_bottom_line(
+            "\nERROR: moulinette failed for tile",
+            FNAMES.short_latlon(tile.lat, tile.lon),
+            f"(exit code {moulinette.returncode & 0xFFFFFFFF:#x}).",
+        )
+        return 0
     UI.timings_and_bottom_line(timer)
     UI.logprint(
         "Moulinette applied for tile lat=",
