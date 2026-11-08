@@ -927,8 +927,11 @@ def smooth_raster_over_airports(tile, dico_airports, preserve_boundary=True):
     x1 = tile.dem.x1
     y0 = tile.dem.y0
     y1 = tile.dem.y1
-    xstep = (x1 - x0) / tile.dem.nxdem
-    ystep = (y1 - y0) / tile.dem.nydem
+    # The DEM has nxdem samples from x0 to x1 inclusive, so nxdem - 1
+    # intervals (as in DEM.alt_vec): dividing by nxdem put the smoothed
+    # area up to one sample east/south of the airport.
+    xstep = (x1 - x0) / (tile.dem.nxdem - 1)
+    ystep = (y1 - y0) / (tile.dem.nydem - 1)
     upscale = max(
         ceil(ystep * GEO.lat_to_m / 10), 1
     )  # target 10m of pixel size at most to avoiding aliasing
