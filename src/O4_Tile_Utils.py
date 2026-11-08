@@ -7,7 +7,6 @@ import subprocess
 import queue
 import threading
 import traceback
-from collections import defaultdict
 import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
 import O4_Imagery_Utils as IMG
@@ -55,7 +54,6 @@ def download_textures(
 
     progress_lock = threading.Lock()
     progress_state = {"done": 0, "pending": 0}
-    attempts = defaultdict(int)
     interrupted = False
     max_attempts = 3
 
@@ -79,28 +77,35 @@ def download_textures(
             progress_state["pending"] += 1
             _update_progress_locked()
 
-        try:
-            ok = IMG.build_jpeg_ortho(tile, *attrs)
-        except Exception as err:
-            UI.vprint(2, f"Download failed: {err}")
-            ok = 0
+        # The attempts run here, in this worker. They used to go back on
+        # download_queue after "pending" had dropped to 0, so the loop below
+        # could see an empty queue first and send "quit": the retried
+        # texture was then never downloaded nor listed in failed, and the
+        # DSF was activated without it.
+        ok = 0
+        for attempt in range(1, max_attempts + 1):
+            try:
+                ok = IMG.build_jpeg_ortho(tile, *attrs)
+            except Exception as err:
+                UI.vprint(2, f"Download failed: {err}")
+                ok = 0
+            if ok or UI.red_flag:
+                break
+            if attempt < max_attempts:
+                UI.vprint(
+                    2, "Retrying texture",
+                    FNAMES.dds_file_name_from_attributes(*attrs),
+                    f"(attempt {attempt + 1} of {max_attempts}).",
+                )
 
-        should_retry = False
         with progress_lock:
             progress_state["pending"] -= 1
             if ok:
                 progress_state["done"] += 1
-                attempts.pop(attrs, None)
-            else:
-                attempt = attempts[attrs] + 1
-                attempts[attrs] = attempt
-                should_retry = attempt < max_attempts and not UI.red_flag
-                if not should_retry:
-                    attempts.pop(attrs, None)
-                    if not UI.red_flag and failed is not None:
-                        failed.append(attrs)
+            elif not UI.red_flag and failed is not None:
+                failed.append(attrs)
             _update_progress_locked()
-        if not ok and not should_retry and not UI.red_flag:
+        if not ok and not UI.red_flag:
             UI.lvprint(
                 1, "ERROR: Could not get texture",
                 FNAMES.dds_file_name_from_attributes(*attrs),
@@ -109,10 +114,6 @@ def download_textures(
 
         if ok:
             convert_queue.put((tile, *attrs))
-        elif should_retry:
-            download_queue.put(attrs)
-            with progress_lock:
-                _update_progress_locked()
 
         if UI.red_flag:
             interrupted = True
