@@ -575,6 +575,12 @@ def initialize_combined_providers_dict():
                             b = 1
                         elif color_code[0] == "D":
                             b = -1
+                        else:
+                            # Neither a named filter nor an L/D code: only
+                            # this line is skipped (below). Without this, b
+                            # was unbound and the UnboundLocalError dropped
+                            # the whole combined provider (#64).
+                            raise ValueError(color_code)
                         brightness = b * float(color_code[1:3])
                         contrast = float(color_code[4:6])
                         color_filters_dict[color_code] = [
