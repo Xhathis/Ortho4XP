@@ -339,10 +339,10 @@ def create_terrain_file(
                 + "\n"
             )
 
-        # Hack/TODO
-        # Should we use decals on ocean floor ? 
-        #if (not tri_type) and (tile.use_decal_on_terrain):
-        if (tri_type != 1) and (tile.use_decal_on_terrain):
+        # Land only, as use_decal_on_terrain is documented ("all but water
+        # triangles"): tri_type 2 (masked sea, or inland water with
+        # use_masks_for_inland) got the green-key grass detail too (#76).
+        if (tri_type == 0) and (tile.use_decal_on_terrain):
             f.write("DECAL_LIB lib/g10/decals/maquify_2_green_key.dcl\n")
 
         if tri_type in (1, 2):
