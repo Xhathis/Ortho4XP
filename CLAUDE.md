@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 292
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 304
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -503,6 +503,13 @@ Test results:
   polygonised. `test` @ 2bd7c60: 292 unit tests, pyflakes 0,
   regression PASS (DSF, 17/17 masks, app log identical). sims_in_ws
   not run: no sim reads an OSM file without target tags.
+- Second review 2026-11-08 (#64-#72), each `fix/<name>` from dev
+  2835720 with unit tests where testable (12 new; #65's, #64's and
+  #72's fail on dev): `fix/comb-color-code`, `fix/download-retry-race`,
+  `fix/airport-small`, `fix/small-leftovers` (#67-#71, one commit
+  each), `fix/tile-config-bad-value`. `test` @ 2afd392: 304 unit
+  tests, pyflakes 0, regression PASS (DSF, 17/17 masks, app log
+  identical), sims_in_ws all 15/15, sim_overlay 7/7 (tmp clean on every path).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -954,6 +961,44 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     LowRes/Finland), so a combined provider using them failed. Normal
     layer reads pass target tags and were never affected. Now
     discard(). Found while measuring the water options (below).
+    Second review 2026-11-08 (audit of the 145 except handlers from
+    #3, then the modules the first review read only in part):
+64. **FIXED** (`3260df9`): a combined provider line whose color code
+    was neither a named filter nor L/D left `b` unbound; the
+    UnboundLocalError dropped the whole combined provider instead of
+    that line. Second (and last) wrong narrowing of #3.
+65. **FIXED** (`ff95ab4`): download_textures put a failed texture back
+    on the queue after its "pending" count had dropped, so the main
+    loop could send "quit" first: the retried texture was neither
+    downloaded nor in `failed`, and the DSF was activated without it
+    (#20 class, timing dependent). The 3 attempts now run inside the
+    worker's task.
+66. **FIXED** (`f3989a6`): Airport_Utils: a runway > 3.5 km from all
+    airports named like an existing key (two "Airstrip"s, an ICAO
+    code) replaced that airport (_add_far_airport); an 'include'
+    apron was tested with runway_pol.is_valid (NameError without
+    runways -> apron dropped); the runway centerline was overwritten
+    by the first piece's outline (second piece of a runway cut by the
+    tile edge); two "Bad runway" log lines began with "1".
+67. **FIXED** (`2cd4ec5`): overlay tmp text files closed on errors
+    (with), so Windows can delete them.
+68. **FIXED** (`ecf8e5a`): build_mesh's custom_dem ERROR now carries
+    the cause (was print() to the console only); community_mesh tests
+    r.status_code instead of str(Response).
+69. **FIXED** (`9b1d867`, log only): merge_pol's dropped polygon
+    (unary_union failure) is a logged WARNING with its bounds;
+    insert_edge(check=False) returns (output unchanged).
+70. **FIXED** (`5c4916d`): requests sessions closed (one per texture,
+    and the ones made after a connection failure).
+71. **FIXED** (`8c966a1`): custom coastline/water folders: the merged
+    file was rewritten after every input file and written even when a
+    file failed to parse, then used for good instead of the folder.
+    OSM.read_custom_osm_dir: one write, an unreadable file stops the
+    step with an ERROR naming it.
+72. **FIXED** (`1088576`): a tile config line with a bad value for a
+    known setting ("true", "abc") was skipped silently (tile built
+    with the value from before); now a logged WARNING. Unknown keys
+    stay quiet. The user's 90 tile configs have none.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1012,6 +1057,20 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
       and blur_mask (~13 s per tile) are each ~1% of a real batch
       (the 66-tile Iceland batch: 10 h, bound by Overpass and imagery
       downloads); both would change mesh or mask bytes.
+13. ~~#64-#72~~ — second review, 2026-11-08. Found and NOT done:
+    - Airport smooth_raster_over_airports steps by (x1-x0)/nxdem
+      instead of /(nxdem-1): the smoothed area is shifted by up to
+      one DEM sample at the east/north edge (small next to the
+      apt_smoothing_pix margin around each airport). Changes the DSF
+      of every tile with an airport (new baseline); the user decides.
+    - Config: the GUI keeps a zone in a tile's config only when the
+      tile's lat and lon both appear among the zone's vertex
+      coordinates truncated to integers (three copies of that test in
+      O4_Config_Utils): a zone covering the tile with all vertices
+      outside it is not saved there, and lat/lon are not told apart
+      (a zone at +12+055 can match tile +55+012). Matters only for
+      zones larger than a tile; the CLI and a batch worker read the
+      tile config.
 
 ## Coding style
 
