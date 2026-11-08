@@ -378,10 +378,12 @@ class OSM_layer:
                         self.dicosmrorig[osmid]["outer"]
                         + self.dicosmrorig[osmid]["inner"]
                     ):
-                        try:
-                            self.dicosmfirst["w"].remove(wayid)
-                        except ValueError:
-                            pass
+                        # A way shared by two relations was already taken out
+                        # by the first one. dicosmfirst["w"] is a set, so
+                        # discard(): narrowing the old bare except to
+                        # ValueError (set.remove raises KeyError) made such
+                        # files crash (#63).
+                        self.dicosmfirst["w"].discard(wayid)
                 if not self.dicosmr[osmid]["outer"]:
                     del self.dicosmr[osmid]
                     del self.dicosmrorig[osmid]
