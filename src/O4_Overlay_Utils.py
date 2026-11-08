@@ -163,80 +163,70 @@ def _extract_overlay(lat, lon):
     if error:
         return error
     UI.vprint(1, "-> Selecting overlays for copy/paste")
-    f = open(
-        os.path.join(
-            FNAMES.Tmp_dir, FNAMES.short_latlon(lat, lon) + "_tmp_dsf.txt"
-        ),
-        "r",
-    )
-    g = open(
-        os.path.join(
-            FNAMES.Tmp_dir,
-            FNAMES.short_latlon(lat, lon) + "_tmp_dsf_without_mesh.txt",
-        ),
-        "w",
-    )
-    line = f.readline()
-    g.write("PROPERTY sim/overlay 1\n")
-    pol_type = 0
-    pol_dict = {}
-    exclude_set_updated = False
-    full_ovl_exclude_pol = set(ovl_exclude_pol)
-    while line:
-        if "PROPERTY" in line:
-            g.write(line)
-        elif "POLYGON_DEF" in line:
-            level = 2 if "facade" not in line else 3
-            pol_dict[pol_type] = line.split()[1]
-            UI.vprint(level, pol_type, ":", pol_dict[pol_type])
-            pol_type += 1
-            g.write(line)
-        elif "NETWORK_DEF" in line:
-            g.write(line)
-        elif "BEGIN_POLYGON" in line:
-            if not exclude_set_updated:
-                tmp = set()
-                for item in full_ovl_exclude_pol:
-                    if isinstance(item, int):
-                        tmp.add(item)
-                    elif isinstance(item, str):
-                        if item and item[0] == "!":
-                            item = item[1:]
-                            tmp = tmp.union(
-                                [k for k in pol_dict if item not in pol_dict[k]]
-                            )
-                        else:
-                            tmp = tmp.union(
-                                [k for k in pol_dict if item in pol_dict[k]]
-                            )
-                full_ovl_exclude_pol = tmp
-                exclude_set_updated = True
-            pol_type = int(line.split()[1])
-            if pol_type not in full_ovl_exclude_pol:
-                while line and ("END_POLYGON" not in line):
-                    g.write(line)
-                    line = f.readline()
-                g.write(line)
-            else:
-                while line and ("END_POLYGON" not in line):
-                    line = f.readline()
-        elif "BEGIN_SEGMENT" in line:
-            road_type = int(line.split()[2])
-            if (
-                road_type not in ovl_exclude_net
-                and "" not in ovl_exclude_net
-                and "*" not in ovl_exclude_net
-            ):
-                while line and ("END_SEGMENT" not in line):
-                    g.write(line)
-                    line = f.readline()
-                g.write(line)
-            else:
-                while line and ("END_SEGMENT" not in line):
-                    line = f.readline()
+    # with: an error while writing (full disk) must not leave the files
+    # open, Windows would then refuse to delete or rewrite them in tmp.
+    with open(_tmp_file(lat, lon, "_tmp_dsf.txt"), "r") as f, open(
+        _tmp_file(lat, lon, "_tmp_dsf_without_mesh.txt"), "w"
+    ) as g:
         line = f.readline()
-    f.close()
-    g.close()
+        g.write("PROPERTY sim/overlay 1\n")
+        pol_type = 0
+        pol_dict = {}
+        exclude_set_updated = False
+        full_ovl_exclude_pol = set(ovl_exclude_pol)
+        while line:
+            if "PROPERTY" in line:
+                g.write(line)
+            elif "POLYGON_DEF" in line:
+                level = 2 if "facade" not in line else 3
+                pol_dict[pol_type] = line.split()[1]
+                UI.vprint(level, pol_type, ":", pol_dict[pol_type])
+                pol_type += 1
+                g.write(line)
+            elif "NETWORK_DEF" in line:
+                g.write(line)
+            elif "BEGIN_POLYGON" in line:
+                if not exclude_set_updated:
+                    tmp = set()
+                    for item in full_ovl_exclude_pol:
+                        if isinstance(item, int):
+                            tmp.add(item)
+                        elif isinstance(item, str):
+                            if item and item[0] == "!":
+                                item = item[1:]
+                                tmp = tmp.union(
+                                    [k for k in pol_dict if item not in pol_dict[k]]
+                                )
+                            else:
+                                tmp = tmp.union(
+                                    [k for k in pol_dict if item in pol_dict[k]]
+                                )
+                    full_ovl_exclude_pol = tmp
+                    exclude_set_updated = True
+                pol_type = int(line.split()[1])
+                if pol_type not in full_ovl_exclude_pol:
+                    while line and ("END_POLYGON" not in line):
+                        g.write(line)
+                        line = f.readline()
+                    g.write(line)
+                else:
+                    while line and ("END_POLYGON" not in line):
+                        line = f.readline()
+            elif "BEGIN_SEGMENT" in line:
+                road_type = int(line.split()[2])
+                if (
+                    road_type not in ovl_exclude_net
+                    and "" not in ovl_exclude_net
+                    and "*" not in ovl_exclude_net
+                ):
+                    while line and ("END_SEGMENT" not in line):
+                        g.write(line)
+                        line = f.readline()
+                    g.write(line)
+                else:
+                    while line and ("END_SEGMENT" not in line):
+                        line = f.readline()
+            line = f.readline()
     UI.vprint(1, "-> Converting back the text DSF to binary format")
     ovl_dsf = _tmp_file(lat, lon, "_tmp_dsf_without_mesh.dsf")
     error = _run_dsftool(
