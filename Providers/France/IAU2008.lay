@@ -5,6 +5,5 @@ resolutions= 793.7515875031751 396.87579375158754 264.5838625010584 198.43789687
 tile_size=256
 url_template=http://geoviz.iau-idf.fr/arcgis/sharing/servers/7fa31e9e1b4c41b5803c4106692c5f09/rest/services/orthophoto/ortho2008/MapServer/tile/{zoom}/{y}/{x}
 max_threads=16
-extent=IdF
 imagery_dir=code
 in_GUI=False
