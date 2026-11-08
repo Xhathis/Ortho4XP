@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 291
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 292
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -498,6 +498,11 @@ Test results:
   ba5bb4b: 291 unit tests, pyflakes 0, regression PASS (DSF, 17/17
   masks, app log identical), sims_in_ws all 15/15. CLI usage errors
   checked by hand: "55", "55 x", "55 12 Arc", "55 12 Arc zz" exit 2.
+- #63 `fix/osm-reader-keyerror` @ 9690e8f: new unit test (two lakes
+  sharing a way; KeyError on dev), all 35 bundled extents read and
+  polygonised. `test` @ 2bd7c60: 292 unit tests, pyflakes 0,
+  regression PASS (DSF, 17/17 masks, app log identical). sims_in_ws
+  not run: no sim reads an OSM file without target tags.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -940,6 +945,15 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     byte-identical (unit test against the old code), 6x faster for
     200,000 nodes, but step 1 of +55+012 is unchanged (32.6 vs 32.9 s):
     elevation lookups are a small part of it.
+63. **FIXED** (`9690e8f`, a regression from #3 / `ed1769f`): reading
+    an OSM file without target tags (combined-provider extents,
+    custom coastline/water files, patch files) crashed with KeyError
+    when two relations share a way: the bare except around
+    dicosmfirst["w"].remove() had been narrowed to ValueError, but it
+    is a set. 2 of the 35 bundled extents crashed (Italy/Veneto,
+    LowRes/Finland), so a combined provider using them failed. Normal
+    layer reads pass target tags and were never affected. Now
+    discard(). Found while measuring the water options (below).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -983,17 +997,21 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     batches).
 11. ~~#45, #46~~ — on `dev` (from the Iceland rerun); gui_smoke and
     test_parallel_batch run on it.
-12. ~~#47-#62~~ — from the full code review of 2026-11-07.
-    Open (none breaks a tile; each changes the output, so each needs
-    a new baseline):
-    - Speedups: Vector_Utils insert_edge/are_encroached (~30 s of step
-      1's ~33 s; pure-float version may change float results) and
-      Mask blur_mask (~13 s per tile; a cumsum box filter may change
-      pixels by 1).
-    - Water quality options: repair invalid OSM water polygons
-      (make_valid) instead of dropping them; treat empty relation
-      member roles as outer (as OSM/JOSM do; 22 log lines in the
-      user's batches).
+12. ~~#47-#63~~ — from the full code review of 2026-11-07.
+    Evaluated 2026-11-08 and NOT done (each changes the output, so
+    each would need a new baseline; measured on the user's data):
+    - Repair invalid OSM water polygons (make_valid): the 90 cached
+      water layers (211,251 closed ways, 11,129 relations) hold 0
+      invalid polygons; 1 "Invalid OSM way" line in the log since
+      2026-11-03. No benefit now. Cheap middle way if it is ever
+      wanted: log the relation rings dropped silently by is_valid.
+    - Empty relation member role as outer: 22 log lines since
+      2026-11-03, from 2 relations (-147 Greenland, -204 Denmark) in
+      ~250 tiles; an empty role is not always outer.
+    - Speedups: insert_edge (~30 s of step 1's ~33 s on a cached tile)
+      and blur_mask (~13 s per tile) are each ~1% of a real batch
+      (the 66-tile Iceland batch: 10 h, bound by Overpass and imagery
+      downloads); both would change mesh or mask bytes.
 
 ## Coding style
 
