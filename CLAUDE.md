@@ -491,7 +491,7 @@ Test results:
   masks, app log identical; it reuses its DDS files), sims_in_ws all
   15/15; sim_step3_failures convert/white/white-once ran nvcompress
   for real through the temp name, no .tmp left in textures.
-  Then on dev a3f5bc7 in G:Ortho4XP: gui_smoke 7/7 (85 tiles on the
+  Then on dev a3f5bc7 in G:\Ortho4XP: gui_smoke 7/7 (85 tiles on the
   map, 0 callback errors; cfg, .last_gui_params.txt and log
   unchanged). Not run: test_parallel_batch.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
