@@ -191,3 +191,17 @@ def test_layer_verdict():
     assert changed and text == "ways 10 -> 9"
     changed, text = FRESH.layer_verdict(same, same, {"n": 3, "w": 1, "r": 0})
     assert changed and text.startswith("4 edited/new (nodes 3, ways 1")
+
+
+def test_check_server_date(tmp_path):
+    f = tmp_path / "x.osm.bz2"
+    f.write_bytes(b"")
+    t = 1_780_000_000  # 2026-05-28T20:26:40Z
+    os.utime(f, (t, t))
+    FRESH.check_server_date("2026-05-28T20:26:40Z", str(f))
+    FRESH.check_server_date("2026-11-11T05:10:00Z", str(f))
+    # A lagging server (FR was a month behind) cannot see newer edits.
+    with pytest.raises(ValueError, match="older than the cache"):
+        FRESH.check_server_date("2026-05-28T20:26:39Z", str(f))
+    with pytest.raises(ValueError):
+        FRESH.check_server_date("", str(f))

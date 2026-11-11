@@ -39,12 +39,13 @@ SERVER_TIMEOUT = 300
 RETRY_WAIT = 30
 
 
-def ask_overpass(session, query):
+def ask_overpass(session, query, cache_file):
     """Answer bytes of a count query, or raise RuntimeError with the reason.
 
     The configured server first, then the others in turn (as a build's
     later tentatives do). Each request holds the cross-process Overpass
-    slot, so a running batch and this check never query at once.
+    slot, so a running batch and this check never query at once. A server
+    whose data is older than cache_file cannot answer and counts as failed.
     """
     keys = list(OSM.overpass_servers)
     if not keys:
@@ -69,7 +70,9 @@ def ask_overpass(session, query):
             finally:
                 OSM._release_overpass_slot(slot)
             if r.status_code == 200:
-                FRESH.parse_count_answer(r.content)  # raises if unusable
+                # Both raise ValueError if the answer is unusable.
+                (osm_base, _, _) = FRESH.parse_count_answer(r.content)
+                FRESH.check_server_date(osm_base, cache_file)
                 return r.content
             last = f"{key}: HTTP {r.status_code}"
             wait = RETRY_WAIT
@@ -101,6 +104,7 @@ def check_tile(session, lat, lon, margin, rows):
             answer = ask_overpass(
                 session,
                 FRESH.count_query(statements, bbox, since, SERVER_TIMEOUT),
+                path,
             )
         except RuntimeError as e:
             print(f"  {name} {layer:<11} FAILED ({e})", flush=True)
