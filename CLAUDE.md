@@ -566,7 +566,7 @@ Test results:
   identical), the 5 batch sims as designed (leftover file: 3 x +55+012
   after error/stop/dem/exception, none after error-once; the sims'
   tile list has one tile 3 times, see #28), and
-  `G:\Ortho4XP_tests	ools\gui_leftover.py <src> <png>` (cwd
+  `G:/Ortho4XP_tests/tools/gui_leftover.py <src> <png>` (cwd
   G:\Ortho4XP, real GUI, refuses to run if the user has a leftover
   file): 6/6 (selected on open, again after reopening, Clear empties
   it and removes the file); .last_gui_params.txt and Ortho4XP.log
