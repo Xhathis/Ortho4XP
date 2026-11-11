@@ -136,29 +136,28 @@ for var in cfg_vars:
 ################################################################################
 # Update from Global Ortho4XP.cfg
 try:
-    f = open(global_cfg_file, "r")
-    for line in f.readlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line[0] == "#":
-            continue
-        try:
-            (var, value) = line.split("=", 1)
-            value = config_compatibility(value)
-            # Set all tile and app config variables
-            set_global_variables(var, value)
-            # Set all global tile config variables
-            var = global_prefix + var
-            set_global_variables(var, value)
-        except Exception as e:
-            # Unknown key (KeyError), no "=" (ValueError) or a value that
-            # cannot be used: skip the line, as before, but say why.
-            UI.lvprint(
-                1, "Global config file contains an invalid line:", line,
-                f"({type(e).__name__}: {e})",
-            )
-    f.close()
+    with open(global_cfg_file, "r") as f:
+        for line in f.readlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line[0] == "#":
+                continue
+            try:
+                (var, value) = line.split("=", 1)
+                value = config_compatibility(value)
+                # Set all tile and app config variables
+                set_global_variables(var, value)
+                # Set all global tile config variables
+                var = global_prefix + var
+                set_global_variables(var, value)
+            except Exception as e:
+                # Unknown key (KeyError), no "=" (ValueError) or a value that
+                # cannot be used: skip the line, as before, but say why.
+                UI.lvprint(
+                    1, "Global config file contains an invalid line:", line,
+                    f"({type(e).__name__}: {e})",
+                )
 except FileNotFoundError:
     # Create a new global config file using default values
     lines = []
@@ -242,41 +241,40 @@ class Tile:
                     )
                     return 0
         try:
-            f = open(config_file, "r")
-            for line in f.readlines():
-                line = line.strip()
-                if not line:
-                    continue
-                if line[0] == "#":
-                    continue
-                try:
-                    (var, value) = line.split("=", 1)
-                    # compatibility with config files from version <= 1.20
-                    value = config_compatibility(value)
-                    setattr(self, var, parse_cfg_value(var, value))
-                except Exception as e:
-                    # compatibility with zone_list config files from
-                    # version <= 1.20
-                    if "zone_list.append" in line:
-                        zone = parse_legacy_zone(line)
-                        if zone is not None:
-                            self.zone_list.append(zone)
-                    elif line.split("=", 1)[0] in cfg_vars:
-                        # A known setting with a value that cannot be used
-                        # (e.g. "true" for a bool): the build goes on with
-                        # the value from before, and the tile config wins
-                        # over the GUI, so say so (#72).
-                        key = line.split("=", 1)[0]
-                        UI.lvprint(
-                            1, "WARNING: tile config", config_file,
-                            "has an invalid line:", line,
-                            f"({type(e).__name__}: {e}); keeping",
-                            key + "=" + repr(getattr(self, key, None)) + ".",
-                        )
-                    else:
-                        # Unknown key (older or newer version) or no "=".
-                        UI.vprint(2, e)
-            f.close()
+            with open(config_file, "r") as f:
+                for line in f.readlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line[0] == "#":
+                        continue
+                    try:
+                        (var, value) = line.split("=", 1)
+                        # compatibility with config files from version <= 1.20
+                        value = config_compatibility(value)
+                        setattr(self, var, parse_cfg_value(var, value))
+                    except Exception as e:
+                        # compatibility with zone_list config files from
+                        # version <= 1.20
+                        if "zone_list.append" in line:
+                            zone = parse_legacy_zone(line)
+                            if zone is not None:
+                                self.zone_list.append(zone)
+                        elif line.split("=", 1)[0] in cfg_vars:
+                            # A known setting with a value that cannot be used
+                            # (e.g. "true" for a bool): the build goes on with
+                            # the value from before, and the tile config wins
+                            # over the GUI, so say so (#72).
+                            key = line.split("=", 1)[0]
+                            UI.lvprint(
+                                1, "WARNING: tile config", config_file,
+                                "has an invalid line:", line,
+                                f"({type(e).__name__}: {e}); keeping",
+                                key + "=" + repr(getattr(self, key, None)) + ".",
+                            )
+                        else:
+                            # Unknown key (older or newer version) or no "=".
+                            UI.vprint(2, e)
             return 1
         except (OSError, UnicodeDecodeError):
             UI.lvprint(
@@ -1038,7 +1036,9 @@ class Ortho4XP_Config(tk.Toplevel):
             messagebox.showinfo("Not found", "No backup tile configuration found.")
             return
 
-        for line in f.readlines():
+        with f:
+            lines = f.readlines()
+        for line in lines:
             line = line.strip()
             if not line or line[0] == "#":
                 continue
@@ -1057,7 +1057,6 @@ class Ortho4XP_Config(tk.Toplevel):
         # Apply changes to update global variables
         self.apply_changes("tile")
         UI.vprint(0, f"Backup configuration loaded for tile at {lat} {lon}")
-        f.close()
 
     def load_tile_cfg(self) -> None:
         """Load tile configuration settings for active tile."""
@@ -1082,7 +1081,9 @@ class Ortho4XP_Config(tk.Toplevel):
             except OSError:
                 messagebox.showinfo("Not found", "No tile configuration found.")
                 return 0
-        for line in f.readlines():
+        with f:
+            lines = f.readlines()
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
@@ -1106,7 +1107,6 @@ class Ortho4XP_Config(tk.Toplevel):
         # Apply changes to update global variables
         self.apply_changes("tile")
         UI.vprint(0, f"Configuration loaded for tile at {lat} {lon}")
-        f.close()
 
     def write_tile_cfg(self) -> None:
         """Save tile configuration settings for active tile."""

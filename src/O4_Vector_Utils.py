@@ -483,78 +483,76 @@ class Vector_Map:
         # note that Triangle4XP too is writing a(nother) node file, which as
         # more node attributes
         total_nodes = len(self.dico_nodes)
-        f = open(node_file_name, "w")
-        f.write(str(total_nodes) + " 2 1 0\n")
-        for idx in sorted(self.nodes_dico.keys()):
-            f.write(
-                str(idx)
-                + " "
-                + " ".join(
-                    [
-                        "{:.9f}".format(x)
-                        for x in (
-                            self.nodes_dico[idx][0],
-                            self.nodes_dico[idx][1],
-                            self.data_nodes[idx],
-                        )
-                    ]
+        with open(node_file_name, "w") as f:
+            f.write(str(total_nodes) + " 2 1 0\n")
+            for idx in sorted(self.nodes_dico.keys()):
+                f.write(
+                    str(idx)
+                    + " "
+                    + " ".join(
+                        [
+                            "{:.9f}".format(x)
+                            for x in (
+                                self.nodes_dico[idx][0],
+                                self.nodes_dico[idx][1],
+                                self.data_nodes[idx],
+                            )
+                        ]
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
-        f.close()
 
     def write_poly_file(self, poly_file_name):
-        f = open(poly_file_name, "w")
-        f.write("0 2 1 0\n")
-        f.write("\n")
-        total_edges = len(self.edges_dico)
-        f.write(str(total_edges) + " 1\n")
-        idx = 1
-        for edge_id in self.edges_dico:
-            f.write(
-                str(idx)
-                + " "
-                + str(self.edges_dico[edge_id][0])
-                + " "
-                + str(self.edges_dico[edge_id][1])
-                + " "
-                + str(self.data_edges[edge_id])
-                + "\n"
-            )
-            idx += 1
-        f.write("\n" + str(len(self.holes)) + "\n")
-        idx = 1
-        for hole in self.holes:
-            f.write(
-                str(idx)
-                + " "
-                + " ".join(["{:.15f}".format(h) for h in hole])
-                + "\n"
-            )
-            idx += 1
-        total_seeds = numpy.sum([len(self.seeds[key]) for key in self.seeds])
-        if total_seeds == 0:
-            f.write("\n0\n")
-        else:
-            f.write("\n" + str(total_seeds) + "\n")
+        with open(poly_file_name, "w") as f:
+            f.write("0 2 1 0\n")
+            f.write("\n")
+            total_edges = len(self.edges_dico)
+            f.write(str(total_edges) + " 1\n")
             idx = 1
-            for long_key in sorted(
-                self.dico_attributes.items(), key=lambda item: item[1]
-            ):
-                (key, marker) = long_key
-                if key not in self.seeds:
-                    continue
-                for seed in self.seeds[key]:
-                    f.write(
-                        str(idx)
-                        + " "
-                        + " ".join(["{:.15f}".format(s) for s in seed])
-                        + " "
-                        + str(marker)
-                        + "\n"
-                    )
-                    idx += 1
-        f.close()
+            for edge_id in self.edges_dico:
+                f.write(
+                    str(idx)
+                    + " "
+                    + str(self.edges_dico[edge_id][0])
+                    + " "
+                    + str(self.edges_dico[edge_id][1])
+                    + " "
+                    + str(self.data_edges[edge_id])
+                    + "\n"
+                )
+                idx += 1
+            f.write("\n" + str(len(self.holes)) + "\n")
+            idx = 1
+            for hole in self.holes:
+                f.write(
+                    str(idx)
+                    + " "
+                    + " ".join(["{:.15f}".format(h) for h in hole])
+                    + "\n"
+                )
+                idx += 1
+            total_seeds = numpy.sum([len(self.seeds[key]) for key in self.seeds])
+            if total_seeds == 0:
+                f.write("\n0\n")
+            else:
+                f.write("\n" + str(total_seeds) + "\n")
+                idx = 1
+                for long_key in sorted(
+                    self.dico_attributes.items(), key=lambda item: item[1]
+                ):
+                    (key, marker) = long_key
+                    if key not in self.seeds:
+                        continue
+                    for seed in self.seeds[key]:
+                        f.write(
+                            str(idx)
+                            + " "
+                            + " ".join(["{:.15f}".format(s) for s in seed])
+                            + " "
+                            + str(marker)
+                            + "\n"
+                        )
+                        idx += 1
         return
 
 
@@ -913,14 +911,14 @@ def improved_buffer(
         buffer_width + separation_width,
         join_style=2,
         mitre_limit=1.5,
-        resolution=1,
+        quad_segs=1,
     )
     if show_progress:
         UI.progress_bar(1, 40)
     if UI.red_flag:
         return geometry.Polygon()
     output_geometry = output_geometry.buffer(
-        -1 * separation_width, join_style=2, mitre_limit=1.5, resolution=1
+        -1 * separation_width, join_style=2, mitre_limit=1.5, quad_segs=1
     )
     if show_progress:
         UI.progress_bar(1, 80)

@@ -128,68 +128,67 @@ def initialize_extents_dict():
                 continue
             extent_code = file_name.split(".")[0]
             extent = {}
-            f = open(
+            with open(
                 os.path.join(FNAMES.Extent_dir, dir_name, file_name),
                 "r",
                 encoding="utf-8",
-            )
-            valid_extent = True
-            for line in f.readlines():
-                line = line[:-1]
-                if "#" in line:
-                    line = line.split("#")[0]
-                if "=" not in line:
-                    continue
-                # (no try needed: "=" is in line, so this cannot fail)
-                key = line.split("=")[0]
-                value = line[len(key) + 1 :]
-                extent[key] = value
-                # structuring data
-                if key == "epsg_code":
-                    try:
-                        GEO.record_epsg(int(value))
-                    except (ValueError, CRSError):
-                        # HACK for Slovenia
-                        if int(value) == 102060:
-                            GEO.record_epsg(3912)
-                        else:
-                            print("Error in epsg code for extent", extent_code)
+            ) as f:
+                valid_extent = True
+                for line in f.readlines():
+                    line = line[:-1]
+                    if "#" in line:
+                        line = line.split("#")[0]
+                    if "=" not in line:
+                        continue
+                    # (no try needed: "=" is in line, so this cannot fail)
+                    key = line.split("=")[0]
+                    value = line[len(key) + 1 :]
+                    extent[key] = value
+                    # structuring data
+                    if key == "epsg_code":
+                        try:
+                            GEO.record_epsg(int(value))
+                        except (ValueError, CRSError):
+                            # HACK for Slovenia
+                            if int(value) == 102060:
+                                GEO.record_epsg(3912)
+                            else:
+                                print("Error in epsg code for extent", extent_code)
+                                valid_extent = False
+                    elif key == "mask_bounds":
+                        try:
+                            extent[key] = [float(x) for x in value.split(",")]
+                        except ValueError:
+                            print(
+                                "Error in reading mask bounds for extent",
+                                extent_code,
+                            )
                             valid_extent = False
-                elif key == "mask_bounds":
-                    try:
-                        extent[key] = [float(x) for x in value.split(",")]
-                    except ValueError:
-                        print(
-                            "Error in reading mask bounds for extent",
-                            extent_code,
-                        )
-                        valid_extent = False
-                elif key == "buffer_width":
-                    try:
-                        extent[key] = float(value)
-                    except ValueError:
-                        print(
-                            "Error in reading mask buffer width for extent",
-                            extent_code,
-                        )
-                        valid_extent = False
-                elif key == "mask_width":
-                    try:
-                        extent[key] = float(value)
-                    except ValueError:
-                        print(
-                            "Error in reading mask width for extent",
-                            extent_code,
-                        )
-                        valid_extent = False
-            if valid_extent:
-                extent["code"] = extent_code
-                extent["dir"] = dir_name
-                extents_dict[extent_code] = extent
-            else:
-                print("Error in reading extent definition file for", file_name)
-                pass
-            f.close()
+                    elif key == "buffer_width":
+                        try:
+                            extent[key] = float(value)
+                        except ValueError:
+                            print(
+                                "Error in reading mask buffer width for extent",
+                                extent_code,
+                            )
+                            valid_extent = False
+                    elif key == "mask_width":
+                        try:
+                            extent[key] = float(value)
+                        except ValueError:
+                            print(
+                                "Error in reading mask width for extent",
+                                extent_code,
+                            )
+                            valid_extent = False
+                if valid_extent:
+                    extent["code"] = extent_code
+                    extent["dir"] = dir_name
+                    extents_dict[extent_code] = extent
+                else:
+                    print("Error in reading extent definition file for", file_name)
+                    pass
 
 
 ################################################################################
@@ -200,30 +199,29 @@ def initialize_color_filters_dict():
         if "." not in file_name or file_name.split(".")[-1] != "flt":
             continue
         color_code = file_name.split(".")[0]
-        f = open(os.path.join(FNAMES.Filter_dir, file_name), "r")
-        valid_color_filters = True
-        color_filters = []
-        for line in f.readlines():
-            line = line[:-1]
-            if "#" in line:
-                line = line.split("#")[0]
-            if not line:
-                continue
-            try:
-                items = line.split()
-                color_filters.append([items[0]] + [float(x) for x in items[1:]])
-            except ValueError:
-                valid_color_filters = False
-        if valid_color_filters:
-            color_filters_dict[color_code] = color_filters
-        else:
-            print(
-                "Could not understand color filter ",
-                color_code,
-                ", skipping it.",
-            )
-            pass
-        f.close()
+        with open(os.path.join(FNAMES.Filter_dir, file_name), "r") as f:
+            valid_color_filters = True
+            color_filters = []
+            for line in f.readlines():
+                line = line[:-1]
+                if "#" in line:
+                    line = line.split("#")[0]
+                if not line:
+                    continue
+                try:
+                    items = line.split()
+                    color_filters.append([items[0]] + [float(x) for x in items[1:]])
+                except ValueError:
+                    valid_color_filters = False
+            if valid_color_filters:
+                color_filters_dict[color_code] = color_filters
+            else:
+                print(
+                    "Could not understand color filter ",
+                    color_code,
+                    ", skipping it.",
+                )
+                pass
 
 
 ################################################################################
@@ -240,308 +238,307 @@ def initialize_providers_dict():
                 continue
             provider_code = file_name.split(".")[0]
             provider = {}
-            f = open(
+            with open(
                 os.path.join(FNAMES.Provider_dir, dir_name, file_name), "r"
-            )
-            valid_provider = True
-            for line in f.readlines():
-                line = line.strip()
-                if "#" in line:
-                    if line[0] == "#":
+            ) as f:
+                valid_provider = True
+                for line in f.readlines():
+                    line = line.strip()
+                    if "#" in line:
+                        if line[0] == "#":
+                            continue
+                        else:
+                            line = line.split("#")[0]
+                    if "=" not in line:
                         continue
-                    else:
-                        line = line.split("#")[0]
-                if "=" not in line:
-                    continue
-                items = line.split("=")
-                key = items[0].strip()
-                value = "=".join(items[1:]).strip()
-                provider[key] = value
-                # structuring data
-                if key == "request_type" and value not in [
-                    "wms",
-                    "wmts",
-                    "tms",
-                    "local_tms",
-                ]:
-                    UI.vprint(
-                        0,
-                        "Unknown request_type field for provider",
-                        provider_code,
-                        ":",
-                        value,
-                    )
-                    valid_provider = False
-                if key == "grid_type" and value not in ["webmercator"]:
-                    UI.vprint(
-                        0,
-                        "Unknown grid_type field for provider",
-                        provider_code,
-                        ":",
-                        value,
-                    )
-                    valid_provider = False
-                elif key == "fake_headers":
-                    try:
-                        # A dict literal; eval() ran any code in a
-                        # .lay file shared on a forum (#84). Some .lay
-                        # files name user_agent_generic in it.
-                        provider[key] = literal_with_names(
-                            value, {"user_agent_generic": user_agent_generic}
+                    items = line.split("=")
+                    key = items[0].strip()
+                    value = "=".join(items[1:]).strip()
+                    provider[key] = value
+                    # structuring data
+                    if key == "request_type" and value not in [
+                        "wms",
+                        "wmts",
+                        "tms",
+                        "local_tms",
+                    ]:
+                        UI.vprint(
+                            0,
+                            "Unknown request_type field for provider",
+                            provider_code,
+                            ":",
+                            value,
                         )
-                        if type(provider[key]) is not dict:
+                        valid_provider = False
+                    if key == "grid_type" and value not in ["webmercator"]:
+                        UI.vprint(
+                            0,
+                            "Unknown grid_type field for provider",
+                            provider_code,
+                            ":",
+                            value,
+                        )
+                        valid_provider = False
+                    elif key == "fake_headers":
+                        try:
+                            # A dict literal; eval() ran any code in a
+                            # .lay file shared on a forum (#84). Some .lay
+                            # files name user_agent_generic in it.
+                            provider[key] = literal_with_names(
+                                value, {"user_agent_generic": user_agent_generic}
+                            )
+                            if type(provider[key]) is not dict:
+                                print(
+                                    "Definition of fake headers for provider",
+                                    provider_code,
+                                    "not valid.",
+                                )
+                                valid_provider = False
+                        except Exception:
                             print(
                                 "Definition of fake headers for provider",
                                 provider_code,
                                 "not valid.",
                             )
                             valid_provider = False
-                    except Exception:
-                        print(
-                            "Definition of fake headers for provider",
-                            provider_code,
-                            "not valid.",
-                        )
-                        valid_provider = False
-                elif key == "epsg_code":
-                    try:
-                        GEO.record_epsg(int(value))
-                    except (ValueError, CRSError):
-                        # HACK for Slovenia
-                        if int(value) == 102060:
-                            GEO.record_epsg(3912)
-                        else:
+                    elif key == "epsg_code":
+                        try:
+                            GEO.record_epsg(int(value))
+                        except (ValueError, CRSError):
+                            # HACK for Slovenia
+                            if int(value) == 102060:
+                                GEO.record_epsg(3912)
+                            else:
+                                UI.vprint(
+                                    0,
+                                    "Error in epsg code for provider",
+                                    provider_code,
+                                )
+                                valid_provider = False
+                    elif key == "in_GUI":
+                        try:
+                            provider["in_GUI"] = ast.literal_eval(value)
+                            if not isinstance(provider["in_GUI"], bool):
+                                UI.vprint(
+                                    0,
+                                    "Error in GUI status for provider",
+                                    provider_code,
+                                )
+                                provider["in_GUI"] = True
+                        except Exception:
                             UI.vprint(
-                                0,
-                                "Error in epsg code for provider",
+                                0, "Error in GUI status for provider", provider_code
+                            )
+                            provider["in_GUI"] = True
+                    elif key == "image_type":
+                        pass
+                    elif key == "url_prefix":
+                        pass
+                    elif key == "url_template":
+                        pass
+                    elif key == "layers":
+                        pass
+                    elif key in ["wms_size", "tile_size"]:
+                        try:
+                            provider[key] = int(value)
+                            if provider[key] < 100 or provider[key] > 10000:
+                                print(
+                                    "Wm(t)s size for provider ",
+                                    provider_code,
+                                    "seems off limits, provider skipped.",
+                                )
+                        except ValueError:
+                            print(
+                                "Error in reading wms size for provider",
                                 provider_code,
                             )
                             valid_provider = False
-                elif key == "in_GUI":
-                    try:
-                        provider["in_GUI"] = ast.literal_eval(value)
-                        if not isinstance(provider["in_GUI"], bool):
-                            UI.vprint(
-                                0,
-                                "Error in GUI status for provider",
-                                provider_code,
-                            )
-                            provider["in_GUI"] = True
-                    except Exception:
-                        UI.vprint(
-                            0, "Error in GUI status for provider", provider_code
-                        )
-                        provider["in_GUI"] = True
-                elif key == "image_type":
-                    pass
-                elif key == "url_prefix":
-                    pass
-                elif key == "url_template":
-                    pass
-                elif key == "layers":
-                    pass
-                elif key in ["wms_size", "tile_size"]:
-                    try:
-                        provider[key] = int(value)
-                        if provider[key] < 100 or provider[key] > 10000:
+                    elif key in ["wms_version", "wmts_version"]:
+                        if len(value.split(".")) < 2:
                             print(
-                                "Wm(t)s size for provider ",
+                                "Error in reading wms version for provider",
                                 provider_code,
-                                "seems off limits, provider skipped.",
                             )
-                    except ValueError:
-                        print(
-                            "Error in reading wms size for provider",
-                            provider_code,
-                        )
-                        valid_provider = False
-                elif key in ["wms_version", "wmts_version"]:
-                    if len(value.split(".")) < 2:
-                        print(
-                            "Error in reading wms version for provider",
-                            provider_code,
-                        )
-                        valid_provider = False
-                elif key == "top_left_corner":
-                    try:
-                        provider[key] = [
-                            numpy.array([float(x) for x in value.split()])
-                            for _ in range(40)
-                        ]
-                    except ValueError:
-                        print(
-                            "Error in reading top left corner for provider",
-                            provider_code,
-                        )
-                        valid_provider = False
-                elif key == "scaledenominator":
-                    try:
-                        provider[key] = numpy.array(
-                            [float(x) for x in value.split()]
-                        )
-                    except ValueError:
-                        print(
-                            "Error in reading scaledenominator for provider",
-                            provider_code,
-                        )
-                        valid_provider = False
-                elif key == "tilematrixset":
-                    pass
-                elif key == "resolutions":
-                    try:
-                        provider[key] = numpy.array(
-                            [float(x) for x in value.split()]
-                        )
-                    except ValueError:
-                        print(
-                            "Error in reading resolutions for provider",
-                            provider_code,
-                        )
-                        valid_provider = False
-                elif key == "max_threads":
-                    # The raw string used to stay in the dict and crash the
-                    # downloads later (int("many")); 0 workers downloaded
-                    # nothing. Drop bad values so the default (16) applies.
-                    try:
-                        provider[key] = int(value)
-                        if provider[key] < 1:
-                            raise ValueError
-                    except ValueError:
-                        print(
-                            "Error in reading max_threads for provider",
-                            provider_code,
-                            ": not a positive integer, using the default.",
-                        )
-                        del provider[key]
-                elif key == "extent":
-                    pass
-                elif key == "color_filters":
-                    if value not in color_filters_dict:
-                        print(
-                            "Error in reading color_filter for provider",
-                            provider_code,
-                            ". Assuming none.",
-                        )
-                        provider[key] = "none"
-                elif key == "imagery_dir":
-                    if value not in ("grouped", "normal", "code"):
-                        print(
-                            "Error in reading imagery_dir for provider",
-                            provider_code,
-                            ". Assuming grouped.",
-                        )
-                        provider[key] = "grouped"
-            if ("request_type" in provider) and (
-                provider["request_type"] == "wmts"
-            ):
-                try:
-                    tilematrixsets = read_tilematrixsets(
-                        os.path.join(
-                            FNAMES.Provider_dir,
-                            dir_name,
-                            "capabilities_" + provider_code + ".xml",
-                        )
-                    )
-                except Exception:
+                            valid_provider = False
+                    elif key == "top_left_corner":
+                        try:
+                            provider[key] = [
+                                numpy.array([float(x) for x in value.split()])
+                                for _ in range(40)
+                            ]
+                        except ValueError:
+                            print(
+                                "Error in reading top left corner for provider",
+                                provider_code,
+                            )
+                            valid_provider = False
+                    elif key == "scaledenominator":
+                        try:
+                            provider[key] = numpy.array(
+                                [float(x) for x in value.split()]
+                            )
+                        except ValueError:
+                            print(
+                                "Error in reading scaledenominator for provider",
+                                provider_code,
+                            )
+                            valid_provider = False
+                    elif key == "tilematrixset":
+                        pass
+                    elif key == "resolutions":
+                        try:
+                            provider[key] = numpy.array(
+                                [float(x) for x in value.split()]
+                            )
+                        except ValueError:
+                            print(
+                                "Error in reading resolutions for provider",
+                                provider_code,
+                            )
+                            valid_provider = False
+                    elif key == "max_threads":
+                        # The raw string used to stay in the dict and crash the
+                        # downloads later (int("many")); 0 workers downloaded
+                        # nothing. Drop bad values so the default (16) applies.
+                        try:
+                            provider[key] = int(value)
+                            if provider[key] < 1:
+                                raise ValueError
+                        except ValueError:
+                            print(
+                                "Error in reading max_threads for provider",
+                                provider_code,
+                                ": not a positive integer, using the default.",
+                            )
+                            del provider[key]
+                    elif key == "extent":
+                        pass
+                    elif key == "color_filters":
+                        if value not in color_filters_dict:
+                            print(
+                                "Error in reading color_filter for provider",
+                                provider_code,
+                                ". Assuming none.",
+                            )
+                            provider[key] = "none"
+                    elif key == "imagery_dir":
+                        if value not in ("grouped", "normal", "code"):
+                            print(
+                                "Error in reading imagery_dir for provider",
+                                provider_code,
+                                ". Assuming grouped.",
+                            )
+                            provider[key] = "grouped"
+                if ("request_type" in provider) and (
+                    provider["request_type"] == "wmts"
+                ):
                     try:
                         tilematrixsets = read_tilematrixsets(
                             os.path.join(
                                 FNAMES.Provider_dir,
                                 dir_name,
-                                "capabilities.xml",
+                                "capabilities_" + provider_code + ".xml",
                             )
                         )
                     except Exception:
-                        print(
-                            "Error in reading capabilities for provider",
-                            provider_code,
-                        )
-                        valid_provider = False
-                if valid_provider:
-                    try:
-                        tms_found = False
-                        for tilematrixset in tilematrixsets:
-                            if (
-                                tilematrixset["identifier"]
-                                == provider["tilematrixset"]
-                            ):
-                                provider["tilematrixset"] = tilematrixset
-                                tms_found = True
-                                break
-                        if tms_found:
-                            provider["scaledenominator"] = numpy.array(
-                                [
-                                    float(x["ScaleDenominator"])
-                                    for x in provider["tilematrixset"][
+                        try:
+                            tilematrixsets = read_tilematrixsets(
+                                os.path.join(
+                                    FNAMES.Provider_dir,
+                                    dir_name,
+                                    "capabilities.xml",
+                                )
+                            )
+                        except Exception:
+                            print(
+                                "Error in reading capabilities for provider",
+                                provider_code,
+                            )
+                            valid_provider = False
+                    if valid_provider:
+                        try:
+                            tms_found = False
+                            for tilematrixset in tilematrixsets:
+                                if (
+                                    tilematrixset["identifier"]
+                                    == provider["tilematrixset"]
+                                ):
+                                    provider["tilematrixset"] = tilematrixset
+                                    tms_found = True
+                                    break
+                            if tms_found:
+                                provider["scaledenominator"] = numpy.array(
+                                    [
+                                        float(x["ScaleDenominator"])
+                                        for x in provider["tilematrixset"][
+                                            "tilematrices"
+                                        ]
+                                    ]
+                                )
+                                provider["top_left_corner"] = [
+                                    [float(x) for x in y["TopLeftCorner"].split()]
+                                    for y in provider["tilematrixset"][
                                         "tilematrices"
                                     ]
                                 ]
+                            else:
+                                print("no tilematrixset found")
+                                valid_provider = False
+                        except Exception:
+                            print(
+                                "Error in reading capabilities for provider",
+                                provider_code,
                             )
-                            provider["top_left_corner"] = [
-                                [float(x) for x in y["TopLeftCorner"].split()]
-                                for y in provider["tilematrixset"][
-                                    "tilematrices"
-                                ]
-                            ]
-                        else:
-                            print("no tilematrixset found")
                             valid_provider = False
-                    except Exception:
-                        print(
-                            "Error in reading capabilities for provider",
-                            provider_code,
+                if valid_provider:
+                    provider["code"] = provider_code
+                    provider["directory"] = dir_name
+                    if "in_GUI" not in provider:
+                        provider["in_GUI"] = True
+                    if "image_type" not in provider:
+                        provider["image_type"] = "jpeg"
+                    if "extent" not in provider:
+                        provider["extent"] = "global"
+                    if "color_filters" not in provider:
+                        provider["color_filters"] = "none"
+                    if "imagery_dir" not in provider:
+                        provider["imagery_dir"] = "grouped"
+                    if "scaledenominator" in provider:
+                        units_per_pix = (
+                            0.00028
+                            if provider["epsg_code"] not in ["4326"]
+                            else 2.5152827955e-09
                         )
-                        valid_provider = False
-            if valid_provider:
-                provider["code"] = provider_code
-                provider["directory"] = dir_name
-                if "in_GUI" not in provider:
-                    provider["in_GUI"] = True
-                if "image_type" not in provider:
-                    provider["image_type"] = "jpeg"
-                if "extent" not in provider:
-                    provider["extent"] = "global"
-                if "color_filters" not in provider:
-                    provider["color_filters"] = "none"
-                if "imagery_dir" not in provider:
-                    provider["imagery_dir"] = "grouped"
-                if "scaledenominator" in provider:
-                    units_per_pix = (
-                        0.00028
-                        if provider["epsg_code"] not in ["4326"]
-                        else 2.5152827955e-09
-                    )
-                    provider["resolutions"] = (
-                        units_per_pix * provider["scaledenominator"]
-                    )
-                if ("grid_type" in provider) and provider[
-                    "grid_type"
-                ] == "webmercator":
-                    provider["request_type"] = "tms"
-                    provider["tile_size"] = 256
-                    provider["epsg_code"] = "3857"
-                    provider["top_left_corner"] = [
-                        [-20037508.34, 20037508.34] for i in range(0, 21)
-                    ]
-                    provider["resolutions"] = numpy.array(
-                        [20037508.34 / (128 * 2 ** i) for i in range(0, 21)]
-                    )
-                if "request_type" not in provider:
+                        provider["resolutions"] = (
+                            units_per_pix * provider["scaledenominator"]
+                        )
+                    if ("grid_type" in provider) and provider[
+                        "grid_type"
+                    ] == "webmercator":
+                        provider["request_type"] = "tms"
+                        provider["tile_size"] = 256
+                        provider["epsg_code"] = "3857"
+                        provider["top_left_corner"] = [
+                            [-20037508.34, 20037508.34] for i in range(0, 21)
+                        ]
+                        provider["resolutions"] = numpy.array(
+                            [20037508.34 / (128 * 2 ** i) for i in range(0, 21)]
+                        )
+                    if "request_type" not in provider:
+                        UI.vprint(
+                            0,
+                            "Error in reading provider definition ",
+                            "file for",
+                            file_name,
+                        )
+                    else:
+                        providers_dict[provider_code] = provider
+                else:
                     UI.vprint(
                         0,
-                        "Error in reading provider definition ",
-                        "file for",
+                        "Error in reading provider definition file for",
                         file_name,
                     )
-                else:
-                    providers_dict[provider_code] = provider
-            else:
-                UI.vprint(
-                    0,
-                    "Error in reading provider definition file for",
-                    file_name,
-                )
-            f.close()
 
 
 ################################################################################
@@ -554,94 +551,93 @@ def initialize_combined_providers_dict():
         provider_code = file_name.split(".")[0]
         try:
             comb_list = []
-            f = open(os.path.join(FNAMES.Provider_dir, file_name), "r")
-            for line in f.readlines():
-                if "#" in line:
-                    line = line.split("#")[0]
-                if not line[:-1]:
-                    continue
-                layer_code, extent_code, color_code, priority = line[
-                    :-1
-                ].split()
-                if layer_code not in providers_dict:
-                    print(
-                        "Unknown provider in combined provider",
-                        provider_code,
-                        ":",
-                        layer_code,
-                    )
-                    continue
-                if extent_code == "default":
-                    extent_code = providers_dict[layer_code]["extent"]
-                if (extent_code not in extents_dict) or (
-                    extent_code[0] == "!"
-                    and (extent_code[1:] not in extents_dict)
-                ):
-                    print(
-                        "Unknown extent in combined provider",
-                        provider_code,
-                        ":",
-                        extent_code,
-                    )
-                    continue
-                if color_code == "default":
-                    try:
-                        color_code = providers_dict[layer_code]["color_filters"]
-                    except KeyError:
+            with open(os.path.join(FNAMES.Provider_dir, file_name), "r") as f:
+                for line in f.readlines():
+                    if "#" in line:
+                        line = line.split("#")[0]
+                    if not line[:-1]:
+                        continue
+                    layer_code, extent_code, color_code, priority = line[
+                        :-1
+                    ].split()
+                    if layer_code not in providers_dict:
                         print(
-                            "Unknown color filter in combined provider",
+                            "Unknown provider in combined provider",
                             provider_code,
                             ":",
-                            color_code,
+                            layer_code,
                         )
                         continue
-                if color_code not in color_filters_dict:
-                    try:
-                        if color_code[0] == "L":
-                            b = 1
-                        elif color_code[0] == "D":
-                            b = -1
-                        else:
-                            # Neither a named filter nor an L/D code: only
-                            # this line is skipped (below). Without this, b
-                            # was unbound and the UnboundLocalError dropped
-                            # the whole combined provider (#64).
-                            raise ValueError(color_code)
-                        brightness = b * float(color_code[1:3])
-                        contrast = float(color_code[4:6])
-                        color_filters_dict[color_code] = [
-                            ["brightness-contrast", brightness, contrast]
-                        ]
-                        if len(color_code) > 6:
-                            saturation = float(color_code[7:9])
-                            color_filters_dict[color_code].append(
-                                ["saturation", saturation]
+                    if extent_code == "default":
+                        extent_code = providers_dict[layer_code]["extent"]
+                    if (extent_code not in extents_dict) or (
+                        extent_code[0] == "!"
+                        and (extent_code[1:] not in extents_dict)
+                    ):
+                        print(
+                            "Unknown extent in combined provider",
+                            provider_code,
+                            ":",
+                            extent_code,
+                        )
+                        continue
+                    if color_code == "default":
+                        try:
+                            color_code = providers_dict[layer_code]["color_filters"]
+                        except KeyError:
+                            print(
+                                "Unknown color filter in combined provider",
+                                provider_code,
+                                ":",
+                                color_code,
                             )
-                    except ValueError:
+                            continue
+                    if color_code not in color_filters_dict:
+                        try:
+                            if color_code[0] == "L":
+                                b = 1
+                            elif color_code[0] == "D":
+                                b = -1
+                            else:
+                                # Neither a named filter nor an L/D code: only
+                                # this line is skipped (below). Without this, b
+                                # was unbound and the UnboundLocalError dropped
+                                # the whole combined provider (#64).
+                                raise ValueError(color_code)
+                            brightness = b * float(color_code[1:3])
+                            contrast = float(color_code[4:6])
+                            color_filters_dict[color_code] = [
+                                ["brightness-contrast", brightness, contrast]
+                            ]
+                            if len(color_code) > 6:
+                                saturation = float(color_code[7:9])
+                                color_filters_dict[color_code].append(
+                                    ["saturation", saturation]
+                                )
+                        except ValueError:
+                            print(
+                                "Unknown color filter in combined provider",
+                                provider_code,
+                                ":",
+                                color_code,
+                            )
+                            continue
+                    if priority not in ["low", "medium", "high", "mask"]:
                         print(
-                            "Unknown color filter in combined provider",
+                            "Unknown priority in combined provider",
                             provider_code,
                             ":",
-                            color_code,
+                            priority,
                         )
                         continue
-                if priority not in ["low", "medium", "high", "mask"]:
-                    print(
-                        "Unknown priority in combined provider",
-                        provider_code,
-                        ":",
-                        priority,
+                    comb_list.append(
+                        {
+                            "layer_code": layer_code,
+                            "extent_code": extent_code,
+                            "color_code": color_code,
+                            "priority": priority,
+                        }
                     )
-                    continue
-                comb_list.append(
-                    {
-                        "layer_code": layer_code,
-                        "extent_code": extent_code,
-                        "color_code": color_code,
-                        "priority": priority,
-                    }
-                )
-            f.close()
             if comb_list:
                 combined_providers_dict[provider_code] = comb_list
             else:
@@ -854,40 +850,39 @@ def initialize_local_combined_providers_dict(tile):
 
 ################################################################################
 def read_tilematrixsets(file_name):
-    f = open(file_name, "r")
+    with open(file_name, "r") as f:
 
-    def xml_decode(line):
-        field = line.split("<")[1].split(">")[0]
-        str_value = line.split(">")[1].split("<")[0]
-        return [field, str_value]
+        def xml_decode(line):
+            field = line.split("<")[1].split(">")[0]
+            str_value = line.split(">")[1].split("<")[0]
+            return [field, str_value]
 
-    tilematrixsets = []
-    line = f.readline()
-    while line:
-        if line.strip() == "<TileMatrixSet>":
-            tilematrixset = {}
-            tilematrixset["tilematrices"] = []
-            line = f.readline()
-            while not line.strip() == "</TileMatrixSet>":
-                if line.strip() == "<TileMatrix>":
-                    tilematrix = {}
-                    line = f.readline()
-                    while not line.strip() == "</TileMatrix>":
-                        field, str_value = xml_decode(line)
-                        if "Identifier" in field:
-                            field = "identifier"
-                        tilematrix[field] = str_value
-                        line = f.readline()
-                    tilematrixset["tilematrices"].append(tilematrix)
-                elif "Identifier" in line:
-                    field, str_value = xml_decode(line)
-                    tilematrixset["identifier"] = str_value
-                line = f.readline()
-            tilematrixsets.append(tilematrixset)
-        else:
-            pass
+        tilematrixsets = []
         line = f.readline()
-    f.close()
+        while line:
+            if line.strip() == "<TileMatrixSet>":
+                tilematrixset = {}
+                tilematrixset["tilematrices"] = []
+                line = f.readline()
+                while not line.strip() == "</TileMatrixSet>":
+                    if line.strip() == "<TileMatrix>":
+                        tilematrix = {}
+                        line = f.readline()
+                        while not line.strip() == "</TileMatrix>":
+                            field, str_value = xml_decode(line)
+                            if "Identifier" in field:
+                                field = "identifier"
+                            tilematrix[field] = str_value
+                            line = f.readline()
+                        tilematrixset["tilematrices"].append(tilematrix)
+                    elif "Identifier" in line:
+                        field, str_value = xml_decode(line)
+                        tilematrixset["identifier"] = str_value
+                    line = f.readline()
+                tilematrixsets.append(tilematrixset)
+            else:
+                pass
+            line = f.readline()
     return tilematrixsets
 
 

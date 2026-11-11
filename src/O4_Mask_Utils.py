@@ -641,60 +641,59 @@ def record_water_tris(tile):
         f_mesh.close()
         if not tile.use_masks_for_inland:
             UI.vprint(2, "   Taking care of inland water near shoreline")
-            f_mesh = open(mesh_file_name, "r")
-            for i in range(0, 4):
-                f_mesh.readline()
-            nbr_pt_in = int(f_mesh.readline())
-            for i in range(0, 2 * nbr_pt_in + 5):
-                f_mesh.readline()
-            nbr_tri_in = int(f_mesh.readline())  # read nbr of tris
-            step_stones = max(nbr_tri_in // 100, 1)
-            percent = -1
-            for i in range(0, nbr_tri_in):
-                if i % step_stones == 0:
-                    percent += 1
-                    UI.progress_bar(1, int(percent * 5 / 10))
-                    if UI.red_flag:
-                        UI.exit_message_and_bottom_line()
-                        return None
-                (n1, n2, n3, tri_type) = [
-                    int(x) - 1 for x in f_mesh.readline().split()[:4]
-                ]
-                tri_type += 1
-                if not (tri_type & has_water) == 1:
-                    continue
-                (lon1, lat1) = pt_in[5 * n1 : 5 * n1 + 2]
-                (lon2, lat2) = pt_in[5 * n2 : 5 * n2 + 2]
-                (lon3, lat3) = pt_in[5 * n3 : 5 * n3 + 2]
-                bary_lat = (lat1 + lat2 + lat3) / 3
-                bary_lon = (lon1 + lon2 + lon3) / 3
-                (til_x, til_y) = GEO.wgs84_to_orthogrid(
-                    bary_lat, bary_lon, tile.mask_zl
-                )
-                if (
-                    til_x < til_x_min - 16
-                    or til_x > til_x_max + 16
-                    or til_y < til_y_min - 16
-                    or til_y > til_y_max + 16
-                ):
-                    continue
-                (til_x2, til_y2) = GEO.wgs84_to_orthogrid(
-                    bary_lat, bary_lon, tile.mask_zl + 2
-                )
-                a = (til_x2 // 16) % 4
-                b = (til_y2 // 16) % 4
-                # Here an inland water tri is added ONLY if sea water tri were 
-                # already added for this mask extent
-                if (til_x, til_y) in dico_sea:
-                    if (til_x, til_y) in dico_inland:
-                        dico_inland[(til_x, til_y)].append(
-                            (lat1, lon1, lat2, lon2, lat3, lon3)
-                        )
-                    else:
-                        dico_inland[(til_x, til_y)] = [
-                            (lat1, lon1, lat2, lon2, lat3, lon3)
-                        ]
-            f_mesh.close()
+            with open(mesh_file_name, "r") as f_mesh:
+                for i in range(0, 4):
+                    f_mesh.readline()
+                nbr_pt_in = int(f_mesh.readline())
+                for i in range(0, 2 * nbr_pt_in + 5):
+                    f_mesh.readline()
+                nbr_tri_in = int(f_mesh.readline())  # read nbr of tris
+                step_stones = max(nbr_tri_in // 100, 1)
+                percent = -1
+                for i in range(0, nbr_tri_in):
+                    if i % step_stones == 0:
+                        percent += 1
+                        UI.progress_bar(1, int(percent * 5 / 10))
+                        if UI.red_flag:
+                            UI.exit_message_and_bottom_line()
+                            return None
+                    (n1, n2, n3, tri_type) = [
+                        int(x) - 1 for x in f_mesh.readline().split()[:4]
+                    ]
+                    tri_type += 1
+                    if not (tri_type & has_water) == 1:
+                        continue
+                    (lon1, lat1) = pt_in[5 * n1 : 5 * n1 + 2]
+                    (lon2, lat2) = pt_in[5 * n2 : 5 * n2 + 2]
+                    (lon3, lat3) = pt_in[5 * n3 : 5 * n3 + 2]
+                    bary_lat = (lat1 + lat2 + lat3) / 3
+                    bary_lon = (lon1 + lon2 + lon3) / 3
+                    (til_x, til_y) = GEO.wgs84_to_orthogrid(
+                        bary_lat, bary_lon, tile.mask_zl
+                    )
+                    if (
+                        til_x < til_x_min - 16
+                        or til_x > til_x_max + 16
+                        or til_y < til_y_min - 16
+                        or til_y > til_y_max + 16
+                    ):
+                        continue
+                    (til_x2, til_y2) = GEO.wgs84_to_orthogrid(
+                        bary_lat, bary_lon, tile.mask_zl + 2
+                    )
+                    a = (til_x2 // 16) % 4
+                    b = (til_y2 // 16) % 4
+                    # Here an inland water tri is added ONLY if sea water tri were 
+                    # already added for this mask extent
+                    if (til_x, til_y) in dico_sea:
+                        if (til_x, til_y) in dico_inland:
+                            dico_inland[(til_x, til_y)].append(
+                                (lat1, lon1, lat2, lon2, lat3, lon3)
+                            )
+                        else:
+                            dico_inland[(til_x, til_y)] = [
+                                (lat1, lon1, lat2, lon2, lat3, lon3)
+                            ]
     
     return (dico_sea, dico_inland)
 ################################################################################
@@ -868,15 +867,14 @@ def blur_mask(img_array, tile, sea_level):
 
 ################################################################################
 def triangulation_to_image(name, pixel_size, grid_size_or_bbox):
-    f_node = open(name + ".1.node", "r")
-    nbr_pt = int(f_node.readline().split()[0])
-    vertices = numpy.zeros(2 * nbr_pt)
-    for i in range(0, nbr_pt):
-        # Triangle .node files have the node number in front
-        vertices[2 * i : 2 * i + 2] = [
-            float(x) for x in f_node.readline().split()[1:3]
-        ]
-    f_node.close()
+    with open(name + ".1.node", "r") as f_node:
+        nbr_pt = int(f_node.readline().split()[0])
+        vertices = numpy.zeros(2 * nbr_pt)
+        for i in range(0, nbr_pt):
+            # Triangle .node files have the node number in front
+            vertices[2 * i : 2 * i + 2] = [
+                float(x) for x in f_node.readline().split()[1:3]
+            ]
     xmin = vertices[::2].min()
     xmax = vertices[::2].max()
     ymin = vertices[1::2].min()
@@ -894,38 +892,37 @@ def triangulation_to_image(name, pixel_size, grid_size_or_bbox):
         "1", (int((xmax - xmin) / pixel_size), int((ymax - ymin) / pixel_size))
     )
     mask_draw = ImageDraw.Draw(mask_im)
-    f_ele = open(name + ".1.ele", "r")
-    nbr_tri = int(f_ele.readline().split()[0])
-    for i in range(nbr_tri):
-        (n1, n2, n3, tritype) = [
-            int(x) - 1 for x in f_ele.readline().split()[1:5]
-        ]
-        tritype += 1
-        if not tritype:
-            continue
-        (x1, y1) = vertices[2 * n1 : 2 * n1 + 2]
-        (x2, y2) = vertices[2 * n2 : 2 * n2 + 2]
-        (x3, y3) = vertices[2 * n3 : 2 * n3 + 2]
-        (px1, py1) = [
-            round((x1 - xmin) / pixel_size),
-            round((y1 - ymin) / pixel_size),
-        ]
-        (px2, py2) = [
-            round((x2 - xmin) / pixel_size),
-            round((y2 - ymin) / pixel_size),
-        ]
-        (px3, py3) = [
-            round((x3 - xmin) / pixel_size),
-            round((y3 - ymin) / pixel_size),
-        ]
-        try:
-            mask_draw.polygon(
-                [(px1, py1), (px2, py2), (px3, py3)], fill="white"
-            )
-        except Exception:
-            # One degenerate triangle (extent tool); the rest still draws.
-            pass
-    f_ele.close()
+    with open(name + ".1.ele", "r") as f_ele:
+        nbr_tri = int(f_ele.readline().split()[0])
+        for i in range(nbr_tri):
+            (n1, n2, n3, tritype) = [
+                int(x) - 1 for x in f_ele.readline().split()[1:5]
+            ]
+            tritype += 1
+            if not tritype:
+                continue
+            (x1, y1) = vertices[2 * n1 : 2 * n1 + 2]
+            (x2, y2) = vertices[2 * n2 : 2 * n2 + 2]
+            (x3, y3) = vertices[2 * n3 : 2 * n3 + 2]
+            (px1, py1) = [
+                round((x1 - xmin) / pixel_size),
+                round((y1 - ymin) / pixel_size),
+            ]
+            (px2, py2) = [
+                round((x2 - xmin) / pixel_size),
+                round((y2 - ymin) / pixel_size),
+            ]
+            (px3, py3) = [
+                round((x3 - xmin) / pixel_size),
+                round((y3 - ymin) / pixel_size),
+            ]
+            try:
+                mask_draw.polygon(
+                    [(px1, py1), (px2, py2), (px3, py3)], fill="white"
+                )
+            except Exception:
+                # One degenerate triangle (extent tool); the rest still draws.
+                pass
     return ((xmin, ymin, xmax, ymax), ImageOps.flip(mask_im).convert("L"))
 
 
@@ -1034,15 +1031,14 @@ if __name__ == "__main__":
     print("Mask size : ", mask_im.size, "pixels.")
     buffer = ""
     try:
-        f = open(name + ".ext", "r")
-        for line in f.readlines():
-            if ("#" not in line) or query:
-                continue
-            if "Initially" not in line:
-                buffer += "# Initially c" + line[3:]
-            else:
-                buffer += line
-        f.close()
+        with open(name + ".ext", "r") as f:
+            for line in f.readlines():
+                if ("#" not in line) or query:
+                    continue
+                if "Initially" not in line:
+                    buffer += "# Initially c" + line[3:]
+                else:
+                    buffer += line
     except OSError:
         pass
     buffer += "# Created with : " + " ".join(sys.argv) + "\n"
@@ -1057,9 +1053,8 @@ if __name__ == "__main__":
         + str(ymax)
         + "\n"
     )
-    f = open(name + ".ext", "w")
-    f.write(buffer)
-    f.close()
+    with open(name + ".ext", "w") as f:
+        f.write(buffer)
     if buffer_width:
         UI.vprint(1, "Buffer of the mask...")
         mask_im = mask_im.filter(ImageFilter.GaussianBlur(buffer_width / 4))

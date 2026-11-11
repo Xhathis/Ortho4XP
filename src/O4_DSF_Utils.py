@@ -119,9 +119,8 @@ def zone_list_to_ortho_dico(tile):
     if tile.cover_airports_with_highres in ("True", "ICAO"):
         UI.vprint(1, "-> Checking airport locations for upgraded zoomlevel.")
         try:
-            f = open(FNAMES.apt_file(tile), "rb")
-            dico_airports = pickle.load(f)
-            f.close()
+            with open(FNAMES.apt_file(tile), "rb") as f:
+                dico_airports = pickle.load(f)
         except (OSError, EOFError, pickle.UnpicklingError):
             UI.lvprint(
                 1,
@@ -410,9 +409,8 @@ def extract_elevation_and_bathymetry_data(lat, lon):
         )
         return None
 
-    f = open(tmp_file, "rb")
-    dsfid = f.read(2).decode("ascii")
-    f.close()
+    with open(tmp_file, "rb") as f:
+        dsfid = f.read(2).decode("ascii")
     if dsfid == "7z":
         UI.vprint(2, "     The original DSF is a 7z archive, uncompressing...")
         # Any failure here (tmp file locked, 7z failing) used to crash step 3
@@ -439,67 +437,66 @@ def extract_elevation_and_bathymetry_data(lat, lon):
             return None
         os.remove(tmp_file + ".7z")
     file_len = os.path.getsize(tmp_file)
-    f = open(tmp_file, "rb")
-    # read filetype cookie
-    dsfid = f.read(8).decode("ascii")
-    if dsfid != "XPLNEDSF":
-        f.close()
-        UI.lvprint(
-            0, "     ERROR: Corrupted Global Scenery DSF", global_scenery_dsf
-        )
-        os.remove(tmp_file)
-        return None
-    bDEMN = bDEMS = b""
-    # skip format number
-    f.read(4)
-    # read atoms
-    atoms_len = file_len - 12 - 16  # 12 for HDR and 16 for MD5
-    atoms_consumed = 0
-    while atoms_consumed < atoms_len:
-        atom_hdr = f.read(4).decode("ascii")
-        atom_len = struct.unpack("<I", f.read(4))[0]
-        if atom_hdr == "SMED":
-            bDEMS_orig = f.read(atom_len - 8)
-            bDEMS = b""
-            bELEV = b""
-            g = io.BytesIO(bDEMS_orig)
-            consumed = 8
-            i = 0
-            while consumed < atom_len:
-                bH = g.read(4)
-                sub_atom_hdr = bH.decode("ascii")
-                bL = g.read(4)
-                sub_atom_len = struct.unpack("<I", bL)[0]
-                bDATA = g.read(sub_atom_len - 8)
-                if (sub_atom_len > 100):
-                    i += 1
-                    if (i == 1):
-                        bELEV = bDATA
-                    elif (i == 2):
-                        # XP bathy data for inland water is only partial,
-                        # we use a safe margin = DEM_elev - 2 to cope with it
-                        bathy = numpy.frombuffer(bDATA, dtype=numpy.int16)
-                        safe  = numpy.frombuffer(bELEV, dtype=numpy.int16) - 2 
-                        bathy = numpy.minimum(bathy, safe)
-                        bDATA = bytes(bathy)
-                bDEMS += bH + bL + bDATA
-                consumed += sub_atom_len
-            g.close()
-        elif atom_hdr == "NFED":
-            consumed = 8
-            while consumed < atom_len:
-                sub_atom_hdr = f.read(4).decode("ascii")
-                sub_atom_len = struct.unpack("<I", f.read(4))[0]
-                data = f.read(sub_atom_len - 8)
-                if sub_atom_hdr == "NMED":
-                    bDEMN = data
-                consumed += sub_atom_len
-        else:
-            f.read(atom_len - 8)
+    with open(tmp_file, "rb") as f:
+        # read filetype cookie
+        dsfid = f.read(8).decode("ascii")
+        if dsfid != "XPLNEDSF":
+            f.close()
+            UI.lvprint(
+                0, "     ERROR: Corrupted Global Scenery DSF", global_scenery_dsf
+            )
+            os.remove(tmp_file)
+            return None
+        bDEMN = bDEMS = b""
+        # skip format number
+        f.read(4)
+        # read atoms
+        atoms_len = file_len - 12 - 16  # 12 for HDR and 16 for MD5
+        atoms_consumed = 0
+        while atoms_consumed < atoms_len:
+            atom_hdr = f.read(4).decode("ascii")
+            atom_len = struct.unpack("<I", f.read(4))[0]
+            if atom_hdr == "SMED":
+                bDEMS_orig = f.read(atom_len - 8)
+                bDEMS = b""
+                bELEV = b""
+                g = io.BytesIO(bDEMS_orig)
+                consumed = 8
+                i = 0
+                while consumed < atom_len:
+                    bH = g.read(4)
+                    sub_atom_hdr = bH.decode("ascii")
+                    bL = g.read(4)
+                    sub_atom_len = struct.unpack("<I", bL)[0]
+                    bDATA = g.read(sub_atom_len - 8)
+                    if (sub_atom_len > 100):
+                        i += 1
+                        if (i == 1):
+                            bELEV = bDATA
+                        elif (i == 2):
+                            # XP bathy data for inland water is only partial,
+                            # we use a safe margin = DEM_elev - 2 to cope with it
+                            bathy = numpy.frombuffer(bDATA, dtype=numpy.int16)
+                            safe  = numpy.frombuffer(bELEV, dtype=numpy.int16) - 2 
+                            bathy = numpy.minimum(bathy, safe)
+                            bDATA = bytes(bathy)
+                    bDEMS += bH + bL + bDATA
+                    consumed += sub_atom_len
+                g.close()
+            elif atom_hdr == "NFED":
+                consumed = 8
+                while consumed < atom_len:
+                    sub_atom_hdr = f.read(4).decode("ascii")
+                    sub_atom_len = struct.unpack("<I", f.read(4))[0]
+                    data = f.read(sub_atom_len - 8)
+                    if sub_atom_hdr == "NMED":
+                        bDEMN = data
+                    consumed += sub_atom_len
+            else:
+                f.read(atom_len - 8)
 
-        atoms_consumed += atom_len
+            atoms_consumed += atom_len
 
-    f.close()
     os.remove(tmp_file)
 
     return (bDEMN, bDEMS)
@@ -1154,250 +1151,247 @@ def build_dsf(tile, download_queue):
     UI.vprint(
         2, "     Size of GEOD atom : " + str(size_of_geod_atom) + " bytes."
     )
-    f = open(dsf_file_name + ".tmp", "wb")
-    f.write(b"XPLNEDSF")
-    f.write(struct.pack("<I", 1))
+    with open(dsf_file_name + ".tmp", "wb") as f:
+        f.write(b"XPLNEDSF")
+        f.write(struct.pack("<I", 1))
 
-    # Head super-atom
-    f.write(b"DAEH")
-    f.write(struct.pack("<I", size_of_head_atom))
-    f.write(b"PORP")
-    f.write(struct.pack("<I", size_of_prop_atom))
-    f.write(bPROP)
+        # Head super-atom
+        f.write(b"DAEH")
+        f.write(struct.pack("<I", size_of_head_atom))
+        f.write(b"PORP")
+        f.write(struct.pack("<I", size_of_prop_atom))
+        f.write(bPROP)
 
-    # Definitions super-atom
-    f.write(b"NFED")
-    f.write(struct.pack("<I", size_of_defn_atom))
-    f.write(b"TRET")
-    f.write(struct.pack("<I", 8 + len(bTERT)))
-    f.write(bTERT)
-    f.write(b"TJBO")
-    f.write(struct.pack("<I", 8 + len(bOBJT)))
-    f.write(bOBJT)
-    f.write(b"YLOP")
-    f.write(struct.pack("<I", 8 + len(bPOLY)))
-    f.write(bPOLY)
-    f.write(b"WTEN")
-    f.write(struct.pack("<I", 8 + len(bNETW)))
-    f.write(bNETW)
-    f.write(b"NMED")
-    f.write(struct.pack("<I", 8 + len(bDEMN)))
-    f.write(bDEMN)
+        # Definitions super-atom
+        f.write(b"NFED")
+        f.write(struct.pack("<I", size_of_defn_atom))
+        f.write(b"TRET")
+        f.write(struct.pack("<I", 8 + len(bTERT)))
+        f.write(bTERT)
+        f.write(b"TJBO")
+        f.write(struct.pack("<I", 8 + len(bOBJT)))
+        f.write(bOBJT)
+        f.write(b"YLOP")
+        f.write(struct.pack("<I", 8 + len(bPOLY)))
+        f.write(bPOLY)
+        f.write(b"WTEN")
+        f.write(struct.pack("<I", 8 + len(bNETW)))
+        f.write(bNETW)
+        f.write(b"NMED")
+        f.write(struct.pack("<I", 8 + len(bDEMN)))
+        f.write(bDEMN)
 
-    # Geodata super-atom
-    f.write(b"DOEG")
-    f.write(struct.pack("<I", size_of_geod_atom))
-    f.write(bGEOD)
-    for k in range(dsf_pool_nbr):
-        if dsf_pool_length[k] == 0:
-            continue
-        f.write(b"LOOP")
-        f.write(
-            struct.pack(
-                "<I",
-                13
-                + dsf_pool_plane[k]
-                + 2 * dsf_pool_plane[k] * dsf_pool_length[k],
+        # Geodata super-atom
+        f.write(b"DOEG")
+        f.write(struct.pack("<I", size_of_geod_atom))
+        f.write(bGEOD)
+        for k in range(dsf_pool_nbr):
+            if dsf_pool_length[k] == 0:
+                continue
+            f.write(b"LOOP")
+            f.write(
+                struct.pack(
+                    "<I",
+                    13
+                    + dsf_pool_plane[k]
+                    + 2 * dsf_pool_plane[k] * dsf_pool_length[k],
+                )
             )
+            f.write(struct.pack("<I", dsf_pool_length[k]))
+            f.write(struct.pack("<B", dsf_pool_plane[k]))
+            for l in range(dsf_pool_plane[k]):
+                f.write(struct.pack("<B", 0))
+                for m in range(dsf_pool_length[k]):
+                    f.write(
+                        struct.pack("<H", dsf_pools[k][dsf_pool_plane[k] * m + l])
+                    )
+        for k in range(dsf_pool_nbr):
+            if dsf_pool_length[k] == 0:
+                continue
+            f.write(b"LACS")
+            f.write(struct.pack("<I", 8 + 8 * dsf_pool_plane[k]))
+            for l in range(2 * dsf_pool_plane[k]):
+                f.write(struct.pack("<f", pool_param[k % pool_nbr][l]))
+
+        UI.progress_bar(1, 95)
+        if UI.red_flag:
+            UI.vprint(1, "DSF construction interrupted.")
+            return 0
+
+        # Since we possibly skipped some pools, and since we possibly
+        # get pools from elsewhere, we rebuild a dico
+        # which tells the pool position in the dsf of a pool prior
+        # to the stripping :
+
+        dico_new_dsf_pool = {}
+        new_idx_dsfpool = nbr_dsfpools_yet_in
+        for k in range(dsf_pool_nbr):
+            if dsf_pool_length[k] != 0:
+                dico_new_dsf_pool[k] = new_idx_dsfpool
+                new_idx_dsfpool += 1
+
+        # Commands atom
+        # we first compute its size :
+        size_of_cmds_atom = 8 + len(bCMDS)
+        for terrain_idx in textured_tris:
+            if len(textured_tris[terrain_idx]) == 0:
+                continue
+            size_of_cmds_atom += 3
+            for idx_dsfpool in textured_tris[terrain_idx]:
+                if idx_dsfpool != "cross-pool":
+                    size_of_cmds_atom += 13 + 2 * (
+                        len(textured_tris[terrain_idx][idx_dsfpool])
+                        + ceil(len(textured_tris[terrain_idx][idx_dsfpool]) / 255)
+                    )
+                else:
+                    size_of_cmds_atom += 13 + 2 * (
+                        len(textured_tris[terrain_idx][idx_dsfpool])
+                        + ceil(len(textured_tris[terrain_idx][idx_dsfpool]) / 510)
+                    )
+        UI.vprint(
+            2, "     Size of CMDS atom : " + str(size_of_cmds_atom) + " bytes."
         )
-        f.write(struct.pack("<I", dsf_pool_length[k]))
-        f.write(struct.pack("<B", dsf_pool_plane[k]))
-        for l in range(dsf_pool_plane[k]):
-            f.write(struct.pack("<B", 0))
-            for m in range(dsf_pool_length[k]):
-                f.write(
-                    struct.pack("<H", dsf_pools[k][dsf_pool_plane[k] * m + l])
-                )
-    for k in range(dsf_pool_nbr):
-        if dsf_pool_length[k] == 0:
-            continue
-        f.write(b"LACS")
-        f.write(struct.pack("<I", 8 + 8 * dsf_pool_plane[k]))
-        for l in range(2 * dsf_pool_plane[k]):
-            f.write(struct.pack("<f", pool_param[k % pool_nbr][l]))
-
-    UI.progress_bar(1, 95)
-    if UI.red_flag:
-        UI.vprint(1, "DSF construction interrupted.")
-        return 0
-
-    # Since we possibly skipped some pools, and since we possibly
-    # get pools from elsewhere, we rebuild a dico
-    # which tells the pool position in the dsf of a pool prior
-    # to the stripping :
-
-    dico_new_dsf_pool = {}
-    new_idx_dsfpool = nbr_dsfpools_yet_in
-    for k in range(dsf_pool_nbr):
-        if dsf_pool_length[k] != 0:
-            dico_new_dsf_pool[k] = new_idx_dsfpool
-            new_idx_dsfpool += 1
-
-    # Commands atom
-    # we first compute its size :
-    size_of_cmds_atom = 8 + len(bCMDS)
-    for terrain_idx in textured_tris:
-        if len(textured_tris[terrain_idx]) == 0:
-            continue
-        size_of_cmds_atom += 3
-        for idx_dsfpool in textured_tris[terrain_idx]:
-            if idx_dsfpool != "cross-pool":
-                size_of_cmds_atom += 13 + 2 * (
-                    len(textured_tris[terrain_idx][idx_dsfpool])
-                    + ceil(len(textured_tris[terrain_idx][idx_dsfpool]) / 255)
-                )
-            else:
-                size_of_cmds_atom += 13 + 2 * (
-                    len(textured_tris[terrain_idx][idx_dsfpool])
-                    + ceil(len(textured_tris[terrain_idx][idx_dsfpool]) / 510)
-                )
-    UI.vprint(
-        2, "     Size of CMDS atom : " + str(size_of_cmds_atom) + " bytes."
-    )
-    f.write(b"SDMC")  # CMDS header
-    f.write(struct.pack("<I", size_of_cmds_atom))  # CMDS length
-    f.write(bCMDS)
-    for terrain_idx in textured_tris:
-        if len(textured_tris[terrain_idx]) == 0:
-            continue
-        # print("terrain_idx = "+str(terrain_idx))
-        f.write(struct.pack("<B", 4))  # SET DEFINITION 16
-        f.write(struct.pack("<H", terrain_idx))  # TERRAIN INDEX
-        flag = (
-            1 if terrain_idx not in overlay_terrains else 2
-        )  # physical or overlay
-        lod = -1 if flag == 1 else tile.overlay_lod
-        for idx_dsfpool in textured_tris[terrain_idx]:
-            if idx_dsfpool != "cross-pool":
-                f.write(struct.pack("<B", 1))  # POOL SELECT
-                f.write(
-                    struct.pack("<H", dico_new_dsf_pool[idx_dsfpool])
-                )  # POOL INDEX
-
-                f.write(struct.pack("<B", 18))  # TERRAIN PATCH FLAGS AND LOD
-                f.write(struct.pack("<B", flag))  # FLAG
-                f.write(struct.pack("<f", 0))  # NEAR LOD
-                f.write(struct.pack("<f", lod))  # FAR LOD
-
-                blocks = floor(
-                    len(textured_tris[terrain_idx][idx_dsfpool]) / 255
-                )
-                for j in range(blocks):
-                    f.write(struct.pack("<B", 23))  # PATCH TRIANGLE
-                    f.write(struct.pack("<B", 255))  # COORDINATE COUNT
-
-                    for k in range(255):
-                        f.write(
-                            struct.pack(
-                                "<H",
-                                textured_tris[terrain_idx][idx_dsfpool][
-                                    255 * j + k
-                                ],
-                            )
-                        )  # COORDINATE IDX
-                remaining_tri_p = (
-                    len(textured_tris[terrain_idx][idx_dsfpool]) % 255
-                )
-                if remaining_tri_p != 0:
-                    f.write(struct.pack("<B", 23))  # PATCH TRIANGLE
+        f.write(b"SDMC")  # CMDS header
+        f.write(struct.pack("<I", size_of_cmds_atom))  # CMDS length
+        f.write(bCMDS)
+        for terrain_idx in textured_tris:
+            if len(textured_tris[terrain_idx]) == 0:
+                continue
+            # print("terrain_idx = "+str(terrain_idx))
+            f.write(struct.pack("<B", 4))  # SET DEFINITION 16
+            f.write(struct.pack("<H", terrain_idx))  # TERRAIN INDEX
+            flag = (
+                1 if terrain_idx not in overlay_terrains else 2
+            )  # physical or overlay
+            lod = -1 if flag == 1 else tile.overlay_lod
+            for idx_dsfpool in textured_tris[terrain_idx]:
+                if idx_dsfpool != "cross-pool":
+                    f.write(struct.pack("<B", 1))  # POOL SELECT
                     f.write(
-                        struct.pack("<B", remaining_tri_p)
-                    )  # COORDINATE COUNT
-                    for k in range(remaining_tri_p):
-                        f.write(
-                            struct.pack(
-                                "<H",
-                                textured_tris[terrain_idx][idx_dsfpool][
-                                    255 * blocks + k
-                                ],
-                            )
-                        )  # COORDINATE IDX
-            else:  # idx_dsfpool == 'cross-pool'
-                pool_idx_init = textured_tris[terrain_idx][idx_dsfpool][0]
-                f.write(struct.pack("<B", 1))  # POOL SELECT
-                f.write(
-                    struct.pack("<H", dico_new_dsf_pool[pool_idx_init])
-                )  # POOL INDEX
-                f.write(struct.pack("<B", 18))  # TERRAIN PATCH FLAGS AND LOD
-                f.write(struct.pack("<B", flag))  # FLAG
-                f.write(struct.pack("<f", 0))  # NEAR LOD
-                f.write(struct.pack("<f", lod))  # FAR LOD
+                        struct.pack("<H", dico_new_dsf_pool[idx_dsfpool])
+                    )  # POOL INDEX
 
-                blocks = floor(
-                    len(textured_tris[terrain_idx][idx_dsfpool]) / 510
-                )
-                for j in range(blocks):
-                    f.write(struct.pack("<B", 24))  # PATCH TRIANGLE CROSS-POOL
-                    f.write(struct.pack("<B", 255))  # COORDINATE COUNT
-                    for k in range(255):
-                        f.write(
-                            struct.pack(
-                                "<H",
-                                dico_new_dsf_pool[
+                    f.write(struct.pack("<B", 18))  # TERRAIN PATCH FLAGS AND LOD
+                    f.write(struct.pack("<B", flag))  # FLAG
+                    f.write(struct.pack("<f", 0))  # NEAR LOD
+                    f.write(struct.pack("<f", lod))  # FAR LOD
+
+                    blocks = floor(
+                        len(textured_tris[terrain_idx][idx_dsfpool]) / 255
+                    )
+                    for j in range(blocks):
+                        f.write(struct.pack("<B", 23))  # PATCH TRIANGLE
+                        f.write(struct.pack("<B", 255))  # COORDINATE COUNT
+
+                        for k in range(255):
+                            f.write(
+                                struct.pack(
+                                    "<H",
                                     textured_tris[terrain_idx][idx_dsfpool][
-                                        510 * j + 2 * k
-                                    ]
-                                ],
-                            )
-                        )  # POOL IDX
+                                        255 * j + k
+                                    ],
+                                )
+                            )  # COORDINATE IDX
+                    remaining_tri_p = (
+                        len(textured_tris[terrain_idx][idx_dsfpool]) % 255
+                    )
+                    if remaining_tri_p != 0:
+                        f.write(struct.pack("<B", 23))  # PATCH TRIANGLE
                         f.write(
-                            struct.pack(
-                                "<H",
-                                textured_tris[terrain_idx][idx_dsfpool][
-                                    510 * j + 2 * k + 1
-                                ],
-                            )
-                        )  # POS_IN_POOL IDX
-                remaining_tri_p = int(
-                    (len(textured_tris[terrain_idx][idx_dsfpool]) % 510) / 2
-                )
-                if remaining_tri_p != 0:
-                    f.write(struct.pack("<B", 24))  # PATCH TRIANGLE CROSS-POOL
+                            struct.pack("<B", remaining_tri_p)
+                        )  # COORDINATE COUNT
+                        for k in range(remaining_tri_p):
+                            f.write(
+                                struct.pack(
+                                    "<H",
+                                    textured_tris[terrain_idx][idx_dsfpool][
+                                        255 * blocks + k
+                                    ],
+                                )
+                            )  # COORDINATE IDX
+                else:  # idx_dsfpool == 'cross-pool'
+                    pool_idx_init = textured_tris[terrain_idx][idx_dsfpool][0]
+                    f.write(struct.pack("<B", 1))  # POOL SELECT
                     f.write(
-                        struct.pack("<B", remaining_tri_p)
-                    )  # COORDINATE COUNT
-                    for k in range(remaining_tri_p):
-                        f.write(
-                            struct.pack(
-                                "<H",
-                                dico_new_dsf_pool[
+                        struct.pack("<H", dico_new_dsf_pool[pool_idx_init])
+                    )  # POOL INDEX
+                    f.write(struct.pack("<B", 18))  # TERRAIN PATCH FLAGS AND LOD
+                    f.write(struct.pack("<B", flag))  # FLAG
+                    f.write(struct.pack("<f", 0))  # NEAR LOD
+                    f.write(struct.pack("<f", lod))  # FAR LOD
+
+                    blocks = floor(
+                        len(textured_tris[terrain_idx][idx_dsfpool]) / 510
+                    )
+                    for j in range(blocks):
+                        f.write(struct.pack("<B", 24))  # PATCH TRIANGLE CROSS-POOL
+                        f.write(struct.pack("<B", 255))  # COORDINATE COUNT
+                        for k in range(255):
+                            f.write(
+                                struct.pack(
+                                    "<H",
+                                    dico_new_dsf_pool[
+                                        textured_tris[terrain_idx][idx_dsfpool][
+                                            510 * j + 2 * k
+                                        ]
+                                    ],
+                                )
+                            )  # POOL IDX
+                            f.write(
+                                struct.pack(
+                                    "<H",
                                     textured_tris[terrain_idx][idx_dsfpool][
-                                        510 * blocks + 2 * k
-                                    ]
-                                ],
-                            )
-                        )  # POOL IDX
+                                        510 * j + 2 * k + 1
+                                    ],
+                                )
+                            )  # POS_IN_POOL IDX
+                    remaining_tri_p = int(
+                        (len(textured_tris[terrain_idx][idx_dsfpool]) % 510) / 2
+                    )
+                    if remaining_tri_p != 0:
+                        f.write(struct.pack("<B", 24))  # PATCH TRIANGLE CROSS-POOL
                         f.write(
-                            struct.pack(
-                                "<H",
-                                textured_tris[terrain_idx][idx_dsfpool][
-                                    510 * blocks + 2 * k + 1
-                                ],
-                            )
-                        )  # POS_IN_PO0L IDX
+                            struct.pack("<B", remaining_tri_p)
+                        )  # COORDINATE COUNT
+                        for k in range(remaining_tri_p):
+                            f.write(
+                                struct.pack(
+                                    "<H",
+                                    dico_new_dsf_pool[
+                                        textured_tris[terrain_idx][idx_dsfpool][
+                                            510 * blocks + 2 * k
+                                        ]
+                                    ],
+                                )
+                            )  # POOL IDX
+                            f.write(
+                                struct.pack(
+                                    "<H",
+                                    textured_tris[terrain_idx][idx_dsfpool][
+                                        510 * blocks + 2 * k + 1
+                                    ],
+                                )
+                            )  # POS_IN_PO0L IDX
 
-    # DEMS atom
-    if bDEMS != b"":
-        f.write(b"SMED")
-        f.write(struct.pack("<I", 8 + len(bDEMS)))
-        f.write(bDEMS)
+        # DEMS atom
+        if bDEMS != b"":
+            f.write(b"SMED")
+            f.write(struct.pack("<I", 8 + len(bDEMS)))
+            f.write(bDEMS)
 
-    UI.progress_bar(1, 98)
-    if UI.red_flag:
-        UI.vprint(1, "DSF construction interrupted.")
-        return 0
+        UI.progress_bar(1, 98)
+        if UI.red_flag:
+            UI.vprint(1, "DSF construction interrupted.")
+            return 0
 
-    f.close()
 
-    f = open(dsf_file_name + ".tmp", "rb")
-    data = f.read()
-    m = hashlib.md5()
-    m.update(data)
-    md5sum = m.digest()
-    f.close()
-    f = open(dsf_file_name + ".tmp", "ab")
-    f.write(md5sum)
-    f.close()
+    with open(dsf_file_name + ".tmp", "rb") as f:
+        data = f.read()
+        m = hashlib.md5()
+        m.update(data)
+        md5sum = m.digest()
+    with open(dsf_file_name + ".tmp", "ab") as f:
+        f.write(md5sum)
     
     UI.progress_bar(1, 100)
     

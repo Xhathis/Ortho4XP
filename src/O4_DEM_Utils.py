@@ -539,10 +539,9 @@ def read_elevation_from_file(
     elif file_name[-4:].lower() == ".raw":
         try:
             nxdem = nydem = int(round(sqrt(os.path.getsize(file_name) / 2)))
-            f = open(file_name, "rb")
-            alt = array.array("h")
-            alt.fromfile(f, nxdem * nydem)
-            f.close()
+            with open(file_name, "rb") as f:
+                alt = array.array("h")
+                alt.fromfile(f, nxdem * nydem)
             if not info_only:
                 alt_dem = numpy.asarray(alt, dtype=numpy.float32).reshape(
                     (nxdem, nydem)

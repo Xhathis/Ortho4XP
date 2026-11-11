@@ -416,7 +416,7 @@ class OSM_layer:
                         nodeids.append(endptinit)
                         self.dicosmr[osmid][role].append(nodeids)
                         del dico_rel_check[role][endptinit]
-                if target_tags == None:
+                if target_tags is None:
                     for wayid in (
                         self.dicosmrorig[osmid]["outer"]
                         + self.dicosmrorig[osmid]["inner"]

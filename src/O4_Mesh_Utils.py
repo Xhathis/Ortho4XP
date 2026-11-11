@@ -35,8 +35,10 @@ else:
 community_server = False
 if os.path.exists(FNAMES.resource_path("community_server.txt")):
     try:
-        f = open(FNAMES.resource_path("community_server.txt"), "r")
-        for line in f.readlines():
+        # with: a module-level f stayed open as long as Ortho4XP ran.
+        with open(FNAMES.resource_path("community_server.txt"), "r") as f:
+            lines = f.readlines()
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
@@ -136,9 +138,8 @@ def build_curv_tol_weight_map(tile, weight_array):
             1, "-> Modifying curv_tol weight map according to runway locations."
         )
         try:
-            f = open(FNAMES.apt_file(tile), "rb")
-            dico_airports = pickle.load(f)
-            f.close()
+            with open(FNAMES.apt_file(tile), "rb") as f:
+                dico_airports = pickle.load(f)
         except (OSError, EOFError, pickle.UnpicklingError):
             UI.lvprint(
                 1,
@@ -237,17 +238,16 @@ def build_curv_tol_weight_map(tile, weight_array):
 ################################################################################
 def post_process_nodes_altitudes(tile):
     dico_attributes = VECT.Vector_Map.dico_attributes
-    f_node = open(FNAMES.output_node_file(tile), "r")
-    init_line_f_node = f_node.readline()
-    nbr_pt = int(init_line_f_node.split()[0])
-    vertices = numpy.zeros(6 * nbr_pt)
-    UI.vprint(1, "-> Loading of the mesh computed by Triangle4XP.")
-    for i in range(0, nbr_pt):
-        vertices[6 * i : 6 * i + 6] = [
-            float(x) for x in f_node.readline().split()[1:7]
-        ]
-    end_line_f_node = f_node.readline()
-    f_node.close()
+    with open(FNAMES.output_node_file(tile), "r") as f_node:
+        init_line_f_node = f_node.readline()
+        nbr_pt = int(init_line_f_node.split()[0])
+        vertices = numpy.zeros(6 * nbr_pt)
+        UI.vprint(1, "-> Loading of the mesh computed by Triangle4XP.")
+        for i in range(0, nbr_pt):
+            vertices[6 * i : 6 * i + 6] = [
+                float(x) for x in f_node.readline().split()[1:7]
+            ]
+        end_line_f_node = f_node.readline()
     UI.vprint(1, "-> Post processing of altitudes according to vector data")
     f_ele = open(FNAMES.output_ele_file(tile), "r")
     nbr_tri = int(f_ele.readline().split()[0])
@@ -271,6 +271,7 @@ def post_process_nodes_altitudes(tile):
             or attr & dico_attributes["SEA_EQUIV"]
         ):
             water_tris.add((v1, v2, v3))
+    f_ele.close()  # was never closed
     if tile.water_smoothing:
         UI.vprint(1, "   Smoothing inland water.")
         for j in range(tile.water_smoothing):
@@ -314,19 +315,18 @@ def post_process_nodes_altitudes(tile):
         vertices[6 * v2 + 4] = 0
         vertices[6 * v3 + 4] = 0
     UI.vprint(1, "-> Writing output nodes file.")
-    f_node = open(FNAMES.output_node_file(tile), "w")
-    f_node.write(init_line_f_node)
-    for i in range(0, nbr_pt):
-        f_node.write(
-            str(i + 1)
-            + " "
-            + " ".join(
-                ("{:.15f}".format(x) for x in vertices[6 * i : 6 * i + 6])
+    with open(FNAMES.output_node_file(tile), "w") as f_node:
+        f_node.write(init_line_f_node)
+        for i in range(0, nbr_pt):
+            f_node.write(
+                str(i + 1)
+                + " "
+                + " ".join(
+                    ("{:.15f}".format(x) for x in vertices[6 * i : 6 * i + 6])
+                )
+                + "\n"
             )
-            + "\n"
-        )
-    f_node.write(end_line_f_node)
-    f_node.close()
+        f_node.write(end_line_f_node)
     return vertices
 
 
@@ -337,39 +337,38 @@ def write_mesh_file(tile, vertices):
         "-> Writing final mesh to the file "
         + FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon),
     )
-    f_ele = open(FNAMES.output_ele_file(tile), "r")
-    nbr_vert = len(vertices) // 6
-    nbr_tri = int(f_ele.readline().split()[0])
-    f = open(FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon), "w")
-    f.write("MeshVersionFormatted 2\n")
-    f.write("Dimension 3\n\n")
-    f.write("Vertices\n")
-    f.write(str(nbr_vert) + "\n")
-    for i in range(0, nbr_vert):
-        f.write(
-            "{:.15f}".format(vertices[6 * i] + tile.lon)
-            + " "
-            + "{:.15f}".format(vertices[6 * i + 1] + tile.lat)
-            + " "
-            + "{:.15f}".format(vertices[6 * i + 2] / 100000)
-            + " 0\n"
-        )
-    f.write("\n")
-    f.write("Normals\n")
-    f.write(str(nbr_vert) + "\n")
-    for i in range(0, nbr_vert):
-        f.write(
-            "{:.2f}".format(vertices[6 * i + 3])
-            + " "
-            + "{:.2f}".format(vertices[6 * i + 4])
-            + " 0\n"
-        )
-    f.write("\n")
-    f.write("Triangles\n")
-    f.write(str(nbr_tri) + "\n")
-    for i in range(0, nbr_tri):
-        f.write(" ".join(f_ele.readline().split()[1:]) + "\n")
-    f_ele.close()
+    with open(FNAMES.output_ele_file(tile), "r") as f_ele:
+        nbr_vert = len(vertices) // 6
+        nbr_tri = int(f_ele.readline().split()[0])
+        f = open(FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon), "w")
+        f.write("MeshVersionFormatted 2\n")
+        f.write("Dimension 3\n\n")
+        f.write("Vertices\n")
+        f.write(str(nbr_vert) + "\n")
+        for i in range(0, nbr_vert):
+            f.write(
+                "{:.15f}".format(vertices[6 * i] + tile.lon)
+                + " "
+                + "{:.15f}".format(vertices[6 * i + 1] + tile.lat)
+                + " "
+                + "{:.15f}".format(vertices[6 * i + 2] / 100000)
+                + " 0\n"
+            )
+        f.write("\n")
+        f.write("Normals\n")
+        f.write(str(nbr_vert) + "\n")
+        for i in range(0, nbr_vert):
+            f.write(
+                "{:.2f}".format(vertices[6 * i + 3])
+                + " "
+                + "{:.2f}".format(vertices[6 * i + 4])
+                + " 0\n"
+            )
+        f.write("\n")
+        f.write("Triangles\n")
+        f.write(str(nbr_tri) + "\n")
+        for i in range(0, nbr_tri):
+            f.write(" ".join(f_ele.readline().split()[1:]) + "\n")
     f.close()
     return
 
@@ -531,15 +530,14 @@ def extract_mesh_to_obj(
     f_mesh.close()
     f.close()
     # then the mtl file
-    f = open(mtl_file_name, "w")
-    f.write(
-        "newmtl orthophoto\nmap_Kd "
-        + FNAMES.geotiff_file_name_from_attributes(
-            til_x_left, til_y_top, zoomlevel, provider_code
+    with open(mtl_file_name, "w") as f:
+        f.write(
+            "newmtl orthophoto\nmap_Kd "
+            + FNAMES.geotiff_file_name_from_attributes(
+                til_x_left, til_y_top, zoomlevel, provider_code
+            )
+            + "\n"
         )
-        + "\n"
-    )
-    f.close()
     UI.timings_and_bottom_line(timer)
     return
 
@@ -638,9 +636,8 @@ def build_mesh(tile):
             )
             return 0
     try:
-        f = open(node_file, "r")
-        input_nodes = int(f.readline().split()[0])
-        f.close()
+        with open(node_file, "r") as f:
+            input_nodes = int(f.readline().split()[0])
     except (OSError, ValueError, IndexError):
         UI.exit_message_and_bottom_line("\nERROR: In reading ", node_file)
         return 0
@@ -931,50 +928,49 @@ def steiner_cap_reached(final_vertices, input_vertices, max_steiner):
 ##############################################################################
 def read_mesh_file(mesh_file):
     
-    f = open(mesh_file,"r")
-    mesh_version = float(f.readline().strip().split()[-1])
+    with open(mesh_file,"r") as f:
+        mesh_version = float(f.readline().strip().split()[-1])
     
-    # skip 3 lines 
-    for i in range(3):
-        f.readline()
+        # skip 3 lines 
+        for i in range(3):
+            f.readline()
     
-    nbr_nodes = int(f.readline())
-    node_coords = numpy.zeros(5 * nbr_nodes)
+        nbr_nodes = int(f.readline())
+        node_coords = numpy.zeros(5 * nbr_nodes)
     
-    # read positions
-    for i in range(nbr_nodes):
-        node_coords[5 * i : 5 * i + 3] = [
-            float(x) for x in f.readline().split()[:3]
-        ]
-    # altitutes are encoded in .mesh files with a 100000 scaling factor
-    node_coords[2::5] *= 100000
+        # read positions
+        for i in range(nbr_nodes):
+            node_coords[5 * i : 5 * i + 3] = [
+                float(x) for x in f.readline().split()[:3]
+            ]
+        # altitutes are encoded in .mesh files with a 100000 scaling factor
+        node_coords[2::5] *= 100000
     
-    # skip 3 lines
-    for i in range(3):
-        f.readline()
+        # skip 3 lines
+        for i in range(3):
+            f.readline()
     
-    # read normals
-    for i in range(nbr_nodes):
-        node_coords[5 * i + 3 : 5 * i + 5] = [
-            float(x) for x in f.readline().split()[:2]
-        ]
+        # read normals
+        for i in range(nbr_nodes):
+            node_coords[5 * i + 3 : 5 * i + 5] = [
+                float(x) for x in f.readline().split()[:2]
+            ]
     
-    # skip 2 lines
-    for i in range(0, 2): 
-        f.readline()
+        # skip 2 lines
+        for i in range(0, 2): 
+            f.readline()
 
-    # read nbr of tris
-    nbr_tris = int(f.readline())      
+        # read nbr of tris
+        nbr_tris = int(f.readline())      
 
-    tri_idx  = numpy.zeros(3 * nbr_tris, dtype = numpy.uint32)
-    tri_types = numpy.zeros(nbr_tris, dtype = numpy.uint32)
-    for i in range(nbr_tris):
-        (n1, n2, n3, t) = [
-            int(x) - 1 for x in f.readline().split()[:4]
-        ]
-        tri_idx[3 * i: 3 * i + 3] = (n1, n2, n3)
-        tri_types[i] = t + 1
-    f.close()
+        tri_idx  = numpy.zeros(3 * nbr_tris, dtype = numpy.uint32)
+        tri_types = numpy.zeros(nbr_tris, dtype = numpy.uint32)
+        for i in range(nbr_tris):
+            (n1, n2, n3, t) = [
+                int(x) - 1 for x in f.readline().split()[:4]
+            ]
+            tri_idx[3 * i: 3 * i + 3] = (n1, n2, n3)
+            tri_types[i] = t + 1
 
     return (mesh_version, nbr_nodes, node_coords, nbr_tris, tri_idx, tri_types)
 ##############################################################################
