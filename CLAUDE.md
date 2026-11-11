@@ -574,6 +574,23 @@ Test results:
   unchanged. The overlay fix of regression.py/sims_in_ws.py (a module
   new in the overlay is removed afterwards) is in the tools since
   2026-11-11.
+- #80 `fix/overpass-two-slots` @ ba2dad2, #81 `fix/batch-overpass-pause`
+  @ 12119d7, #82 `fix/batch-neighbour-barrier` @ 736e9c1 (from #81),
+  2026-11-11: 3 new slot tests (one with a second process holding both
+  locks), the #44/#46/#78 retry tests replaced by 20 gate/requeue/pause
+  tests (fake clock, probe run synchronously), 7 neighbour-barrier
+  tests (3 fail on #81's global barrier); check_overpass_slot.py (now
+  expects a peak of exactly 2) 4/4. `test` @ 755f292: 366 unit tests,
+  pyflakes 0, regression PASS (DSF, 17/17 masks, app log identical),
+  sims_in_ws all 15/15 (sim_batch error: tile 2 fails try 1, 2 and 3
+  = step 1 calls 2, 4, 5, "Tiles built: 2, failed: 1."; error-once
+  builds it on try 2), sim_batch_cleaning par with real workers: phase
+  2 of +55+012 started right after its own steps 1-2 (the sea tile
+  ended first), mesh kept until the cleanup, DSF byte-identical to
+  test-4fa5e9f_frozen (the sim compared against the pre-#73 baseline
+  and reported FAIL; its path is fixed in the tools). Not run:
+  test_parallel_batch and gui_smoke (G:\Ortho4XP; the former
+  re-downloads the Nova Scotia data), and a real outage.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
