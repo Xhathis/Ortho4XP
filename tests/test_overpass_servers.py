@@ -252,3 +252,62 @@ def test_data_age_days():
     assert OSM.data_age_days("garbage", now) is None
     assert OSM.osm_base_of(OK) == "2026-11-11T08:14:53Z"
     assert OSM.osm_base_of(b"<osm/>") == ""
+
+
+# --- inconsistent answers (#99) ---------------------------------------------
+# FR, 2026-11-11: ways naming nodes deleted from its database (KeyError in
+# update_dicosm, 17 tiles failed for good instead of being retried).
+def _answer(nodes, refs, q=b'"'):
+    body = b"".join(b"<node id=%s%d%s lat=%s1%s lon=%s2%s/>\n"
+                    % (q, n, q, q, q, q, q) for n in nodes)
+    body += (b"<way id=%s7%s>\n" % (q, q)
+             + b"".join(b"<nd ref=%s%d%s/>\n" % (q, r, q) for r in refs)
+             + b"</way>\n")
+    return OK.replace(b"</osm>", body + b"</osm>")
+
+
+BROKEN = _answer([1, 2], [1, 29171402, 2, 1])
+GOOD = _answer([1, 2, 3], [1, 2, 3, 1])
+
+
+def test_dangling_node_refs():
+    assert OSM.dangling_node_refs(GOOD) == []
+    assert OSM.dangling_node_refs(OK) == []  # no ways at all
+    assert OSM.dangling_node_refs(BROKEN) == [b"29171402"]
+    assert OSM.dangling_node_refs(_answer([1], [1, 5, 5, 6], q=b"'")) == [
+        b"5", b"6"]
+    many = _answer([], range(10, 20))
+    assert OSM.dangling_node_refs(many) == [b"10", b"11", b"12"]
+
+
+def test_inconsistent_answer_tries_next_server(net):
+    (replies, asked, _, _) = net
+    replies[DE] = [Resp(200, BROKEN)]
+    replies[FR] = [Resp(200, GOOD)]
+    assert OSM.get_overpass_data("way", (1, 2, 3, 4)) == GOOD
+    assert asked == [DE, DE, FR]
+    assert health() is None  # not a reason to skip DE
+
+
+def test_inconsistent_answers_fail_layer_for_a_retry(layer):
+    (replies, asked, _, lines) = layer
+    replies[DE] = [DOWN_ERR]
+    replies[FR] = [Resp(200, BROKEN)]
+    osm_layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        WATER, osm_layer, 55, 12, cached_suffix="") == 0
+    assert asked == [DE, DE, FR]  # same database: no per-query fallback
+    assert OSM.get_overpass_data.size_failure is False
+    assert OSM.overpass_gave_up and UI.red_flag  # the batch requeues it
+    assert any("(last: FR: inconsistent answer (missing node 29171402))"
+               in l for l in lines)
+    assert not osm_layer.dicosmw  # nothing half-read
+
+
+def test_consistent_answer_still_read(layer):
+    (replies, asked, _, _) = layer
+    replies[DE] = [Resp(200, GOOD)]
+    osm_layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        WATER, osm_layer, 55, 12, cached_suffix="") == 1
+    assert [len(w) for w in osm_layer.dicosmw.values()] == [4]
