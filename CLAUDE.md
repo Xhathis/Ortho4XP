@@ -653,6 +653,17 @@ Test results:
   cut from the frozen N55E012.hgt, build dir in <scratch>): 7/7, one
   WARNING "(missing: west)", west half at the edge value (36 m at
   55.7 N), mesh built, no second WARNING in step 2.
+- 455-tile batch on `dev` 07a3f65 (started 2026-11-11 17:38, the first
+  with the new mesh budget): 17 tiles (all Maldives +00..+07 / +072,
+  +073, -01+073, -08+072, and +25-079) failed in step 1 with KeyError
+  in update_dicosm (#99). #99 `fix/overpass-dangling-refs` @ 2794a27:
+  4 new tests (3 fail on dev, the layer one with the batch's KeyError),
+  469 pass, pyflakes 0; real request: FR's water answer for +02+072
+  rejected naming node 29171402 (the batch's), no per-query fallback.
+  `test` @ fb8c19f: 469 unit tests. Not run while the batch runs (one
+  build at a time): regression (reads only cached OSM, so it cannot
+  reach this code; expected PASS) and sims_in_ws. Not on `dev` yet: the
+  batch starts every worker from G:\Ortho4XP.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1362,6 +1373,18 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     fixture moved to conftest.py (O4 imports inside the fixture, after
     pytest_collection's cwd switch); pyflakes is 0 for tests/ too
     (was 10: fixture imports, one unused variable).
+99. **FIXED** (`2794a27`): with overpass-api.de down (2026-11-11 from
+    ~17:40), FR answered with ways naming nodes deleted from OSM on
+    2026-10-20/21 (main API: HTTP 410) but not the nodes: its database
+    was mid catch-up (osm_base 10-19/20). update_dicosm raised KeyError,
+    an "unexpected error", so 17 tiles failed for good instead of being
+    requeued (#81). _overpass_request now rejects such an answer
+    (dangling_node_refs: streams the <nd ref>s against a set of node
+    ids; largest cached layer, +47-123 small_roads 261 MB: ~6 s, ~160
+    MB) as failure kind BROKEN: next server tried, no skip of the
+    server, no per-query fallback; all servers BROKEN = Overpass layer
+    failure (overpass_gave_up), so batches retry the tile. Cached and
+    custom OSM files are not checked (written by Ortho4XP or the user).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1470,6 +1493,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (#93; from fix/small-hygiene), fix/airport-dead-block (#94-#96).
 21. ~~#97, #98~~ — the leftover custom_dem worktree finished and the
     test lint cleaned, 2026-11-11.
+22. #99 — on `test`; to `dev` after the 455-tile batch, with a
+    regression and sims_in_ws run first.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
