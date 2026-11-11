@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 325
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 339
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -542,6 +542,18 @@ Test results:
   325 unit tests, pyflakes 0, regression PASS against
   test-4fa5e9f_frozen (DSF, 17/17 masks, app log identical: no
   WARNING), sim_mesh_failure as designed.
+- #77 `fix/osm-cache-check` @ 68c7d5c: 14 new unit tests (339 pass),
+  pyflakes 0, regression --overlay PASS (DSF, 17/17 masks, app log
+  identical); real check of +34+024 an hour after its download: 4
+  layers unchanged (counts equal to the cache), coastline no answer
+  (Overpass outage).
+- 346-tile batch (Mediterranean, NW America, Norway, Iceland; 2026-11-08
+  16:07): killed by a Windows Update restart on 2026-11-11 02:29 in
+  phase 2 (workers exit 0x40010004). 65 built, 178 waiting for steps
+  2.5-3, 102 lost step 1 to Overpass (DE ConnectTimeout, KU
+  ReadTimeout, 11-08 19:00 to 11-10 ~20:00; the #46 retry at 11-10
+  00:14 failed again), +35+028 open sea. 11 overlays failed: the
+  user's Global Scenery has no DSF for +44..+46 / -122..-125.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1056,6 +1068,19 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 76. **FIXED** (`5534d9c`): use_decal_on_terrain put the decal on
     masked sea terrain too (tri_type != 1); now land only, as the
     option is documented. No effect with the option off.
+77. **DONE** (`68c7d5c`, new tool): check_osm_cache.py [tiles]
+    [--csv f] reports which cached OSM layers changed since their
+    download (the cache keeps no ids or dates, only the file mtime).
+    One Overpass request per layer (src/O4_OSM_Freshness.py): count
+    of matching elements now, and of elements edited after mtime - 1 h
+    (newer:); unchanged = no edits and the same counts as the cache
+    file. Also flags a small_roads cache without a road type the
+    tile's road_level wants: the file name is the same at every level,
+    so raising road_level (e.g. to 5 for tracks) silently reuses the
+    old cache (not fixed in the build; the user's caches are complete
+    for level 4). Read only, uses the Overpass slot; ~1 min per layer
+    (as much server time as a download). The layer queries are now
+    VMAP constants (`ec0a49e`, output unchanged).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1115,6 +1140,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
       (the 66-tile Iceland batch: 10 h, bound by Overpass and imagery
       downloads); both would change mesh or mask bytes.
 14. ~~#75, #76~~ — third pass with the config review, 2026-11-08.
+15. ~~#77~~ — OSM cache check, 2026-11-11.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
