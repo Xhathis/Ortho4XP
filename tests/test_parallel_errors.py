@@ -110,3 +110,28 @@ def test_convert_task_records_an_exception_as_failed_conversion(monkeypatch):
     assert IMG.failed_conversions == [
         FNAMES.dds_file_name_from_attributes(69952, 40576, 17, "Arc")
     ]
+
+
+class _WriteLog(list):
+    """success list that records every write."""
+
+    def __init__(self):
+        super().__init__([1])
+        self.writes = []
+
+    def __setitem__(self, i, v):
+        self.writes.append(v)
+        super().__setitem__(i, v)
+
+
+def test_successful_items_never_write_the_shared_result():
+    # #85: a write by a successful item could overwrite a failure stored
+    # by another thread in between its read and its write.
+    q = queue.Queue()
+    for item in [(1,), (0,), (1,), (1,)]:
+        q.put(item)
+    q.put("quit")
+    success = _WriteLog()
+    PAR.parallel_worker(lambda r: r, q, None, success).run()
+    assert success.writes == [0]
+    assert success[0] == 0

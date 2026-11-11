@@ -50,7 +50,12 @@ class parallel_worker(threading.Thread):
                 )
                 UI.vprint(1, traceback.format_exc())
                 result = 0
-            self._success[0] = result and self._success[0]
+            if not result:
+                # Only a failure writes. The old "s[0] = result and s[0]"
+                # was a read-modify-write: a worker that had read 1 could
+                # store it after another stored 0, and a failed item (a
+                # white imagery piece, a missing mask) was lost (#85).
+                self._success[0] = 0
             if self._progress:
                 self._progress["done"] += 1
                 UI.progress_bar(
