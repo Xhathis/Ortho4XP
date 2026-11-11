@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 352
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 360
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -561,6 +561,18 @@ Test results:
   masks, app log identical), sims_in_ws dad25be all 15/15 (sim_batch's
   overpass_answers stub now takes the bbox argument); the new probe
   against the real servers: DE answers both queries (33-39 s).
+- #79 `fix/batch-leftover-tiles` @ 297b4d5: 8 new unit tests (360
+  pass), pyflakes 0, regression PASS (DSF, 17/17 masks, app log
+  identical), the 5 batch sims as designed (leftover file: 3 x +55+012
+  after error/stop/dem/exception, none after error-once; the sims'
+  tile list has one tile 3 times, see #28), and
+  `G:\Ortho4XP_tests	ools\gui_leftover.py <src> <png>` (cwd
+  G:\Ortho4XP, real GUI, refuses to run if the user has a leftover
+  file): 6/6 (selected on open, again after reopening, Clear empties
+  it and removes the file); .last_gui_params.txt and Ortho4XP.log
+  unchanged. The overlay fix of regression.py/sims_in_ws.py (a module
+  new in the overlay is removed afterwards) is in the tools since
+  2026-11-11.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1108,6 +1120,14 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     tiles in a row fail on Overpass again; the rest fail untried with
     one ERROR line listing them, and the next phase starts (a success
     or another error resets the count; sequential and parallel).
+79. **DONE** (`297b4d5`, GUI feature): a batch keeps its tiles not
+    done yet in .last_batch_tiles.txt (repo root, gitignored; written
+    at the start, a tile removed when built through the last phase or
+    skipped as open sea; failed, stopped and unstarted tiles stay; empty
+    = no file). The tile window selects them when it opens, so Batch
+    Build carries on after a crash, a restart or failures. New button
+    "Clear selection": unselects all, and removes the file when no
+    batch runs. Plain text, one +LL+LLL per line, # comments.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1169,6 +1189,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 14. ~~#75, #76~~ — third pass with the config review, 2026-11-08.
 15. ~~#77~~ — OSM cache check, 2026-11-11.
 16. ~~#78~~ — Overpass outage of the 346-tile batch, 2026-11-11.
+17. ~~#79~~ — tile window selects the last batch's leftover tiles.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
