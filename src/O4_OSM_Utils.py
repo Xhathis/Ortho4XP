@@ -33,6 +33,12 @@ layer_request_tentatives = max_osm_tentatives // 2
 # After an HTTP 429 the server wants us to slow down; retrying within a few
 # seconds (2, 4, 8 s) got the connection reset by overpass-api.de.
 overpass_rate_limit_wait = 60  # seconds, at least
+# Overpass requests running at once across all Ortho4XP processes (#80).
+# overpass-api.de grants two per IP ("Rate limit: 2" on /api/status); with
+# one, the good hours of the 346-tile batch of 2026-11-08 were already at
+# the limit (60-87 layer downloads an hour at ~50 s each). Three at once
+# got HTTP 429 (#30).
+overpass_max_parallel = 2
 # Set when a layer stopped the build because Overpass gave no answer after
 # all tentatives (and reset by the batch before each step 1): a batch puts
 # such a tile aside and tries it again later, since Overpass outages are
@@ -95,35 +101,53 @@ def _unlock_file(f):
         fcntl.flock(f, fcntl.LOCK_UN)
 
 
+def _overpass_lock_names():
+    """Lock file names, one per allowed concurrent request.
+
+    The first keeps the name of the single lock used before (#30), so an
+    older Ortho4XP still running at the same time shares that slot.
+    """
+    return [".overpass.lock"] + [
+        f".overpass.lock{i}" for i in range(1, max(1, overpass_max_parallel))
+    ]
+
+
 def _acquire_overpass_slot():
-    """Wait until no other Ortho4XP process has an Overpass request running.
+    """Wait for a free Overpass slot (shared by all Ortho4XP processes).
 
     Parallel batch workers each download their own tile's OSM data; three
-    at once got HTTP 429 and then connection resets from overpass-api.de,
-    which allows about two running queries per IP. One request at a time is
-    what the sequential batch always did. The OS releases the lock when a
-    process ends, also when it is killed (Stop button). Returns the open
-    lock file, or None if the build was stopped while waiting.
+    at once got HTTP 429 and then connection resets from overpass-api.de.
+    At most overpass_max_parallel requests run at once, across processes:
+    one lock file per slot. The OS releases a lock when its process ends,
+    also when it is killed (Stop button). Returns the open lock file of the
+    slot, or None if the build was stopped while waiting.
     """
     os.makedirs(FNAMES.OSM_dir, exist_ok=True)
-    f = open(os.path.join(FNAMES.OSM_dir, ".overpass.lock"), "a+")
+    files = [open(os.path.join(FNAMES.OSM_dir, name), "a+")
+             for name in _overpass_lock_names()]
     waiting = False
     while True:
-        try:
-            _lock_file(f)
+        for f in files:
+            try:
+                _lock_file(f)
+            except OSError:
+                continue
+            for other in files:
+                if other is not f:
+                    other.close()
             return f
-        except OSError:
-            if UI.red_flag:
+        if UI.red_flag:
+            for f in files:
                 f.close()
-                return None
-            if not waiting:
-                UI.vprint(
-                    1,
-                    "      Waiting for another Ortho4XP process to finish "
-                    "its OSM request...",
-                )
-                waiting = True
-            time.sleep(1)
+            return None
+        if not waiting:
+            UI.vprint(
+                1,
+                "      Waiting for another Ortho4XP process to finish "
+                "its OSM request...",
+            )
+            waiting = True
+        time.sleep(1)
 
 
 def _release_overpass_slot(f):
