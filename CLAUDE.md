@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 339
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 352
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -115,7 +115,9 @@ DSF, masks, app_log.diff, dsf.diff if needed). The order of "Created
 `regression.py freeze|baseline` made the baseline; a new one needs a
 new folder (they refuse to overwrite). `--overlay <src_dir>` builds
 `<commit>` with that folder's O4_*.py copied over it (uncommitted code
-in a fix worktree), restored afterwards.
+in a fix worktree), restored afterwards (since 2026-11-11 also a module
+the commit lacks is removed again; before, it blocked the next checkout
+of a commit that has it; same in sims_in_ws.py).
 `sims_in_ws.py <commit> [--overlay <src_dir>] all` runs the 10 CLI
 sims and the 5 batch sims in the same worktree (~20 min),
 each after a fresh reset from the frozen inputs, and checks each
@@ -189,9 +191,9 @@ holder; 429 wait), `check_step3_provider.py [tile_dir]` (#31: empty,
 unknown and zone providers stop build_tile at once, GO2/Arc pass; uses
 an existing tile's mesh read-only and silences UI.logprint, which
 build_tile calls directly).
-`Ortho4XP.cfg` uses `overpass_server_choice=DE` (KU times out); since
-#23 tentatives 5-8 alternate with the other servers in
-overpass_servers.txt. The failure sims replace the whole server list
+`Ortho4XP.cfg` uses `overpass_server_choice=DE`; since #23 tentatives
+5-8 alternate with the other servers in overpass_servers.txt (since
+#78: DE and FR; KU was dead). The failure sims replace the whole server list
 with one closed port, so they still fail without fallback.
 Never run the full-build sims (sim_osm_failure, sim_water_geometry_failure,
 sim_mask_dem_failure, sim_mesh_failure, sim_step3_failures, sim_dem_cli,
@@ -554,6 +556,11 @@ Test results:
   ReadTimeout, 11-08 19:00 to 11-10 ~20:00; the #46 retry at 11-10
   00:14 failed again), +35+028 open sea. 11 overlays failed: the
   user's Global Scenery has no DSF for +44..+46 / -122..-125.
+- #78 `fix/overpass-outage` @ dad25be: 13 new unit tests (352 pass;
+  10 fail on dev), pyflakes 0, regression --overlay PASS (DSF, 17/17
+  masks, app log identical), sims_in_ws dad25be all 15/15 (sim_batch's
+  overpass_answers stub now takes the bbox argument); the new probe
+  against the real servers: DE answers both queries (33-39 s).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1081,6 +1088,26 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     for level 4). Read only, uses the Overpass slot; ~1 min per layer
     (as much server time as a download). The layer queries are now
     VMAP constants (`ec0a49e`, output unchanged).
+78. **FIXED** (`a29d404`, `3b42d30`, `de396a6`, `dad25be`): the
+    Overpass outage of 2026-11-08..10 (DE overloaded: 1,090
+    ConnectTimeouts in the failed tiles' logs, yet 426 layer downloads
+    in between) cost the 346-tile batch 102 tiles and ~1 day: KU never
+    answered (234 fallback tries of up to 190 s), the #46 probe's
+    empty-box query was answered at 11-10 00:14 while real requests
+    kept failing, and the retry pass then took 20.7 h for 119 tiles,
+    holding up phase 2. Now: (1) overpass_servers.txt has FR
+    (overpass.openstreetmap.fr: whole planet, 3-4 s, but its data was
+    a month old) instead of KU; tested and not usable: kumi.systems,
+    mail.ru, openstreetmap.ru, osm.jp (no answer), osm.ch
+    (Switzerland only), lz4./z.overpass-api.de (the same DE machines).
+    (2) check_osm_cache.py refuses an answer whose osm_base is older
+    than the cache file (FR's would report every layer unchanged).
+    (3) The batch's wait probe counts aeroway elements in the first
+    tile to retry (read timeout 90 s; HTTP 200 with <remark> is no
+    answer). (4) The retry pass ends after overpass_retry_give_up (3)
+    tiles in a row fail on Overpass again; the rest fail untried with
+    one ERROR line listing them, and the next phase starts (a success
+    or another error resets the count; sequential and parallel).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1141,6 +1168,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
       downloads); both would change mesh or mask bytes.
 14. ~~#75, #76~~ — third pass with the config review, 2026-11-08.
 15. ~~#77~~ — OSM cache check, 2026-11-11.
+16. ~~#78~~ — Overpass outage of the 346-tile batch, 2026-11-11.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
