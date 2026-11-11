@@ -9,9 +9,7 @@ import O4_OSM_Utils as OSM
 import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
 
-from test_overpass_batch_retry import (  # noqa: F401 (lines is a fixture)
-    FakeTile, fake_popen, lines,
-)
+from test_overpass_batch_retry import FakeTile, fake_popen
 
 SIX = [(60, 0), (60, 1), (60, 2), (60, 3), (60, 4), (60, 5)]
 

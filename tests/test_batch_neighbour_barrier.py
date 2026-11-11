@@ -8,7 +8,7 @@ import pytest
 
 import O4_File_Names as FNAMES
 import O4_Tile_Utils as TILE
-from test_overpass_batch_retry import FakeTile, lines  # noqa: F401
+from test_overpass_batch_retry import FakeTile
 
 STEP1 = TILE.BATCH_STEPS[0]
 A, B, C, D = (60, 0), (60, 1), (62, 5), (62, 6)  # A-B and C-D neighbours
@@ -129,7 +129,7 @@ def test_one_phase_only(batch, monkeypatch):
 def test_stop_kills_both_phases(batch, monkeypatch):
     killed = []
     monkeypatch.setattr(TILE, "_kill_process_tree", killed.append)
-    events = fake_workers(monkeypatch, {(B, 0): 50, (C, 1): 50})
+    fake_workers(monkeypatch, {(B, 0): 50, (C, 1): 50})
     polls = [0]
     real_sleep_calls = []
 
