@@ -166,8 +166,10 @@ def build_masks(tile, for_imagery=False):
             source = (
                 (";" in tile.custom_dem) and tile.custom_dem.split(";")[0]
             ) or tile.custom_dem
+            # partial_ok: step 1 has already warned about this raster.
             tile.dem = DEM.DEM(
-                tile.lat, tile.lon, source, fill_nodata, info_only=False
+                tile.lat, tile.lon, source, fill_nodata, info_only=False,
+                partial_ok=True,
             )
         except Exception as e:
             # DEM loading can fail in GDAL, file access or value parsing.

@@ -44,7 +44,10 @@ class DEMError(Exception):
 
 ################################################################################
 class DEM:
-    def __init__(self, lat, lon, source="", fill_nodata=True, info_only=False):
+    def __init__(
+        self, lat, lon, source="", fill_nodata=True, info_only=False,
+        partial_ok=False,
+    ):
         self.lat = lat
         self.lon = lon
         source = source.replace("{latlon}", FNAMES.hem_latlon(lat, lon))
@@ -54,7 +57,7 @@ class DEM:
         else:
             self.alt = self.alt_nostrict
             self.alt_vec = self.alt_vec_nostrict
-        self.load_data(source, info_only)
+        self.load_data(source, info_only, partial_ok)
         if info_only:
             return
         if fill_nodata == "to zero":
@@ -80,7 +83,7 @@ class DEM:
             self.alt_dem.mean(),
         )
 
-    def load_data(self, source, info_only=False):
+    def load_data(self, source, info_only=False, partial_ok=False):
         # Samples taken from neighbour tiles on each side of alt_dem.
         self.margin = 0
         if not source:
@@ -172,12 +175,34 @@ class DEM:
             ) = read_elevation_from_file(
                 file_name, self.lat, self.lon, info_only
             )
+            # A gap in the tile's main raster is filled by clamping (here
+            # and in Triangle4XP): the raster's edge values are stretched
+            # over the rest of the tile, which used to go unmentioned. A
+            # composite's local sources and iterate's LIDAR cover part of
+            # the tile by design (partial_ok).
+            if not info_only and not partial_ok:
+                gaps = raster_gaps_in_tile(
+                    self.x0, self.y0, self.x1, self.y1, self.nxdem, self.nydem
+                )
+                if gaps:
+                    UI.lvprint(
+                        0,
+                        "    WARNING: elevation raster", file_name,
+                        "does not cover tile",
+                        FNAMES.short_latlon(self.lat, self.lon),
+                        "(missing: " + ", ".join(gaps) + "): its edge",
+                        "values are extended there. Use a raster covering",
+                        "the whole tile.",
+                    )
         if not local_sources:
             return
         self.subdems = tuple()
         for local_source in local_sources:
             self.subdems += (
-                DEM(self.lat, self.lon, local_source, False, info_only),
+                DEM(
+                    self.lat, self.lon, local_source, False, info_only,
+                    partial_ok=True,
+                ),
             )
             self.subdems[-1].alt = self.subdems[-1].alt_strict
             self.subdems[-1].alt_vec = self.subdems[-1].alt_vec_strict
@@ -488,6 +513,38 @@ def build_combined_raster(source, lat, lon, info_only):
     return (epsg, x0, y0, x1, y1, nodata, nxdem, nydem, alt_dem)
 
 ################################################################################
+def raster_gaps_in_tile(x0, y0, x1, y1, nxdem, nydem):
+    """Sides of the tile ([0, 1] x [0, 1], tile coordinates) that a raster
+    with sample centres from (x0, y0) to (x1, y1) leaves uncovered.
+
+    A gap up to one sample spacing is no gap: a grid of whole-tile samples
+    often stops one sample short of the far edge (e.g. a Copernicus tile,
+    3600 rows from the north edge down).
+    """
+    tol_x = (x1 - x0) / max(nxdem - 1, 1) + 1e-9
+    tol_y = (y1 - y0) / max(nydem - 1, 1) + 1e-9
+    gaps = []
+    if x0 > tol_x:
+        gaps.append("west")
+    if x1 < 1 - tol_x:
+        gaps.append("east")
+    if y0 > tol_y:
+        gaps.append("south")
+    if y1 < 1 - tol_y:
+        gaps.append("north")
+    return gaps
+
+
+# alt_vec_nostrict/alt_vec_strict index samples as uint16 (so at most 65535
+# per side), and Triangle4XP indexes alt[ny * nxdem + nx] in a C int (so at
+# most 2^31 - 1 samples in all, e.g. 46340 x 46340): a larger raster gave
+# wrong altitudes silently (and needs several times its size in RAM per
+# step anyway).
+MAX_RASTER_SIDE = 65535
+MAX_RASTER_SAMPLES = 2**31 - 1
+
+
+################################################################################
 def read_elevation_from_file(
     file_name, lat, lon, info_only=False, base_if_error=3601, critical=True
 ):
@@ -573,9 +630,21 @@ def read_elevation_from_file(
         try:
             ds = gdal.Open(file_name)
             rs = ds.GetRasterBand(1)
+            (nxdem, nydem) = (ds.RasterXSize, ds.RasterYSize)
+            if max(nxdem, nydem) > MAX_RASTER_SIDE:
+                raise ValueError(
+                    f"raster is {nxdem} x {nydem} samples, at most "
+                    f"{MAX_RASTER_SIDE} per side are supported: cut it to "
+                    "the tile or resample it"
+                )
+            if nxdem * nydem > MAX_RASTER_SAMPLES:
+                raise ValueError(
+                    f"raster is {nxdem} x {nydem} samples, at most "
+                    f"{MAX_RASTER_SAMPLES} in all are supported: cut it to "
+                    "the tile or resample it"
+                )
             if not info_only:
                 alt_dem = rs.ReadAsArray().astype(numpy.float32)
-            (nxdem, nydem) = (ds.RasterXSize, ds.RasterYSize)
             nodata = rs.GetNoDataValue()
             if nodata is None:
                 UI.lvprint(

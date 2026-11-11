@@ -351,7 +351,7 @@ cfg_tile_vars = {
     "custom_dem": {
         "type": str,
         "default": "",
-        "hint": "Path to an elevation data file to be used instead of the default Viewfinderpanoramas.org ones (J. de Ferranti). The raster must be in geopgraphical coordinates (EPSG:4326) but the extent need not match the tile boundary (requires Gdal). Regions of the tile that are not covered by the raster are mapped to zero altitude (can be useful for high resolution data over islands in particular).",
+        "hint": "Path to an elevation data file to be used instead of the default Viewfinderpanoramas.org ones (J. de Ferranti). The raster must be in geopgraphical coordinates (EPSG:4326) but the extent need not match the tile boundary (requires Gdal). Regions of the tile that the raster does not cover get the altitude of the raster's nearest edge (logged as a WARNING): give a raster that covers the whole tile, with no_data where it has no data (see fill_nodata). {latlon} in the path is replaced with the tile's name, e.g. N55E012.",
     },
     "fill_nodata": {
         "type": bool,

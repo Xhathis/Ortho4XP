@@ -624,6 +624,7 @@ def build_mesh(tile):
                     source,
                     fill_nodata=False,
                     info_only=False,
+                    partial_ok=True,  # iterate: local LIDAR
                 )
                 tile.dem.write_to_file(FNAMES.alt_file(tile))
         except Exception as e:
