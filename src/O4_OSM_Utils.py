@@ -808,8 +808,34 @@ def _server_order(server_keys, shuffle=True) -> list:
 # SIZE: the server answered that it could not do the request (a <remark>,
 # an error answer, a cut answer) - one request per query may work. DOWN and
 # TIMEOUT count towards skipping the server; TIMEOUT and SIZE allow the
-# one-request-per-query fallback of a layer.
-DOWN, TIMEOUT, SIZE = "down", "timeout", "size"
+# one-request-per-query fallback of a layer. BROKEN: a complete answer that
+# contradicts itself (a way naming a node the answer lacks, #99) - the
+# server's database is mid-update; neither skips the server (its other
+# answers may be fine) nor falls back per query (same database).
+DOWN, TIMEOUT, SIZE, BROKEN = "down", "timeout", "size", "broken"
+
+_NODE_ID = re.compile(rb'<node id=["\'](-?\d+)')
+_ND_REF = re.compile(rb'<nd ref=["\'](-?\d+)')
+
+
+def dangling_node_refs(content, limit=3):
+    """Node ids that ways of an OSM answer refer to but the answer lacks.
+
+    Overpass's (._;>>;) sends every node of every way, so a missing one
+    means the server's database is inconsistent (FR, 2026-11-11, catching
+    up: nodes deleted on 10-20/21 gone, the ways still naming them), and
+    update_dicosm would crash with KeyError. Returns up to limit ids
+    (bytes), empty when the answer is consistent. Streams the refs: one
+    set of node ids only (largest cached layer: ~6 s, ~160 MB).
+    """
+    nodes = set(m.group(1) for m in _NODE_ID.finditer(content))
+    missing = []
+    for m in _ND_REF.finditer(content):
+        if m.group(1) not in nodes and m.group(1) not in missing:
+            missing.append(m.group(1))
+            if len(missing) >= limit:
+                break
+    return missing
 
 
 def _health_path():
@@ -1031,6 +1057,13 @@ def _overpass_request(session, key, url, timeout):
         UI.vprint(1, f"      OSM server {key} could not run the query "
                   "(remark or error in its answer)")
         return (0, SIZE, "error answer", 0)
+    missing = dangling_node_refs(r.content)
+    if missing:
+        ids = ", ".join(i.decode() for i in missing)
+        UI.vprint(1, f"      OSM server {key} sent ways with nodes missing "
+                  f"from its answer (e.g. node {ids}): its data is "
+                  "inconsistent")
+        return (0, BROKEN, f"inconsistent answer (missing node {ids})", 0)
     return (r.content, None, "", 0)
 
 
