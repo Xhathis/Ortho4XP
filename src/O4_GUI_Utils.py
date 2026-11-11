@@ -400,15 +400,14 @@ class Ortho4XP_GUI(tk.Tk):
 
         # reinitialization from last visit
         try:
-            f = open(FNAMES.resource_path(".last_gui_params.txt"), "r")
-            (lat, lon, default_website, default_zl) = f.readline().split()
-            custom_build_dir = f.readline().strip()
-            self.lat.set(lat)
-            self.lon.set(lon)
-            self.default_website.set(default_website)
-            self.default_zl.set(default_zl)
-            self.custom_build_dir.set(custom_build_dir)
-            f.close()
+            with open(FNAMES.resource_path(".last_gui_params.txt"), "r") as f:
+                (lat, lon, default_website, default_zl) = f.readline().split()
+                custom_build_dir = f.readline().strip()
+                self.lat.set(lat)
+                self.lon.set(lon)
+                self.default_website.set(default_website)
+                self.default_zl.set(default_zl)
+                self.custom_build_dir.set(custom_build_dir)
         except (OSError, ValueError):
             self.lat.set(48)
             self.lon.set(-6)
@@ -476,46 +475,45 @@ class Ortho4XP_GUI(tk.Tk):
         tile_cfg_file = os.path.join(build_dir, "Ortho4XP_" + FNAMES.short_latlon(lat, lon) + ".cfg")
 
         if os.path.exists(tile_cfg_file):
-            f = open(tile_cfg_file, "r")
-            for line in f.readlines():
-                line = line.strip()
-                if not line or line[0] == "#":
-                    continue
-                try:
-                    # maxsplit 1: a value may contain "=" (the old
-                    # split("=") skipped such a line silently).
-                    (var, value) = line.split("=", 1)
-                    value = CFG.config_compatibility(value)
-                    if var == "zone_list":
-                        # Append zones from config to global zone_list but also check if it's a duplicate
-                        for zone in ast.literal_eval(value):
-                            if zone not in CFG.zone_list:
-                                CFG.zone_list.append(zone)
-                        # Don't replace the global zone_list itself
+            with open(tile_cfg_file, "r") as f:
+                for line in f.readlines():
+                    line = line.strip()
+                    if not line or line[0] == "#":
                         continue
-                    CFG.set_cfg_variable(var, CFG.parse_cfg_value(var, value))
-                except Exception as e:
-                    # compatibility with zone_list config files from version <= 1.20
-                    if "zone_list.append" in line:
-                        zone = CFG.parse_legacy_zone(line)
-                        if zone is not None and zone not in CFG.zone_list:
-                            CFG.zone_list.append(zone)
-                    elif line.split("=", 1)[0] in cfg_vars:
-                        # A known setting with an unusable value: the build
-                        # would keep the value from before (#72).
-                        UI.vprint(
-                            1, "WARNING: tile config", tile_cfg_file,
-                            "has an invalid line:", line,
-                            f"({type(e).__name__}: {e})",
-                        )
-                    else:
-                        UI.vprint(2, e)
-                # Update main window GUI values
-                self.default_website.set(CFG.default_website)
-                self.default_zl.set(CFG.default_zl)
-            self.tile_cfg_exists.set(True)
-            UI.vprint(1, f"Configuration loaded for tile at {lat} {lon}")
-            f.close()
+                    try:
+                        # maxsplit 1: a value may contain "=" (the old
+                        # split("=") skipped such a line silently).
+                        (var, value) = line.split("=", 1)
+                        value = CFG.config_compatibility(value)
+                        if var == "zone_list":
+                            # Append zones from config to global zone_list but also check if it's a duplicate
+                            for zone in ast.literal_eval(value):
+                                if zone not in CFG.zone_list:
+                                    CFG.zone_list.append(zone)
+                            # Don't replace the global zone_list itself
+                            continue
+                        CFG.set_cfg_variable(var, CFG.parse_cfg_value(var, value))
+                    except Exception as e:
+                        # compatibility with zone_list config files from version <= 1.20
+                        if "zone_list.append" in line:
+                            zone = CFG.parse_legacy_zone(line)
+                            if zone is not None and zone not in CFG.zone_list:
+                                CFG.zone_list.append(zone)
+                        elif line.split("=", 1)[0] in cfg_vars:
+                            # A known setting with an unusable value: the build
+                            # would keep the value from before (#72).
+                            UI.vprint(
+                                1, "WARNING: tile config", tile_cfg_file,
+                                "has an invalid line:", line,
+                                f"({type(e).__name__}: {e})",
+                            )
+                        else:
+                            UI.vprint(2, e)
+                    # Update main window GUI values
+                    self.default_website.set(CFG.default_website)
+                    self.default_zl.set(CFG.default_zl)
+                self.tile_cfg_exists.set(True)
+                UI.vprint(1, f"Configuration loaded for tile at {lat} {lon}")
         else:
             for var in list_global_tile_vars:
                 # Set the value of CFG.* from the value of CFG.global_*
@@ -1875,7 +1873,9 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         if found_config:
                             prov = zl = ""
                             zone_list_exists = False
-                            for line in tmpf.readlines():
+                            with tmpf:
+                                lines = tmpf.readlines()
+                            for line in lines:
                                 if line[:15] == "default_website":
                                     prov = line.strip().split("=")[1][:4]
                                 elif line[:10] == "default_zl":
@@ -1883,7 +1883,6 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                                 elif line[:9] == "zone_list" and len(line[10:]) > 3:
                                     zone_list_exists = True
                                     break
-                            tmpf.close()
                             if not prov:
                                 prov = "?"
                             if zl:
@@ -1973,13 +1972,14 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
                         found_config = False
                     if found_config:
                         prov = zl = ""
-                        for line in tmpf.readlines():
+                        with tmpf:
+                            lines = tmpf.readlines()
+                        for line in lines:
                             if line[:15] == "default_website":
                                 prov = line.strip().split("=")[1][:4]
                             elif line[:10] == "default_zl":
                                 zl = int(line.strip().split("=")[1])
                                 break
-                        tmpf.close()
                         if not prov:
                             prov = "?"
                         if zl:

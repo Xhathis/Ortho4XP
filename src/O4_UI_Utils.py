@@ -61,17 +61,16 @@ def logprint(*args):
     try:
         # Same (locale) encoding as before, so the log stays one encoding;
         # a character it lacks is escaped instead of losing the whole line.
-        f = open(
+        with open(
             FNAMES.resource_path("Ortho4XP.log"), "a",
             errors="backslashreplace",
-        )
-        f.write(
-            time.strftime("%c")
-            + " | "
-            + " ".join([str(x) for x in args])
-            + "\n"
-        )
-        f.close()
+        ) as f:
+            f.write(
+                time.strftime("%c")
+                + " | "
+                + " ".join([str(x) for x in args])
+                + "\n"
+            )
     except (OSError, UnicodeError):  # logging must never crash
         pass
 

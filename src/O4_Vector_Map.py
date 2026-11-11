@@ -1022,73 +1022,72 @@ def keep_obj8(
     multipol = geometry.Polygon()
     latscale = GEO.m_to_lat
     lonscale = latscale / cos(lat_anchor * pi / 180)
-    f = open(objfile_name, "r")
-    for line in f.readlines():
-        if line[0:2] == "VT":
-            (xo, yo, zo) = [float(s) for s in line.split()[1:4]]
-            Xo = xo * cos(heading_anchor * pi / 180) - zo * sin(
-                heading_anchor * pi / 180
-            )
-            Zo = xo * sin(heading_anchor * pi / 180) + zo * cos(
-                heading_anchor * pi / 180
-            )
-            y = numpy.round(lat_anchor - latscale * float(Zo) - tile.lat, 7)
-            x = numpy.round(lon_anchor + lonscale * float(Xo) - tile.lon, 7)
-            z = yo + alt_anchor
-            dico_idx_nodes[idx_node] = vector_map.insert_node(x, y, z)
-            idx_node += 1
-        elif line[0:3] == "IDX":
-            dico_index[index] = [int(x) for x in line.split()[1:]]
-            index += 1
-        elif line[0:4] == "TRIS":
-            (offset, count) = [int(x) for x in line.split()[1:3]]
-            list = []
-            count_tmp = 0
-            try:
-                polist = []
-                while count_tmp < count:
-                    list += dico_index[offset]
-                    count_tmp += len(dico_index[offset])
-                    offset += 1
-                for j in range(count // 3):
-                    (a, b, c) = [
-                        dico_idx_nodes[x] for x in list[3 * j : 3 * j + 3]
-                    ]
-                    if a == b or a == c or b == c:
-                        continue
-                    for (initp, endp) in ((a, b), (b, c), (c, a)):
-                        vector_map.insert_edge(
-                            initp,
-                            endp,
-                            vector_map.dico_attributes["INTERP_ALT"],
-                            check=True,
-                        )
-                    seed = (
-                        numpy.array(vector_map.nodes_dico[a])
-                        + numpy.array(vector_map.nodes_dico[b])
-                        + numpy.array(vector_map.nodes_dico[c])
-                    ) / 3
-                    if "INTERP_ALT" in vector_map.seeds:
-                        vector_map.seeds["INTERP_ALT"].append(seed)
-                    else:
-                        vector_map.seeds["INTERP_ALT"] = [seed]
-                    polist.append(
-                        geometry.Polygon(
-                            [
-                                vector_map.nodes_dico[a],
-                                vector_map.nodes_dico[b],
-                                vector_map.nodes_dico[c],
-                                vector_map.nodes_dico[a],
-                            ]
-                        )
-                    )
-                multipol = VECT.ensure_MultiPolygon(ops.unary_union(polist))
-            except Exception as e:
-                # Malformed OBJ8 indices or geometry: the object's footprint
-                # is then missing from the mesh, which used to go unnoticed.
-                UI.vprint(
-                    1, "     WARNING: could not use the triangles of",
-                    objfile_name, f"({type(e).__name__}: {e}).",
+    with open(objfile_name, "r") as f:
+        for line in f.readlines():
+            if line[0:2] == "VT":
+                (xo, yo, zo) = [float(s) for s in line.split()[1:4]]
+                Xo = xo * cos(heading_anchor * pi / 180) - zo * sin(
+                    heading_anchor * pi / 180
                 )
-    f.close()
+                Zo = xo * sin(heading_anchor * pi / 180) + zo * cos(
+                    heading_anchor * pi / 180
+                )
+                y = numpy.round(lat_anchor - latscale * float(Zo) - tile.lat, 7)
+                x = numpy.round(lon_anchor + lonscale * float(Xo) - tile.lon, 7)
+                z = yo + alt_anchor
+                dico_idx_nodes[idx_node] = vector_map.insert_node(x, y, z)
+                idx_node += 1
+            elif line[0:3] == "IDX":
+                dico_index[index] = [int(x) for x in line.split()[1:]]
+                index += 1
+            elif line[0:4] == "TRIS":
+                (offset, count) = [int(x) for x in line.split()[1:3]]
+                list = []
+                count_tmp = 0
+                try:
+                    polist = []
+                    while count_tmp < count:
+                        list += dico_index[offset]
+                        count_tmp += len(dico_index[offset])
+                        offset += 1
+                    for j in range(count // 3):
+                        (a, b, c) = [
+                            dico_idx_nodes[x] for x in list[3 * j : 3 * j + 3]
+                        ]
+                        if a == b or a == c or b == c:
+                            continue
+                        for (initp, endp) in ((a, b), (b, c), (c, a)):
+                            vector_map.insert_edge(
+                                initp,
+                                endp,
+                                vector_map.dico_attributes["INTERP_ALT"],
+                                check=True,
+                            )
+                        seed = (
+                            numpy.array(vector_map.nodes_dico[a])
+                            + numpy.array(vector_map.nodes_dico[b])
+                            + numpy.array(vector_map.nodes_dico[c])
+                        ) / 3
+                        if "INTERP_ALT" in vector_map.seeds:
+                            vector_map.seeds["INTERP_ALT"].append(seed)
+                        else:
+                            vector_map.seeds["INTERP_ALT"] = [seed]
+                        polist.append(
+                            geometry.Polygon(
+                                [
+                                    vector_map.nodes_dico[a],
+                                    vector_map.nodes_dico[b],
+                                    vector_map.nodes_dico[c],
+                                    vector_map.nodes_dico[a],
+                                ]
+                            )
+                        )
+                    multipol = VECT.ensure_MultiPolygon(ops.unary_union(polist))
+                except Exception as e:
+                    # Malformed OBJ8 indices or geometry: the object's footprint
+                    # is then missing from the mesh, which used to go unnoticed.
+                    UI.vprint(
+                        1, "     WARNING: could not use the triangles of",
+                        objfile_name, f"({type(e).__name__}: {e}).",
+                    )
     return multipol
