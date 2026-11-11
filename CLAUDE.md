@@ -588,9 +588,18 @@ Test results:
   2 of +55+012 started right after its own steps 1-2 (the sea tile
   ended first), mesh kept until the cleanup, DSF byte-identical to
   test-4fa5e9f_frozen (the sim compared against the pre-#73 baseline
-  and reported FAIL; its path is fixed in the tools). Not run:
-  test_parallel_batch and gui_smoke (G:\Ortho4XP; the former
-  re-downloads the Nova Scotia data), and a real outage.
+  and reported FAIL; its path is fixed in the tools).
+  test_parallel_batch on `test` @ 323f13c, run from the _test worktree
+  (cwd = code under test: junctions to the F: caches, a copy of the
+  user's Ortho4XP.cfg, and tmp/Tiles/Geotiffs/yOrtho4XP_Overlays made
+  by hand, as Ortho4XP.py's startup would; without tmp the first try
+  failed in step 3 and at batch_context.json; the user's G:\Ortho4XP,
+  Masks and log untouched; junctions removed with rmdir afterwards):
+  compare 166/166 masks and 3 DSFs identical seq/par (seq 11m20s,
+  par 7m57s; the 3 tiles are one row, -066 neighbours both, so the
+  barrier acts as the global one here), fail, stop (2 slots: third
+  tile never started, no tool left) and context all ok; all cached,
+  no download. Not run: gui_smoke, and a real outage.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
