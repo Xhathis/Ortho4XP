@@ -482,36 +482,34 @@ class Ortho4XP_GUI(tk.Tk):
                 if not line or line[0] == "#":
                     continue
                 try:
-                    (var, value) = line.split("=")
+                    # maxsplit 1: a value may contain "=" (the old
+                    # split("=") skipped such a line silently).
+                    (var, value) = line.split("=", 1)
                     value = CFG.config_compatibility(value)
-                    target = (
-                        cfg_vars[var]["module"] + "." + var
-                        if "module" in cfg_vars[var]
-                        else "CFG." + var
-                    )
-                    if cfg_vars[var]["type"] in (bool, list):
-                        cmd = target + "=" + value
-                    else:
-                        cmd = target + "=cfg_vars['" + var + "']['type'](value)"
                     if var == "zone_list":
                         # Append zones from config to global zone_list but also check if it's a duplicate
                         for zone in ast.literal_eval(value):
                             if zone not in CFG.zone_list:
                                 CFG.zone_list.append(zone)
-                        # Stop the loop here since we don't want to override the global zone_list which cmd will do
+                        # Don't replace the global zone_list itself
                         continue
-                    exec(cmd)
+                    CFG.set_cfg_variable(var, CFG.parse_cfg_value(var, value))
                 except Exception as e:
                     # compatibility with zone_list config files from version <= 1.20
                     if "zone_list.append" in line:
-                        try:
-                            exec(line)
-                        except Exception as e:
-                            print(e)
-                            pass
+                        zone = CFG.parse_legacy_zone(line)
+                        if zone is not None and zone not in CFG.zone_list:
+                            CFG.zone_list.append(zone)
+                    elif line.split("=", 1)[0] in cfg_vars:
+                        # A known setting with an unusable value: the build
+                        # would keep the value from before (#72).
+                        UI.vprint(
+                            1, "WARNING: tile config", tile_cfg_file,
+                            "has an invalid line:", line,
+                            f"({type(e).__name__}: {e})",
+                        )
                     else:
                         UI.vprint(2, e)
-                        pass
                 # Update main window GUI values
                 self.default_website.set(CFG.default_website)
                 self.default_zl.set(CFG.default_zl)
@@ -521,14 +519,14 @@ class Ortho4XP_GUI(tk.Tk):
         else:
             for var in list_global_tile_vars:
                 # Set the value of CFG.* from the value of CFG.global_*
-                _var = "CFG." + var.replace(global_prefix, "")
-                # Get the value of CFG.global_*
-                value = eval("CFG." + var)
+                value = getattr(CFG, var)
                 if cfg_global_tile_vars[var]["type"] in (bool, list):
-                    cmd = _var + "=" + str(value)
+                    # A copy, as the old exec of str(value) made: the tile
+                    # setting must not share a list with the global one.
+                    value = ast.literal_eval(str(value))
                 else:
-                    cmd = _var + "=cfg_global_tile_vars['" + var + "']['type'](value)"
-                exec(cmd)
+                    value = cfg_global_tile_vars[var]["type"](value)
+                CFG.set_cfg_variable(var.replace(global_prefix, ""), value)
             self.tile_cfg_exists.set(False)
         # Update config window tile tab values if it's open
         if self.config_window is not None and self.config_window.winfo_exists():
@@ -545,9 +543,8 @@ class Ortho4XP_GUI(tk.Tk):
         for var in list_tile_vars:
             if var == "default_website" or var == "default_zl":
                 continue
-            target = "CFG." + var
             # Set tile and app config tab values from global variables
-            self.config_window.v_[var].set(str(eval(target)))
+            self.config_window.v_[var].set(str(getattr(CFG, var)))
 
     def update_website(self, *args) -> None:
         """Update global default_website variable from GUI."""
