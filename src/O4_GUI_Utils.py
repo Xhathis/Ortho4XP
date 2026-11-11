@@ -1548,6 +1548,10 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             self.frame_left, text="  Batch Build   ", command=self.batch_build
         ).grid(row=row, column=0, padx=5, pady=5, sticky=N + S + E + W)
         row += 1
+        ttk.Button(
+            self.frame_left, text="Clear selection", command=self.clear_selection
+        ).grid(row=row, column=0, padx=5, pady=5, sticky=N + S + E + W)
+        row += 1
         ttk.Separator(self.frame_left, orient=HORIZONTAL).grid(row=row, column=0, padx=5, pady=5, sticky=N + S + E + W)
         row +=1
         tk.Label(
@@ -1614,8 +1618,37 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         self.active_tile = self.canvas.create_rectangle(
             x0, y0, x1, y1, fill="", outline="yellow", width=3
         )
+        self.preselect_leftover_tiles()
         self.threaded_preview()
         return
+
+    def preselect_leftover_tiles(self) -> None:
+        """Select the tiles the last batch did not build (#79).
+
+        A batch records them in .last_batch_tiles.txt as it goes, so after
+        a crash, a restart or a batch with failures, Batch Build carries on
+        with what is left.
+        """
+        tiles = TILE.read_leftover_tiles()
+        for (lat, lon) in tiles:
+            if (lat, lon) not in self.dico_tiles_todo:
+                self.mark_todo(lat, lon)
+        if tiles:
+            UI.vprint(
+                0, f"Selected the {len(tiles)} tile(s) the last batch did not"
+                " build (" + TILE.LEFTOVER_FILE + "). 'Clear selection'"
+                " unselects them.",
+            )
+
+    def clear_selection(self) -> None:
+        """Unselect all tiles, and forget the last batch's leftover tiles."""
+        for item in self.dico_tiles_todo.values():
+            self.canvas.delete(item)
+        self.dico_tiles_todo.clear()
+        if not UI.is_working:
+            # While a batch runs the file is its own record; it is
+            # rewritten as tiles finish.
+            TILE.write_leftover_tiles([])
 
     def add_symlink(self, lat: int, lon: int) -> None:
         """Add symlink to custom_scenery_dir."""
@@ -2191,20 +2224,24 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
         y = self.canvas.canvasy(event.y)
         (lat, lon) = [floor(t) for t in GEO.pix_to_wgs84(x, y, self.earthzl)]
         if (lat, lon) not in self.dico_tiles_todo:
-            [x0, y0] = GEO.wgs84_to_pix(lat + 1, lon, self.earthzl)
-            [x1, y1] = GEO.wgs84_to_pix(lat, lon + 1, self.earthzl)
-            if not OsX:
-                self.dico_tiles_todo[(lat, lon)] = self.canvas.create_rectangle(
-                    x0, y0, x1, y1, fill="red", stipple="gray12"
-                )
-            else:
-                self.dico_tiles_todo[(lat, lon)] = self.canvas.create_rectangle(
-                    x0 + 2, y0 + 2, x1 - 2, y1 - 2, outline="red", width=1
-                )
+            self.mark_todo(lat, lon)
         else:
             self.canvas.delete(self.dico_tiles_todo[(lat, lon)])
             self.dico_tiles_todo.pop((lat, lon), None)
         return
+
+    def mark_todo(self, lat, lon):
+        """Select a tile for the batch: a red rectangle on the map."""
+        [x0, y0] = GEO.wgs84_to_pix(lat + 1, lon, self.earthzl)
+        [x1, y1] = GEO.wgs84_to_pix(lat, lon + 1, self.earthzl)
+        if not OsX:
+            self.dico_tiles_todo[(lat, lon)] = self.canvas.create_rectangle(
+                x0, y0, x1, y1, fill="red", stipple="gray12"
+            )
+        else:
+            self.dico_tiles_todo[(lat, lon)] = self.canvas.create_rectangle(
+                x0 + 2, y0 + 2, x1 - 2, y1 - 2, outline="red", width=1
+            )
 
     def batch_build(self):
         # Check if config window is open and if unsaved changes exist
