@@ -18,10 +18,7 @@ import O4_OSM_Utils as OSM
 import O4_Overlay_Utils as OVL
 import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
-# Modules whose variables are set via exec() from cfg_vars[...]["module"]
-# (e.g. "IMG.http_timeout=..."); referenced here so that these imports
-# are not removed as unused.
-_EXEC_TARGETS = (IMG, OSM, OVL, TILE, UI)
+import sys
 from O4_Cfg_Vars import (
     cfg_app_vars,
     cfg_global_tile_vars,
@@ -42,7 +39,28 @@ from O4_Cfg_Vars import (
     list_mesh_vars,
     list_tile_vars,
     list_vector_vars,
+    parse_cfg_value,
+    parse_legacy_zone,
 )
+
+# The modules named in cfg_vars[...]["module"]: such a setting lives
+# there (e.g. IMG.http_timeout), the others in this module.
+_CFG_MODULES = {"IMG": IMG, "OSM": OSM, "OVL": OVL, "TILE": TILE, "UI": UI}
+
+
+def _cfg_owner(var):
+    module = cfg_vars[var].get("module")
+    return _CFG_MODULES[module] if module else sys.modules[__name__]
+
+
+def get_cfg_variable(var):
+    """The current value of setting var (replaces eval of its name)."""
+    return getattr(_cfg_owner(var), var)
+
+
+def set_cfg_variable(var, value):
+    """Set setting var where it lives (replaces exec of an assignment)."""
+    setattr(_cfg_owner(var), var, value)
 
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.setLevel(logging.INFO)
@@ -66,16 +84,7 @@ def set_global_variables(var: str, value: str) -> None:
         var_without_global = var[len(global_prefix):]
         if var_without_global in cfg_app_vars:
             return
-    target = (
-        cfg_vars[var]["module"] + "." + var
-        if "module" in cfg_vars[var]
-        else "globals()['" + var + "']"
-        )
-    if cfg_vars[var]["type"] in (bool, list):
-        cmd = target + "=" + value
-    else:
-        cmd = target + "=cfg_vars['" + var + "']['type'](value)"
-    exec(cmd)
+    set_cfg_variable(var, parse_cfg_value(var, value))
 
 def config_compatibility(value) -> str:
     """
@@ -122,12 +131,7 @@ def zones_in_tile(zones, lat, lon):
 # they are defined in a different module and overriden when the config is loaded (below)
 # hence the reason this module is loaded last in O4_GUI_Utils.py
 for var in cfg_vars:
-    target = (
-        cfg_vars[var]["module"] + "." + var
-        if "module" in cfg_vars[var]
-        else var
-    )
-    exec(target + "=cfg_vars['" + var + "']['default']")
+    set_cfg_variable(var, cfg_vars[var]["default"])
 
 ################################################################################
 # Update from Global Ortho4XP.cfg
@@ -149,7 +153,7 @@ try:
             set_global_variables(var, value)
         except Exception as e:
             # Unknown key (KeyError), no "=" (ValueError) or a value that
-            # exec() cannot use: skip the line, as before, but say why.
+            # cannot be used: skip the line, as before, but say why.
             UI.lvprint(
                 1, "Global config file contains an invalid line:", line,
                 f"({type(e).__name__}: {e})",
@@ -187,7 +191,7 @@ class Tile:
         self.build_dir = FNAMES.build_dir(lat, lon, custom_build_dir)
         self.dem = None
         for var in list_tile_vars:
-            exec("self." + var + "=" + var)
+            setattr(self, var, globals()[var])
 
     def make_dirs(self):
         if os.path.isdir(self.build_dir):
@@ -249,25 +253,14 @@ class Tile:
                     (var, value) = line.split("=", 1)
                     # compatibility with config files from version <= 1.20
                     value = config_compatibility(value)
-                    if cfg_vars[var]["type"] in (bool, list):
-                        cmd = "self." + var + "=" + value
-                    else:
-                        cmd = (
-                            "self."
-                            + var
-                            + "=cfg_vars['"
-                            + var
-                            + "']['type'](value)"
-                        )
-                    exec(cmd)
+                    setattr(self, var, parse_cfg_value(var, value))
                 except Exception as e:
                     # compatibility with zone_list config files from
                     # version <= 1.20
                     if "zone_list.append" in line:
-                        try:
-                            exec("self." + line)
-                        except Exception:
-                            pass
+                        zone = parse_legacy_zone(line)
+                        if zone is not None:
+                            self.zone_list.append(zone)
                     elif line.split("=", 1)[0] in cfg_vars:
                         # A known setting with a value that cannot be used
                         # (e.g. "true" for a bool): the build goes on with
@@ -320,7 +313,7 @@ class Tile:
                 if var == "zone_list":
                     lines.append(var + "=" + str(tile_zones) + "\n")
                 else:
-                    lines.append(var + "=" + str(eval("self." + var)) + "\n")
+                    lines.append(var + "=" + str(getattr(self, var)) + "\n")
             # The old file is kept as .bak.
             FNAMES.write_text_atomic(
                 config_file, "".join(lines), backup=config_file_bak
@@ -987,12 +980,7 @@ class Ortho4XP_Config(tk.Toplevel):
     def load_interface_from_variables(self) -> None:
         """Load the configuration interface values for all tabs."""
         for var in list_cfg_vars:
-            target = (
-                cfg_vars[var]["module"] + "." + var
-                if "module" in cfg_vars[var]
-                else "globals()['" + var + "']"
-            )
-            self.v_[var].set(str(eval(target)))
+            self.v_[var].set(str(get_cfg_variable(var)))
 
     def reset_tile_cfg(self) -> None:
         """Reset tile settings to global tile settings."""
@@ -1061,14 +1049,11 @@ class Ortho4XP_Config(tk.Toplevel):
             except Exception as e:
                 # compatibility with zone_list config files from version <= 1.20
                 if "zone_list.append" in line:
-                    try:
-                        exec(line)
-                    except Exception as e:
-                        print(e)
-                        pass
+                    zone = parse_legacy_zone(line)
+                    if zone is not None:
+                        globals()["zone_list"].append(zone)
                 else:
                     UI.vprint(2, e)
-                    pass
         # Apply changes to update global variables
         self.apply_changes("tile")
         UI.vprint(0, f"Backup configuration loaded for tile at {lat} {lon}")
@@ -1110,14 +1095,11 @@ class Ortho4XP_Config(tk.Toplevel):
             except Exception as e:
                 # compatibility with zone_list config files from version <= 1.20
                 if "zone_list.append" in line:
-                    try:
-                        exec(line)
-                    except Exception as e:
-                        print(e)
-                        pass
+                    zone = parse_legacy_zone(line)
+                    if zone is not None:
+                        zone_list.append(zone)
                 else:
                     UI.vprint(2, e)
-                    pass
         if not self.v_["zone_list"].get():
             self.v_["zone_list"].set(str(zone_list))
         self.parent.tile_cfg_exists.set(True)
@@ -1310,30 +1292,11 @@ class Ortho4XP_Config(tk.Toplevel):
 
         if tab == "global":
             for var in list_global_tile_vars:
-                target = "globals()['" + var + "']"
                 try:
-                    if cfg_global_tile_vars[var]["type"] in (bool, list):
-                        value = self.v_[var].get()
-                        cmd = target + "=" + value
-                    else:
-                        value = cfg_global_tile_vars[var]["type"](self.v_[var].get())
-                        cmd = (
-                            target
-                            + "=cfg_global_tile_vars['"
-                            + var
-                            + "']['type'](self.v_['"
-                            + var
-                            + "'].get())"
-                        )
-                    exec(cmd)
+                    globals()[var] = parse_cfg_value(var, self.v_[var].get())
                 except Exception:
-                    exec(
-                        target
-                        + "=cfg_global_tile_vars['"
-                        + var
-                        + "']['type'](cfg_global_tile_vars['"
-                        + var
-                        + "']['default'])"
+                    globals()[var] = cfg_global_tile_vars[var]["type"](
+                        cfg_global_tile_vars[var]["default"]
                     )
                     if tab == "app":
                         self.v_[var].set(str(cfg_global_tile_vars[var]["default"]))
@@ -1362,38 +1325,12 @@ class Ortho4XP_Config(tk.Toplevel):
                 if var == "zone_list":
                     continue
                 try:
-                    target = (
-                        cfg_vars[var]["module"] + "." + var
-                        if "module" in cfg_vars[var]
-                        else "globals()['" + var + "']"
+                    set_cfg_variable(
+                        var, parse_cfg_value(var, self.v_[var].get())
                     )
-                    if cfg_vars[var]["type"] in (bool, list):
-                        value = self.v_[var].get()
-                        cmd = target + "=" + value
-                    else:
-                        value = cfg_vars[var]["type"](self.v_[var].get())
-                        cmd = (
-                            target
-                            + "=cfg_vars['"
-                            + var
-                            + "']['type'](self.v_['"
-                            + var
-                            + "'].get())"
-                        )
-                    exec(cmd)
                 except Exception:
-                    target = (
-                        cfg_vars[var]["module"] + "." + var
-                        if "module" in cfg_vars[var]
-                        else "globals()['" + var + "']"
-                    )
-                    exec(
-                        target
-                        + "=cfg_vars['"
-                        + var
-                        + "']['type'](cfg_vars['"
-                        + var
-                        + "']['default'])"
+                    set_cfg_variable(
+                        var, cfg_vars[var]["type"](cfg_vars[var]["default"])
                     )
                     if tab == "app":
                         self.v_[var].set(str(cfg_vars[var]["default"]))

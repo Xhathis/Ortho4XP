@@ -1,3 +1,4 @@
+import ast
 import io
 import os
 import queue
@@ -96,6 +97,26 @@ local_combined_providers_dict = {}
 extents_dict = {"global": {"dir": None, "code": "global"}}
 color_filters_dict = {"none": []}
 _failed_color_filters = set()  # filters already reported as failing
+
+################################################################################
+def literal_with_names(text, names):
+    """ast.literal_eval of text, where the given bare names stand for values.
+
+    For values in provider files that used to go through eval(): only
+    literals and these names, no calls or other code (#84).
+    """
+    tree = ast.parse(text.strip(), mode="eval")
+
+    class _Names(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if node.id in names:
+                return ast.copy_location(ast.Constant(names[node.id]), node)
+            return node
+
+    return ast.literal_eval(_Names().visit(tree))
+
+
+################################################################################
 
 ################################################################################
 def initialize_extents_dict():
@@ -262,7 +283,12 @@ def initialize_providers_dict():
                     valid_provider = False
                 elif key == "fake_headers":
                     try:
-                        provider[key] = eval(value)
+                        # A dict literal; eval() ran any code in a
+                        # .lay file shared on a forum (#84). Some .lay
+                        # files name user_agent_generic in it.
+                        provider[key] = literal_with_names(
+                            value, {"user_agent_generic": user_agent_generic}
+                        )
                         if type(provider[key]) is not dict:
                             print(
                                 "Definition of fake headers for provider",
@@ -293,7 +319,7 @@ def initialize_providers_dict():
                             valid_provider = False
                 elif key == "in_GUI":
                     try:
-                        provider["in_GUI"] = eval(value)
+                        provider["in_GUI"] = ast.literal_eval(value)
                         if not isinstance(provider["in_GUI"], bool):
                             UI.vprint(
                                 0,

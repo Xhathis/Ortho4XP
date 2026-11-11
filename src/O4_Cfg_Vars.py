@@ -1,5 +1,8 @@
 """"Ortho4XP configuration variables."""
 
+import ast
+import re
+
 import O4_OSM_Utils as OSM
 
 
@@ -474,3 +477,38 @@ list_global_dsf_vars = [global_prefix + item for item in list_dsf_vars]
 list_global_mask_vars = [global_prefix + item for item in list_mask_vars]
 
 list_cfg_vars = list_tile_vars + list_global_tile_vars + list_app_vars
+
+def parse_cfg_value(var: str, value: str):
+    """The value of setting var from its text in a config file or entry.
+
+    bool and list settings used to be set with exec(var + "=" + value),
+    which ran any Python code in a config value: a shared tile config,
+    a .cfg from a forum, or a click on a tile in the GUI map could run
+    commands (#84). ast.literal_eval reads the same literals (True, 1,
+    [0], 100, [[...], 17, 'GO2'] zone lists) and nothing else. Other
+    types convert as before. Raises KeyError for an unknown setting and
+    ValueError / SyntaxError (and TypeError, MemoryError, RecursionError
+    for deeply nested input) for a value that cannot be used.
+    """
+    var_type = cfg_vars[var]["type"]
+    if var_type in (bool, list):
+        return ast.literal_eval(value)
+    return var_type(value)
+
+
+_LEGACY_ZONE = re.compile(r"^(?:self\.)?zone_list\.append\((.*)\)\s*$")
+
+
+def parse_legacy_zone(line: str):
+    """The zone of a 'zone_list.append(zone)' line (configs <= 1.20).
+
+    These lines were run with exec(). Returns the zone, or None when the
+    line is not such a line or its argument is not a literal.
+    """
+    m = _LEGACY_ZONE.match(line.strip())
+    if not m:
+        return None
+    try:
+        return ast.literal_eval(m.group(1))
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return None
