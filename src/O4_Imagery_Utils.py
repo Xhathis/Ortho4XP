@@ -1404,6 +1404,33 @@ def get_and_paste_wmts_part(
 ################################################################################
 
 ################################################################################
+def _max_threads(provider):
+    return int(provider["max_threads"]) if "max_threads" in provider else 16
+
+
+def texture_session(max_threads):
+    """The session shared by the download threads of one texture (#87).
+
+    requests keeps at most 10 connections per host by default
+    (pool_maxsize); with 16 threads (most providers) a connection beyond
+    those was closed after its request ("Connection pool is full,
+    discarding connection": 12-15 per Arc texture in a test, 2026-11-11),
+    and the next request opened a new TCP and TLS connection. The pool
+    now holds one per thread. Download time was the same (~1.5 s per
+    texture), so this only spares the servers the extra connections.
+    """
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        pool_maxsize=max(max_threads, 10)
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+################################################################################
+
+################################################################################
 def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
     # less general than the next build_texture_from_bbox_and_size but
     # probably slightly quicker
@@ -1412,8 +1439,9 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
     parts_y = til_y_max - til_y_min
     width = height = provider["tile_size"]
     big_image = Image.new("RGB", (width * parts_x, height * parts_y))
+    max_threads = _max_threads(provider)
     # we set-up the queue of downloads
-    http_session = requests.Session()
+    http_session = texture_session(max_threads)
     download_queue = queue.Queue()
     for monty in range(0, parts_y):
         for montx in range(0, parts_x):
@@ -1430,12 +1458,7 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
                 http_session,
             )
             download_queue.put(fargs)
-    # then the number of workers
-    if "max_threads" in provider:
-        max_threads = int(provider["max_threads"])
-    else:
-        max_threads = 16
-    # and finally activate them
+    # and finally activate the workers
     try:
         success = parallel_execute(
             get_and_paste_wmts_part, download_queue, max_threads, progress
@@ -1537,7 +1560,8 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
         else:
             subt_size = None
     big_image = Image.new("RGB", (width * parts_x, height * parts_y))
-    http_session = requests.Session()
+    max_threads = _max_threads(provider)
+    http_session = texture_session(max_threads)
     download_queue = queue.Queue()
     for monty in range(0, parts_y):
         for montx in range(0, parts_x):
@@ -1573,10 +1597,6 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
                 ]
             download_queue.put(fargs)
     # We execute the downloads and subimage pastes
-    if "max_threads" in provider:
-        max_threads = int(provider["max_threads"])
-    else:
-        max_threads = 16
     try:
         if provider["request_type"] == "wms":
             success = parallel_execute(
