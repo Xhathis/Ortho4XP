@@ -911,14 +911,14 @@ def improved_buffer(
         buffer_width + separation_width,
         join_style=2,
         mitre_limit=1.5,
-        resolution=1,
+        quad_segs=1,
     )
     if show_progress:
         UI.progress_bar(1, 40)
     if UI.red_flag:
         return geometry.Polygon()
     output_geometry = output_geometry.buffer(
-        -1 * separation_width, join_style=2, mitre_limit=1.5, resolution=1
+        -1 * separation_width, join_style=2, mitre_limit=1.5, quad_segs=1
     )
     if show_progress:
         UI.progress_bar(1, 80)
