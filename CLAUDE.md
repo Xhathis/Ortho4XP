@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 366
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 384
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -164,7 +164,9 @@ imagery comes back partly white always / only the first time, #35),
 for +55+012: normal, stale tmp, 3 DSFTool failures, missing source,
 blocked destination, #34; ~30 s) and `time_convert.py <slots> <N> <scratch>`,
 `sim_overpass_fallback.py [src_dir]` (get_overpass_data against two
-local mock servers; no real Overpass traffic), `sim_dem_failure.py
+local mock servers DE and FR; no real Overpass traffic; since #83 the
+order DE, DE, FR and the skip of a dead server, health file in a
+scratch OSM_dir; 12 checks), `sim_dem_failure.py
 <scratch>` (DEM() cases A-I against a scratch Elevation_data copy,
 downloads blocked), `sim_dem_cli.py` (CLI build without elevation
 data: step 1 must stop, exit 1), `sim_batch.py dem` (tile 2 of 3
@@ -600,6 +602,23 @@ Test results:
   barrier acts as the global one here), fail, stop (2 slots: third
   tile never started, no tool left) and context all ok; all cached,
   no download. Not run: gui_smoke, and a real outage.
+- #83 `fix/overpass-server-switch` @ 93c123f, 2026-11-11: 18 new unit
+  tests (test_overpass_servers.py: order, no wait after the last try,
+  failure kinds, 429 wait, shared skip/probation/clear, probe clears
+  the skip, broken health file, layer fallback only after timeout/size,
+  old-data NOTE), the #23 server-choice tests replaced by _server_order
+  tests, the #81 batch tests kept at pause_after 3 in their fixture
+  (probe interval 0 on the real clock) plus one for the default 1;
+  sim_overpass_fallback (rewritten for DE/FR) 12/12. `test` @ ceafb3a:
+  384 unit tests, pyflakes 0, regression PASS (DSF, 17/17 masks, app
+  log identical; no health file written), sims_in_ws all 15/15
+  (sim_batch now sets overpass_probe_interval 0): sim_osm_failure stops
+  after the combined request ("... from any Overpass server (last: DE:
+  ConnectionError)"), no per-query requests; sim_batch error: try 1
+  and 2 fail on DE (the 3rd DE failure skips it), try 3 fails at once
+  ("all servers skipped"), "Tiles built: 2, failed: 1."; error-once
+  builds it on try 2. Not run: a real outage. Cosmetic: the pause line
+  says "failed 1 tiles in a row".
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1190,6 +1209,34 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     barrier (a neighbour's mesh is final once its phase 1 ended;
     cleanup still waits for the batch end, #42). Sequential batches
     keep the strict two phases (#28).
+83. **DONE** (`93c123f`): Overpass server order and failures. Before:
+    a layer went 4 times to DE as one request, then each query 8 times
+    (FR only on the 5th and 7th), waits up to 256 s also after the last
+    try: up to ~55 min and 12 requests before a layer failed, and every
+    worker and layer found out on its own that DE was down. Now
+    get_overpass_data asks the configured server twice (10 s apart;
+    after 429 the server's wait, >= 60 s), then each other server once,
+    no wait after the last try. Failure kinds: down (no connection,
+    429, 5xx), timeout (read), size (<remark>, error or cut answer; an
+    answer with a <remark> over 1000 bytes used to pass as complete). A
+    layer falls back to one request per query only after a timeout or
+    size failure; all servers down fails the layer at once (~1 min).
+    OSM_data\.overpass_health.json (+ .lock; shared by all processes,
+    written only when something fails, never in a cached build): 3
+    down/timeout failures in a row skip a server for 15 min, the
+    remaining tries of the running request included; then one try
+    (probation: a failure skips it again at once); a success or an
+    answer to the batch's probe (which asks skipped servers too) clears
+    it. A downloaded layer whose osm_base is more than 2 days old is
+    logged ("NOTE: OSM <layer> layer of <tile> has data of <date> from
+    server FR (n days old)"): the cache does not record its source, so
+    this line is the only trace (check_osm_cache.py, or a rebuild once
+    FR caught up). Batch: overpass_pause_after 1 (was 3). Data dates on
+    2026-11-11 08:16 UTC: DE 1 min old, FR 2026-10-13 (29 days; 10-10
+    earlier that day, so catching up, not a fixed lag). overpass_servers.txt
+    comment updated; max_osm_tentatives, layer_request_tentatives and
+    _pick_overpass_server are gone (the sims set max_osm_tentatives, now
+    unused, harmlessly).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1255,6 +1302,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 18. ~~#80-#82~~ — choke points of the 346-tile batch, 2026-11-11.
     Not done: one Overpass request per tile instead of per layer
     (measure first).
+19. ~~#83~~ — Overpass server order, failure kinds, shared skip of a
+    dead server, 2026-11-11.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
