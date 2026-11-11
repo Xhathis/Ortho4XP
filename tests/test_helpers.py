@@ -6,6 +6,7 @@ import pytest
 import O4_Mesh_Utils as MESH
 import O4_OSM_Utils as OSM
 import O4_Tile_Utils as TILE
+import O4_UI_Utils as UI
 
 
 # --- #28: batch phases -------------------------------------------------------
@@ -45,34 +46,25 @@ def test_tool_failure_other_codes():
     assert "OSM" in MESH._tool_failure(1)
 
 
-# --- #23: Overpass server choice -----------------------------------------------
+# --- #23, #83: Overpass server order ------------------------------------------
 @pytest.fixture
 def servers(monkeypatch):
-    monkeypatch.setattr(OSM, "max_osm_tentatives", 8)
     monkeypatch.setattr(OSM, "overpass_server_choice", "DE")
-    return ["DE", "FR", "KU"]
+    monkeypatch.setattr(UI, "vprint", lambda *a: None)
+    return ["FR", "DE", "KU"]
 
 
-def test_fixed_server_first_half(servers):
-    assert [OSM._pick_overpass_server(t, servers) for t in range(1, 5)] == ["DE"] * 4
+def test_configured_server_first(servers):
+    assert OSM._server_order(servers) == ["DE", "FR", "KU"]
 
 
-def test_fixed_server_falls_back_in_second_half(servers):
-    picks = [OSM._pick_overpass_server(t, servers) for t in range(5, 9)]
-    # odd tentatives go to the other servers, even ones stay on DE
-    assert picks[1] == picks[3] == "DE"
-    assert picks[0] != "DE" and picks[2] != "DE"
-    assert {picks[0], picks[2]} == {"FR", "KU"}
-
-
-def test_unknown_choice_uses_first_server(servers, monkeypatch):
+def test_unknown_choice_keeps_file_order(servers, monkeypatch):
     monkeypatch.setattr(OSM, "overpass_server_choice", "XX")
-    assert OSM._pick_overpass_server(1, servers) == "DE"
+    assert OSM._server_order(servers) == servers
 
 
-def test_random_choice_avoids_last_server(servers, monkeypatch):
+def test_random_choice(servers, monkeypatch):
     monkeypatch.setattr(OSM, "overpass_server_choice", "random")
-    monkeypatch.setattr(OSM.get_overpass_data, "last_key", "FR", raising=False)
-    picks = {OSM._pick_overpass_server(1, servers) for _ in range(50)}
-    assert "FR" not in picks and picks <= {"DE", "KU"}
-    assert OSM._pick_overpass_server(1, ["DE"]) == "DE"
+    orders = {tuple(OSM._server_order(servers)) for _ in range(60)}
+    assert len(orders) > 1 and all(sorted(o) == sorted(servers) for o in orders)
+    assert OSM._server_order(servers, shuffle=False) == servers

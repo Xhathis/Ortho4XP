@@ -102,6 +102,7 @@ def test_requeued_neighbour_holds_tile(batch, monkeypatch):
     # B loses step 1 to Overpass and goes back into the queue: A must wait
     # for its second try, which builds it.
     monkeypatch.setattr(TILE, "overpass_retry_wait", 0)
+    monkeypatch.setattr(TILE, "overpass_probe_interval", 0)  # pause (#83)
     codes = {(B, 0): TILE.OVERPASS_EXIT_CODE}
     events = fake_workers(monkeypatch, {}, codes)
     real_failed = TILE._OverpassGate.failed

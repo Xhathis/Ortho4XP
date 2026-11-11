@@ -2,8 +2,8 @@
 # Format: IDENTIFIER = URL
 # One entry per line. At least one entry is required.
 #
-# With overpass_server_choice = DE (Ortho4XP.cfg) the first half of the
-# tentatives go to DE, the others alternate with the remaining servers.
+# With overpass_server_choice = DE (Ortho4XP.cfg) a request goes to DE
+# twice, then once to each other server, in this order (#83).
 # FR has the whole planet and answers fast, but its data may lag weeks
 # behind (2026-11-11: data of 2026-10-10): a fallback, not a first choice.
 # overpass.private.coffee (KU) and overpass.kumi.systems timed out on every
