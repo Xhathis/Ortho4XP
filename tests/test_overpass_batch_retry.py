@@ -18,34 +18,6 @@ import O4_UI_Utils as UI
 STEP1 = TILE.BATCH_STEPS[0]
 
 
-@pytest.fixture
-def lines(monkeypatch):
-    monkeypatch.setattr(UI, "log", False)
-    out = []
-    monkeypatch.setattr(
-        UI, "lvprint", lambda level, *a: out.append(" ".join(map(str, a))))
-    monkeypatch.setattr(UI, "vprint", lambda *a: None)
-    monkeypatch.setattr(UI, "exit_message_and_bottom_line", lambda *a: None)
-    monkeypatch.setattr(TILE, "overpass_retry_wait", 0)
-    # The batch pauses on the first Overpass failure (#83): no 5 min wait
-    # for the probe on the real clock (tests of the probe set it).
-    monkeypatch.setattr(TILE, "overpass_probe_interval", 0)
-    # The tests below were written for a pause after 3 tiles in a row (#81);
-    # test_gate_pauses_on_first_failure checks the default (1, #83).
-    monkeypatch.setattr(TILE, "overpass_pause_after", 3)
-    monkeypatch.setattr(OSM, "overpass_gave_up", False)
-    # Never ask the real Overpass from a test (#46).
-    monkeypatch.setattr(OSM, "overpass_answers", lambda bbox=None: True)
-    # The probe runs at once, not in a thread (#81).
-    monkeypatch.setattr(TILE, "_run_in_background", lambda fn: [bool(fn())])
-    UI.is_working = False
-    UI.stop_requested = False
-    UI.red_flag = False
-    yield out
-    UI.stop_requested = False
-    UI.red_flag = False
-
-
 class FakeTile:
     custom_build_dir = ""
     default_website = "GO2"
