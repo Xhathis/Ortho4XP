@@ -1,4 +1,5 @@
 """The tiles a batch did not build are kept for the tile window (#79)."""
+from pathlib import Path
 import os
 
 import pytest
@@ -30,7 +31,7 @@ def no_leftover_file():
 def test_write_read_roundtrip():
     TILE.write_leftover_tiles([(55, 12), (-7, 72), (61, -50)])
     assert os.path.dirname(path()) == os.path.abspath(".")
-    text = open(path(), encoding="utf-8").read()
+    text = Path(path()).read_text(encoding="utf-8")
     assert text.startswith("# Tiles of the last batch")
     assert "+55+012\n-07+072\n+61-050\n" in text
     assert TILE.read_leftover_tiles() == [(55, 12), (-7, 72), (61, -50)]

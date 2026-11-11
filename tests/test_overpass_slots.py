@@ -48,24 +48,25 @@ def test_slot_shared_with_another_process(monkeypatch):
         print("held", flush=True)
         sys.stdin.readline()
     """)
-    p = subprocess.Popen([sys.executable, "-c", holder], cwd=os.getcwd(),
-                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         text=True)
-    try:
-        # The import may print a notice first (no overpass_servers.txt in
-        # the test's empty cwd).
-        for line in p.stdout:
-            if line.strip() == "held":
-                break
-        else:
-            raise AssertionError("holder process did not take the slots")
-        monkeypatch.setattr(UI, "red_flag", True)
-        assert OSM._acquire_overpass_slot() is None
-        monkeypatch.setattr(UI, "red_flag", False)
-    finally:
-        p.stdin.write("\n")
-        p.stdin.flush()
-        p.wait(timeout=30)
+    # As a context manager Popen closes both pipes and waits for the child.
+    with subprocess.Popen([sys.executable, "-c", holder], cwd=os.getcwd(),
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          text=True) as p:
+        try:
+            # The import may print a notice first (no overpass_servers.txt
+            # in the test's empty cwd).
+            for line in p.stdout:
+                if line.strip() == "held":
+                    break
+            else:
+                raise AssertionError("holder process did not take the slots")
+            monkeypatch.setattr(UI, "red_flag", True)
+            assert OSM._acquire_overpass_slot() is None
+            monkeypatch.setattr(UI, "red_flag", False)
+        finally:
+            p.stdin.write("\n")
+            p.stdin.flush()
+            p.wait(timeout=30)
     # The OS released its locks with the process.
     s = OSM._acquire_overpass_slot()
     assert s is not None
