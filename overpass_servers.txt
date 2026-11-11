@@ -1,6 +1,14 @@
 # Overpass API servers used to download OSM vector data.
 # Format: IDENTIFIER = URL
 # One entry per line. At least one entry is required.
+#
+# With overpass_server_choice = DE (Ortho4XP.cfg) the first half of the
+# tentatives go to DE, the others alternate with the remaining servers.
+# FR has the whole planet and answers fast, but its data may lag weeks
+# behind (2026-11-11: data of 2026-10-10): a fallback, not a first choice.
+# overpass.private.coffee (KU) and overpass.kumi.systems timed out on every
+# request in November 2026; mail.ru, openstreetmap.ru and osm.jp did not
+# answer; osm.ch only has Switzerland.
 
 DE = https://overpass-api.de/api/interpreter
-KU = https://overpass.private.coffee/api/interpreter
+FR = https://overpass.openstreetmap.fr/api/interpreter
