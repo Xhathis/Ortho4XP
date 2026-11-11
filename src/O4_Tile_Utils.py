@@ -848,7 +848,9 @@ class _OverpassGate:
             self.probe = None
             self.next_probe = now + overpass_probe_interval
             UI.lvprint(
-                0, f"Overpass failed {self.in_row} tiles in a row: tiles whose "
+                0, "Overpass failed "
+                + ("1 tile" if self.in_row == 1 else f"{self.in_row} tiles in a row")
+                + ": tiles whose "
                 "step 1 needs Overpass wait until it answers again (checked "
                 f"every {UI.nicer_timer(overpass_probe_interval)}, at most "
                 f"{UI.nicer_timer(overpass_wait_max)}); the others go on.",
