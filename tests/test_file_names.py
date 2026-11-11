@@ -1,5 +1,6 @@
 """O4_File_Names: tile, folder and file naming."""
 import os
+from pathlib import Path
 import threading
 
 import pytest
@@ -112,7 +113,7 @@ def test_temp_path_is_beside_target_and_unique_per_thread():
 def test_finish_temp_file(tmp_path):
     target = tmp_path / "a.bin"
     tmp = FNAMES.temp_path_for(str(target))
-    open(tmp, "wb").write(b"new")
+    Path(tmp).write_bytes(b"new")
     FNAMES.finish_temp_file(tmp, str(target))
     assert target.read_bytes() == b"new" and not os.path.exists(tmp)
 
@@ -123,7 +124,7 @@ def test_finish_temp_file_when_target_is_locked(tmp_path, monkeypatch):
     target = tmp_path / "a.bin"
     target.write_bytes(b"other process")
     tmp = FNAMES.temp_path_for(str(target))
-    open(tmp, "wb").write(b"mine")
+    Path(tmp).write_bytes(b"mine")
 
     def locked(src, dst):
         raise PermissionError("in use")

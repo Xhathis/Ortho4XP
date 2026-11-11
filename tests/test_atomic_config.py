@@ -1,5 +1,6 @@
 """#56: config files are replaced in one step, the old one kept as .bak."""
 import os
+from pathlib import Path
 
 import pytest
 
@@ -10,7 +11,7 @@ import O4_File_Names as FNAMES
 def test_new_file_without_backup(tmp_path):
     path = str(tmp_path / "a.cfg")
     FNAMES.write_text_atomic(path, "x=1\n", backup=path + ".bak")
-    assert open(path).read() == "x=1\n"
+    assert Path(path).read_text() == "x=1\n"
     assert not os.path.exists(path + ".bak")
     assert os.listdir(tmp_path) == ["a.cfg"]
 
@@ -19,8 +20,8 @@ def test_old_file_goes_to_backup(tmp_path):
     path = str(tmp_path / "a.cfg")
     FNAMES.write_text_atomic(path, "x=1\n")
     FNAMES.write_text_atomic(path, "x=2\n", backup=path + ".bak")
-    assert open(path).read() == "x=2\n"
-    assert open(path + ".bak").read() == "x=1\n"
+    assert Path(path).read_text() == "x=2\n"
+    assert Path(path + ".bak").read_text() == "x=1\n"
 
 
 def test_failed_write_keeps_the_old_file(tmp_path, monkeypatch):
@@ -42,7 +43,7 @@ def test_failed_write_keeps_the_old_file(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         FNAMES.write_text_atomic(path, "x=2\n", backup=path + ".bak")
     monkeypatch.undo()
-    assert open(path).read() == "x=1\n"
+    assert Path(path).read_text() == "x=1\n"
     assert sorted(os.listdir(tmp_path)) == ["a.cfg", "a.cfg.bak"]
 
 
@@ -52,12 +53,12 @@ def test_tile_write_to_config_keeps_backup(tmp_path):
     tile.default_website = "Arc"
     assert tile.write_to_config() == 1
     path = os.path.join(tile.build_dir, "Ortho4XP_+55+012.cfg")
-    first = open(path).read()
+    first = Path(path).read_text()
     assert "default_website=Arc\n" in first
     tile.default_website = "GO2"
     assert tile.write_to_config() == 1
-    assert "default_website=GO2\n" in open(path).read()
-    assert open(path + ".bak").read() == first
+    assert "default_website=GO2\n" in Path(path).read_text()
+    assert Path(path + ".bak").read_text() == first
     assert sorted(os.listdir(tile.build_dir)) == [
         "Ortho4XP_+55+012.cfg", "Ortho4XP_+55+012.cfg.bak"]
 
@@ -67,7 +68,7 @@ def test_tile_write_failure_keeps_old_config(tmp_path, monkeypatch):
     os.makedirs(tile.build_dir, exist_ok=True)
     assert tile.write_to_config() == 1
     path = os.path.join(tile.build_dir, "Ortho4XP_+55+012.cfg")
-    before = open(path).read()
+    before = Path(path).read_text()
 
     def fail(path, text, backup=None):
         raise OSError(13, "Permission denied")
@@ -76,4 +77,4 @@ def test_tile_write_failure_keeps_old_config(tmp_path, monkeypatch):
     monkeypatch.setattr(CFG.UI, "lvprint", lambda *a: None)
     monkeypatch.setattr(CFG.UI, "vprint", lambda *a: None)
     assert not tile.write_to_config()
-    assert open(path).read() == before
+    assert Path(path).read_text() == before
