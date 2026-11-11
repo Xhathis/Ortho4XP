@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 384
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 453
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -618,7 +618,16 @@ Test results:
   and 2 fail on DE (the 3rd DE failure skips it), try 3 fails at once
   ("all servers skipped"), "Tiles built: 2, failed: 1."; error-once
   builds it on try 2. Not run: a real outage. Cosmetic: the pause line
-  says "failed 1 tiles in a row".
+  says "failed 1 tiles in a row" (fixed by #92).
+- Full code review 2026-11-11, #84-#96 (branches under item 20 of the
+  planned order). `test` @ 5c3b818 (#84-#93): 453 unit tests, pyflakes
+  0, regression PASS (DSF, 17/17 masks, app log identical; step 3 28.3
+  -> 20.6 s), sims_in_ws all 15/15, gui_smoke 7/7 against _test/src
+  (131 tiles on the map; the user's .last_gui_params.txt, log and cfg
+  unchanged, hash-checked). `test` @ 9de01b9 (+ #94-#96): 453 unit
+  tests (no ResourceWarning), pyflakes 0, regression PASS (DSF, 17/17
+  masks, app log identical, 74 s), sims_in_ws all 15/15 (Triangle4XP
+  pipe change through sim_mesh_failure), sim_overlay 7/7 (DSFTool).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -685,7 +694,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 6. **FIXED** (`fc5914a`). pyflakes is installed in the venv
    (`venv\Scripts\python.exe -m pyflakes Ortho4XP.py src/O4_*.py` must
    stay at 0 findings). The IMG/OSM/OVL/TILE/UI imports in
-   O4_Config_Utils are exec() targets (see `_EXEC_TARGETS`), not unused.
+   O4_Config_Utils are setattr targets (`_CFG_MODULES`, #84), not unused.
    Minor (pyflakes): 10 unused imports, 9 unused local variables, 3 f-strings
    without placeholders, 1 unused `global extents_dict`.
 7. **FIXED** (`ac12969`, `d48aaa0`, `f955376`: build stops with ERROR, CLI
@@ -1237,6 +1246,68 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     comment updated; max_osm_tentatives, layer_request_tentatives and
     _pick_overpass_server are gone (the sims set max_osm_tentatives, now
     unused, harmlessly).
+    Full code review 2026-11-11 (all live modules, a profile and an
+    audit of every exception caught during a build, sys.monitoring):
+84. **FIXED** (`238b198`): setting values from Ortho4XP.cfg, tile
+    configs, .last_gui_params.txt, the GUI and .lay files went through
+    exec()/eval(), so a config line ran as Python code. Values are now
+    data: O4_Cfg_Vars.parse_cfg_value (bool/list via ast.literal_eval,
+    else the declared type), get/set_cfg_variable instead of exec;
+    the old "zone_list.append(...)" lines still load
+    (parse_legacy_zone). .lay fake_headers may name
+    user_agent_generic (literal_with_names). The user's 133 tile
+    configs, the global config and all 68 providers read to identical
+    values (checked by script).
+85. **FIXED** (`ff01135`): parallel_worker's success flag was a
+    read-modify-write shared by the threads; a failed item could be
+    overwritten by a concurrent success (lost update), so the caller
+    saw success. Now only ever set to 0.
+86. **FIXED** (`ddb6fbd`): an imagery answer without Content-Type
+    raised KeyError; 429/408/5xx were retried at once. Now retried
+    after Retry-After (429/503) or 2 * 2^n s (2-60 s), Stop checked
+    every 0.25 s.
+87. **FIXED** (`05c1277`): the per-texture requests session had
+    urllib3's 10-connection pool for up to 16 threads: 12-15 "pool is
+    full" discards per Arc texture (new TCP+TLS each). Now
+    pool_maxsize = max(max_threads, 10). Download time unchanged
+    (~1.5-1.9 s per texture, Arc ZL17 and GO2 ZL16, bound by the
+    servers); 2 textures at once ~20% faster than one after the other
+    (max_download_slots=2 is the user's choice, not set).
+88. **DONE** (`4432c6c`): needs_mask decoded the mask PNG for every
+    texture (566 decodes on +55+012 for 17 masks). LRU of 8 decoded
+    masks keyed by (path, mtime_ns, size), cleared after build_dsf:
+    48 decodes. Same bytes.
+89. **DONE** (`0c990af`): improved_buffer used shapely's deprecated
+    resolution=; quad_segs=1 gives identical WKB (shapely 2.1.2).
+90. **DONE** (`053880c`): 32 open()/close() pairs became with-blocks
+    (a raise left the file open, on Windows it could not be deleted or
+    replaced); batch worker log closed when Popen fails.
+91. **DONE** (`28fa45f`): build_texture_from_bbox_and_size had a
+    per-piece downscale that never ran (its condition was never true);
+    removed (running it would add seams).
+92. **DONE** (`e0a612d`, log only): the #81 pause line says "failed 1
+    tile" or "N tiles in a row".
+93. **DONE** (`5f46a25`): build_dsf wrote pools and patch commands
+    with one struct.pack + write per 16-bit value (15.6 M calls, ~10 s
+    for +55+012); now array.tobytes() per plane/command
+    (_pool_planes, _patch_triangle_cmds, _cross_pool_triangle_cmds),
+    float2qquad via format(). Same bytes (unit tests against the old
+    loops; regression DSF byte-identical). Step 3 with #88: 28.3 s ->
+    20.5 s.
+94. **DONE** (`085fe2f`): removed the disabled ("for ... in []")
+    runways-as-lines block in encode_runways_taxiways_and_aprons; it
+    used numpy.array(LineString), broken on shapely 2.
+95. **FIXED** (`ee300f7`): parallel_worker called progress_bar(None)
+    at "quit" and caught the TypeError (seen in the exception audit).
+96. **DONE** (`5870e56`, `d8dc741`, `e100f95`; Triangle4XP.exe,
+    moulinette.exe and DSFTool.exe calls): their stdout pipes are
+    closed before wait(), record_water_tris's mesh file in a with;
+    tests read and write files through pathlib. pytest -W
+    default::ResourceWarning reports none.
+    Looked at and left: Vector_Map's "if False" road block (upstream's
+    switch), insert_edge (~21 s) and blur_mask (~17 s) (change the
+    output, see item 12 below), the log write race (3 processes x 4000
+    lines, none lost).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1256,8 +1327,13 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 - Done 2026-11-03: one Overpass request per layer (#26) and parallel
   batch tiles (#27, 3 cached Nova Scotia tiles: 115 s vs 169 s; fresh
   tiles gain more, they wait on servers).
-- Ideas not done: algorithmic work in insert_edge, blur_mask,
-  build_dsf.
+- Ideas not done: algorithmic work in insert_edge, blur_mask.
+- 2026-11-11 (#88, #93): step 3 of the regression 28.3 s -> 20.5 s,
+  same DSF. Profile of a cached build: insert_edge/rtree ~21 s,
+  blur_mask ~17 s; both left (they would change mesh/mask bytes).
+- Imagery downloads (#87): ~1.5-1.9 s per texture whatever the pool;
+  2 textures in parallel ~20% faster. max_download_slots=2 is an
+  option for the user's config (not changed).
 
 ## Planned order of work
 
@@ -1304,6 +1380,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (measure first).
 19. ~~#83~~ — Overpass server order, failure kinds, shared skip of a
     dead server, 2026-11-11.
+20. ~~#84-#96~~ — full code review 2026-11-11. Branches:
+    fix/config-literal-eval (#84), fix/imagery-http (#85-#87, #91),
+    fix/mask-cache (#88), fix/small-hygiene (#89, #90, #92; branched
+    from fix/config-literal-eval: same reader code), fix/dsf-writer
+    (#93; from fix/small-hygiene), fix/airport-dead-block (#94-#96).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
