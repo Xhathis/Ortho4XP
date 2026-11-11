@@ -1143,20 +1143,27 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
     tiles mostly wait on Overpass and imagery servers, which is what makes
     running a few at once worth it.
 
-    Two phases: steps 1-2 for every tile, then steps 2.5-3 (and overlays).
-    The masks of a tile also use the meshes of its neighbours
-    (MASK.select_neighbor_meshes); without the phase barrier they would
-    depend on which neighbour happened to finish its mesh first.
+    Two phases: steps 1-2, then steps 2.5-3 (and overlays). The masks of a
+    tile also use the meshes of its neighbours (MASK.select_neighbor_meshes),
+    so a tile starts steps 2.5-3 only once it and its neighbours in the
+    batch are through steps 1-2 (#82; before, all tiles of the batch had
+    to be); otherwise its masks would depend on which neighbour happened to
+    finish its mesh first. Each phase runs up to batch_parallel_tiles
+    workers, so imagery downloads overlap the Overpass requests of others.
     """
     nbr_slots = min(batch_parallel_tiles, len(list_lat_lon))
     timer = time.time()
+    phases = _batch_phases(flags)
     UI.lvprint(
         0, "Batch build launched for a number of", len(list_lat_lon),
-        "tiles,", nbr_slots, "in parallel.",
+        "tiles,", nbr_slots, "in parallel"
+        + (" per phase." if len(phases) > 1 else "."),
     )
-    phases = _batch_phases(flags)
-    todo = list(list_lat_lon)
-    failed_tiles = []
+    if len(phases) > 1:
+        UI.vprint(
+            0, f"Batch phases: {phases[0][0]}, then {phases[1][0]} once a "
+            "tile and its neighbours in the batch are through the first.",
+        )
     built = []  # (lat, lon) of tiles through the last phase
     # The provider, zoomlevel and custom zones picked in the GUI only live
     # in this process (CFG globals, copied into tile); a tile without its
@@ -1174,22 +1181,15 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
         )
     UI.is_working = 1
     try:
-        for (k, (name, steps)) in enumerate(phases):
-            if len(phases) > 1:
-                UI.vprint(0, f"Batch phase {k + 1}/{len(phases)}: {name}")
-            result = _run_batch_phase(
-                tile, todo, steps, nbr_slots,
-                last_phase=(k == len(phases) - 1),
-                context_file=context_file,
-                built=built,
-                gate=_OverpassGate() if steps[0] else None,
-            )
-            if result is None:  # Stop button
-                return 0
-            failed_tiles += result
-            failed = {coords for (coords, _) in result}
-            todo = [(lat, lon) for (lat, lon) in todo
-                    if FNAMES.short_latlon(lat, lon) not in failed]
+        failed_tiles = _run_batch_phases(
+            tile, list_lat_lon,
+            [(name, steps, k == len(phases) - 1)
+             for (k, (name, steps)) in enumerate(phases)],
+            nbr_slots, context_file, built=built,
+            gate=_OverpassGate() if phases and phases[0][1][0] else None,
+        )
+        if failed_tiles is None:  # Stop button
+            return 0
     finally:
         UI.is_working = 0
         try:
@@ -1204,7 +1204,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
 def _worker_env():
     """Environment of a --batch-worker process.
 
-    The worker's output goes to its tmp log, which _run_batch_phase opens
+    The worker's output goes to its tmp log, which _run_batch_phases opens
     as UTF-8; without PYTHONIOENCODING the worker would write it in the
     ANSI code page and crash on names it cannot encode (a Polish airport
     in +54+015 failed step 1).
@@ -1219,63 +1219,112 @@ def _run_batch_phase(
     tile, list_lat_lon, flags, nbr_slots, last_phase, context_file,
     built=None, gate=None,
 ):
-    """Run one worker per tile, nbr_slots at a time.
+    """One phase of a parallel batch for list_lat_lon (see _run_batch_phases)."""
+    return _run_batch_phases(
+        tile, list_lat_lon, [("", flags, last_phase)], nbr_slots,
+        context_file, built=built, gate=gate,
+    )
 
-    Returns the list of (coords, failed step), or None after Stop. In the
-    last phase, built tiles are added to built (when given). With a gate
-    (_OverpassGate, step 1), a tile whose step 1 found no Overpass answer
-    goes back into the queue while it has tries left, and tiles that need
-    Overpass are held back during an outage; without one it is a step 1
-    failure.
+
+def _phase2_ready(lat, lon, in_batch, ended1):
+    """True when (lat, lon) and its neighbours in the batch are through
+    phase 1 (#82): its masks read their meshes (#28)."""
+    return (lat, lon) in ended1 and all(
+        n in ended1 for n in _neighbours(lat, lon) if n in in_batch
+    )
+
+
+def _run_batch_phases(
+    tile, list_lat_lon, phases, nbr_slots, context_file, built=None,
+    gate=None,
+):
+    """Run one worker per tile and phase, up to nbr_slots per phase.
+
+    phases: [(name, flags for _build_one_tile, last phase of the batch?)],
+    one or two. A tile starts the second once it and its neighbours in
+    list_lat_lon have ended the first (built, failed or open sea): their
+    meshes are final then. Returns the list of (coords, failed step), or
+    None after Stop. Tiles through the batch's last phase are added to
+    built (when given). With a gate (_OverpassGate, first phase with step
+    1), a tile whose step 1 found no Overpass answer goes back into the
+    queue while it has tries left, and tiles that need Overpass are held
+    back during an outage; without one it is a step 1 failure.
     """
     script = FNAMES.resource_path("Ortho4XP.py")
     # A frozen (PyInstaller) build is its own interpreter and script.
     launcher = [sys.executable] if getattr(sys, "frozen", False) else [
         sys.executable, script]
-    flag_string = "".join("1" if f else "0" for f in flags)
+    flag_strings = ["".join("1" if f else "0" for f in flags)
+                    for (_, flags, _) in phases]
     creationflags = (
         subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     )
     env = _worker_env()
-    todo = list(list_lat_lon)
-    running = {}  # proc -> (lat, lon, coords, log path, log file, start)
+    in_batch = set(list_lat_lon)
+    queues = [list(list_lat_lon)] + [[] for _ in phases[1:]]
+    ended1 = set()  # tiles through phase 1, whatever the result
+    # proc -> (phase, lat, lon, coords, log path, log file, start)
+    running = {}
     failed_tiles = []
-    started = 0
+    started = [0] * len(phases)
     needed = {}  # (lat, lon) -> needed Overpass when started
-    while todo or running:
+
+    def next_tile(p):
+        if p == 0:
+            return _next_startable(queues[0], gate)
+        for (i, (lat, lon)) in enumerate(queues[p]):
+            if _phase2_ready(lat, lon, in_batch, ended1):
+                return i
+        return None
+
+    def end_phase1(lat, lon, ok):
+        ended1.add((lat, lon))
+        if ok and len(phases) > 1:
+            queues[1].append((lat, lon))
+
+    while any(queues) or running:
         if gate:
-            gate.poll(todo)
-        while todo and len(running) < nbr_slots and not UI.stop_requested:
-            i = _next_startable(todo, gate)
-            if i is None:
-                break  # held back: Overpass outage or waiting to retry
-            (lat, lon) = todo.pop(i)
-            if gate:
-                needed[(lat, lon)] = gate.needs_overpass(lat, lon)
-            started += 1
-            coords = FNAMES.short_latlon(lat, lon)
-            log_path = os.path.join(FNAMES.Tmp_dir, f"batch_{coords}.log")
-            log_file = open(log_path, "w", encoding="utf-8")
-            proc = subprocess.Popen(
-                launcher + ["--batch-worker", str(lat), str(lon),
-                            flag_string, tile.custom_build_dir or "",
-                            context_file],
-                stdout=log_file, stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(script), env=env,
-                creationflags=creationflags,
-            )
-            running[proc] = (lat, lon, coords, log_path, log_file, time.time())
-            UI.vprint(
-                0, f"Tile {coords} started ({started}/{len(list_lat_lon)},"
-                f" {len(running)} running), output in {log_path}",
-            )
+            gate.poll(queues[0])
+        for p in range(len(phases)):
+            while queues[p] and not UI.stop_requested and sum(
+                    1 for info in running.values() if info[0] == p
+            ) < nbr_slots:
+                i = next_tile(p)
+                if i is None:
+                    break  # held back (Overpass, retry wait, neighbours)
+                (lat, lon) = queues[p].pop(i)
+                if gate and p == 0:
+                    needed[(lat, lon)] = gate.needs_overpass(lat, lon)
+                started[p] += 1
+                coords = FNAMES.short_latlon(lat, lon)
+                log_path = os.path.join(FNAMES.Tmp_dir, f"batch_{coords}.log")
+                log_file = open(log_path, "w", encoding="utf-8")
+                proc = subprocess.Popen(
+                    launcher + ["--batch-worker", str(lat), str(lon),
+                                flag_strings[p], tile.custom_build_dir or "",
+                                context_file],
+                    stdout=log_file, stderr=subprocess.STDOUT,
+                    cwd=os.path.dirname(script), env=env,
+                    creationflags=creationflags,
+                )
+                running[proc] = (p, lat, lon, coords, log_path, log_file,
+                                 time.time())
+                n_running = sum(1 for info in running.values()
+                                if info[0] == p)
+                UI.vprint(
+                    0, f"Tile {coords} started"
+                    + (f" ({phases[p][0]})" if len(phases) > 1 else "")
+                    + f" ({started[p]}/{len(list_lat_lon)}, {n_running} "
+                    f"running), output in {log_path}",
+                )
         if UI.stop_requested:
             for (proc, info) in running.items():
                 _kill_process_tree(proc)
-                info[4].close()
+                info[5].close()
             UI.lvprint(
                 0, "Batch stopped:", len(running), "running tile(s)",
-                "interrupted,", len(todo), "not started in this phase.",
+                "interrupted,", sum(len(q) for q in queues),
+                "waiting to start.",
             )
             UI.exit_message_and_bottom_line()
             return None
@@ -1283,9 +1332,10 @@ def _run_batch_phase(
             code = proc.poll()
             if code is None:
                 continue
-            (lat, lon, coords, log_path, log_file, start) = running.pop(proc)
+            (p, lat, lon, coords, log_path, log_file, start) = running.pop(proc)
             log_file.close()
-            if needed.get((lat, lon)) and (
+            last_phase = phases[p][2]
+            if p == 0 and needed.get((lat, lon)) and (
                     code in (0, SEA_EXIT_CODE)
                     or 11 <= code < 10 + len(BATCH_STEPS)):
                 gate.answered()  # it got through step 1
@@ -1298,6 +1348,8 @@ def _run_batch_phase(
                     _remove_from_todo_map(lat, lon)
                     if built is not None:
                         built.append((lat, lon))
+                if p == 0:
+                    end_phase1(lat, lon, True)
                 try:
                     os.remove(log_path)  # keep tmp clean; errors keep it
                 except OSError:
@@ -1307,14 +1359,16 @@ def _run_batch_phase(
                 UI.vprint(0, f"Tile {coords} is open sea, nothing to build.")
                 _remove_from_todo_map(lat, lon)
                 failed_tiles.append((coords, SEA_SKIPPED))
+                if p == 0:
+                    end_phase1(lat, lon, False)
                 try:
                     os.remove(log_path)
                 except OSError:
                     pass
                 continue
-            if (code == OVERPASS_EXIT_CODE and gate
+            if (p == 0 and code == OVERPASS_EXIT_CODE and gate
                     and gate.failed(lat, lon)):
-                todo.append((lat, lon))
+                queues[0].append((lat, lon))
                 continue
             if code == OVERPASS_EXIT_CODE:
                 step = BATCH_STEPS[0]
@@ -1327,6 +1381,8 @@ def _run_batch_phase(
                 "- skipped, see", log_path,
             )
             failed_tiles.append((coords, step))
+            if p == 0:
+                end_phase1(lat, lon, False)
         time.sleep(0.5)
     return failed_tiles
 
