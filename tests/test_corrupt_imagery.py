@@ -18,6 +18,7 @@ class _Response:
     def __init__(self, content):
         self.content = content
         self.headers = {"Content-Type": "image/jpeg"}
+        self.status_code = 200
 
     def __str__(self):
         return "<Response [200]>"

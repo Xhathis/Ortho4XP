@@ -1048,6 +1048,32 @@ def has_data(
 ################################################################################
 
 ################################################################################
+def _server_retry_wait(r, tries_before):
+    """Seconds to wait before asking an imagery server again (#86).
+
+    2 s after a server error, as before. After HTTP 429 (rate limited) or
+    503 (overloaded) the server's Retry-After when it sends one, else a
+    wait doubling from 2 s with each try; 2 to 60 s.
+    """
+    if r.status_code not in (429, 503):
+        return 2
+    try:
+        wait = float(r.headers.get("Retry-After", ""))
+    except ValueError:
+        wait = 2 * 2 ** tries_before
+    return min(max(wait, 2), 60)
+
+
+def _sleep_unless_stopped(seconds, step=0.25):
+    """Sleep, but return False as soon as Stop is pressed."""
+    while seconds > 0:
+        if UI.red_flag:
+            return False
+        time.sleep(min(step, seconds))
+        seconds -= step
+    return not UI.red_flag
+
+
 def http_request_to_image(width, height, url, request_headers, http_session):
     # Sessions made here after a connection failure belong to this call and
     # are closed when it ends (with their sockets); the one passed in is
@@ -1080,6 +1106,7 @@ def _http_request_to_image(
             else:
                 r = http_session.get(url, timeout=http_timeout)
             status_code = str(r)
+            status = r.status_code
             # Bing white image with small camera or Arcgis no data yet =>
             # try to downsample to lower ZL
             if ("Content-Length" in r.headers) and int(
@@ -1095,8 +1122,10 @@ def _http_request_to_image(
                 ):
                     UI.vprint(3, url, r.headers)
                     return (0, "[404]")
+            # .get: an answer without Content-Type raised KeyError here,
+            # which is no RequestException, so it was not retried.
             if ("[200]" in status_code) and (
-                "image" in r.headers["Content-Type"]
+                "image" in r.headers.get("Content-Type", "")
             ):
                 try:
                     small_image = Image.open(io.BytesIO(r.content))
@@ -1126,11 +1155,17 @@ def _http_request_to_image(
                 UI.vprint(2, "Server said 'Forbidden' ! (IP banned?)")
                 UI.vprint(3, url, r.headers, r.content)
                 break
-            elif "[5" in status_code:
+            elif status in (408, 429) or "[5" in status_code:
+                # Server error, overload (503), rate limit (429) or request
+                # timeout (408): worth another try after a wait. 429 and 408
+                # used to give a white piece at once (#86).
                 UI.vprint(2, "Server said 'Internal Error'.", status_code)
                 if not check_tms_response:
                     break
-                time.sleep(2)
+                if not _sleep_unless_stopped(
+                    _server_retry_wait(r, tentative_image)
+                ):
+                    return (0, "Stopped")
             else:
                 UI.vprint(2, "Unmanaged Server answer:", status_code)
                 UI.vprint(3, url, r.headers)
@@ -1395,6 +1430,33 @@ def get_and_paste_wmts_part(
 ################################################################################
 
 ################################################################################
+def _max_threads(provider):
+    return int(provider["max_threads"]) if "max_threads" in provider else 16
+
+
+def texture_session(max_threads):
+    """The session shared by the download threads of one texture (#87).
+
+    requests keeps at most 10 connections per host by default
+    (pool_maxsize); with 16 threads (most providers) a connection beyond
+    those was closed after its request ("Connection pool is full,
+    discarding connection": 12-15 per Arc texture in a test, 2026-11-11),
+    and the next request opened a new TCP and TLS connection. The pool
+    now holds one per thread. Download time was the same (~1.5 s per
+    texture), so this only spares the servers the extra connections.
+    """
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        pool_maxsize=max(max_threads, 10)
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+################################################################################
+
+################################################################################
 def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
     # less general than the next build_texture_from_bbox_and_size but
     # probably slightly quicker
@@ -1403,8 +1465,9 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
     parts_y = til_y_max - til_y_min
     width = height = provider["tile_size"]
     big_image = Image.new("RGB", (width * parts_x, height * parts_y))
+    max_threads = _max_threads(provider)
     # we set-up the queue of downloads
-    http_session = requests.Session()
+    http_session = texture_session(max_threads)
     download_queue = queue.Queue()
     for monty in range(0, parts_y):
         for montx in range(0, parts_x):
@@ -1421,12 +1484,7 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
                 http_session,
             )
             download_queue.put(fargs)
-    # then the number of workers
-    if "max_threads" in provider:
-        max_threads = int(provider["max_threads"])
-    else:
-        max_threads = 16
-    # and finally activate them
+    # and finally activate the workers
     try:
         success = parallel_execute(
             get_and_paste_wmts_part, download_queue, max_threads, progress
@@ -1514,21 +1572,17 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
             s_lrx = s_box_lrx
             s_lry = s_box_lry
             crop_needed = True
-        downscale = (
-            int(
-                min(log(width * parts_x / t_sizex), log(height / t_sizey))
-                / log(2)
-            )
-            - 1
-        )
-        if downscale >= 1:
-            width /= 2 ** downscale
-            height /= 2 ** downscale
-            subt_size = (width, height)
-        else:
-            subt_size = None
+        # A "downscale" of each piece used to be computed here, for a
+        # mosaic much larger than the target. Its test used height /
+        # t_sizey (no parts_y), always < 1 for a 4096 px texture, so it
+        # never ran; had it run, its float sizes would have failed in
+        # Image.new and its crop box would have been in the wrong pixels.
+        # Removed (#91): resizing the whole mosaic once at the end (below)
+        # is also better than shrinking each piece apart (seams).
+        subt_size = None
     big_image = Image.new("RGB", (width * parts_x, height * parts_y))
-    http_session = requests.Session()
+    max_threads = _max_threads(provider)
+    http_session = texture_session(max_threads)
     download_queue = queue.Queue()
     for monty in range(0, parts_y):
         for montx in range(0, parts_x):
@@ -1564,10 +1618,6 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
                 ]
             download_queue.put(fargs)
     # We execute the downloads and subimage pastes
-    if "max_threads" in provider:
-        max_threads = int(provider["max_threads"])
-    else:
-        max_threads = 16
     try:
         if provider["request_type"] == "wms":
             success = parallel_execute(
