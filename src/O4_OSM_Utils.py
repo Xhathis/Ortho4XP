@@ -1,6 +1,9 @@
 import os
 import sys
 import time
+import datetime
+import json
+import re
 import io
 import bz2
 import random
@@ -19,7 +22,6 @@ else:
 
 # Default overpass_server_choice if not in config
 overpass_server_choice = "random"
-max_osm_tentatives = 8
 # Overpass gives a query 180 s by default before it answers, and sends
 # nothing until then, so a 60 s read timeout cut off slow but valid
 # answers (large residential layers) on every tentative.
@@ -29,7 +31,24 @@ overpass_timeout = (10, 190)  # (connect, read) in seconds
 # instead of being stored twice. It gets more server time, and falls back to
 # one request per query when it keeps failing.
 layer_request_server_timeout = 300  # seconds, sent as [timeout:...]
-layer_request_tentatives = max_osm_tentatives // 2
+# Server order and failures (#83). Before, a layer went 4 times to the
+# configured server as one request, then each query 8 times (FR only on the
+# 5th and 7th), with waits up to 256 s, also after the last try: up to ~55
+# min and 12 requests before a layer failed, and every worker and layer
+# found out on its own that DE was down. Now the configured server gets
+# overpass_primary_tries tries, then each other server one; the
+# per-query fallback only when a server connected but could not do the
+# request (size or timeout), not when it is down; and a server failing
+# overpass_skip_after times in a row (any process) is left out by all for
+# overpass_skip_time. The batch pauses on the first tile that fails (#81).
+overpass_primary_tries = 2
+overpass_primary_retry_wait = 10  # seconds between them
+overpass_skip_after = 3
+overpass_skip_time = 900  # seconds
+OVERPASS_HEALTH_FILE = ".overpass_health.json"  # in OSM_data, shared
+# A downloaded layer whose data (osm_base) is older than this many days is
+# logged with its server and date: FR was a month behind on 2026-11-11.
+overpass_stale_days = 2
 # After an HTTP 429 the server wants us to slow down; retrying within a few
 # seconds (2, 4, 8 s) got the connection reset by overpass-api.de.
 overpass_rate_limit_wait = 60  # seconds, at least
@@ -619,22 +638,27 @@ def OSM_queries_to_OSM_layer(
         response = get_overpass_data(
             statements,
             (lat, lon, lat + 1, lon + 1),
-            tentatives=layer_request_tentatives,
             server_timeout=layer_request_server_timeout,
         )
         if UI.red_flag:
             return 0
         if response:
+            _note_old_data(cached_suffix, lat, lon, [_last_source()])
             osm_layer.update_dicosm(response, input_tags, target_tags)
             if cached_suffix:
                 osm_layer.write_to_file(cached_data_filename)
             return 1
+        if not getattr(get_overpass_data, "size_failure", False):
+            # No server could be reached at all: one request per query
+            # would only ask the same dead servers more often (#83).
+            return _overpass_layer_failed(cached_suffix, "the combined request")
         UI.vprint(
             1,
             "      No answer for the combined request (last:",
             (get_overpass_data.last_error or "unknown") + "),",
             "falling back to one request per query.",
         )
+    sources = []
     for query in queries:
         # look first for cached data (old scheme)
         if isinstance(query, str):
@@ -650,29 +674,62 @@ def OSM_queries_to_OSM_layer(
         if UI.red_flag:
             return 0
         if not response:
-            # A missing query leaves the whole layer incomplete (e.g. a tile
-            # without any inland water), and nothing of it gets cached.
-            # Raise the red flag so the build stops here instead of producing
-            # a tile that looks fine but lacks data.
-            UI.lvprint(
-                0,
-                "   ERROR: No valid answer for",
-                query,
-                "after",
-                max_osm_tentatives,
-                "tentatives (last:",
-                (get_overpass_data.last_error or "unknown") + "). The",
-                cached_suffix or "OSM",
-                "layer would be incomplete, stopping.",
-            )
-            global overpass_gave_up
-            overpass_gave_up = True
-            UI.red_flag = True
-            return 0
+            return _overpass_layer_failed(cached_suffix, query)
+        sources.append(_last_source())
         osm_layer.update_dicosm(response, input_tags, target_tags)
+    _note_old_data(cached_suffix, lat, lon, sources)
     if cached_suffix:
         osm_layer.write_to_file(cached_data_filename)
     return 1
+
+
+def _last_source():
+    """(server, osm_base) of the last answer (tests may stub the request)."""
+    return getattr(get_overpass_data, "last_source", ("", ""))
+
+
+def _overpass_layer_failed(cached_suffix, what):
+    """Stop the build: a layer without an answer from any server.
+
+    A missing query leaves the whole layer incomplete (e.g. a tile without
+    any inland water), and nothing of it gets cached. Raise the red flag so
+    the build stops here instead of producing a tile that looks fine but
+    lacks data; a batch puts the tile aside (overpass_gave_up, #44, #81).
+    """
+    UI.lvprint(
+        0,
+        "   ERROR: No valid answer for",
+        what,
+        "from any Overpass server (last:",
+        (get_overpass_data.last_error or "unknown") + "). The",
+        cached_suffix or "OSM",
+        "layer would be incomplete, stopping.",
+    )
+    global overpass_gave_up
+    overpass_gave_up = True
+    UI.red_flag = True
+    return 0
+
+
+def _note_old_data(cached_suffix, lat, lon, sources):
+    """Log a downloaded layer whose data is old (a lagging server, #83).
+
+    sources: (server, osm_base) of each answer that made up the layer. The
+    cache file does not record where its data came from; this log line is
+    the only trace, so a tile can be checked (check_osm_cache.py) or
+    rebuilt once the server has caught up.
+    """
+    old = [(key, base, age) for (key, base) in sources
+           for age in [data_age_days(base)]
+           if age is not None and age > overpass_stale_days]
+    if not old:
+        return
+    (key, base, age) = max(old, key=lambda o: o[2])
+    UI.lvprint(
+        0, "   NOTE: OSM", cached_suffix or "", "layer of",
+        FNAMES.short_latlon(lat, lon), f"has data of {base[:10]} from server",
+        f"{key} ({age:.0f} days old).",
+    )
 
 
 def OSM_query_to_OSM_layer(
@@ -711,9 +768,7 @@ def OSM_query_to_OSM_layer(
                 1,
                 "      No valid answer for",
                 query,
-                "after",
-                max_osm_tentatives,
-                "tentatives (last:",
+                "from any Overpass server (last:",
                 (get_overpass_data.last_error or "unknown") + "), skipping it.",
             )
             return 0
@@ -723,42 +778,172 @@ def OSM_query_to_OSM_layer(
     return 1
 
 
-def _pick_overpass_server(tentative: int, server_keys: list) -> str:
-    """Return the server key to use for this tentative (1-based)."""
+def _server_order(server_keys, shuffle=True) -> list:
+    """The servers in the order a request asks them (#83).
+
+    The configured overpass_server_choice first ("random": a random order,
+    or the file order with shuffle=False), then the others in
+    overpass_servers.txt order.
+    """
+    keys = list(server_keys)
     if overpass_server_choice == "random":
-        if len(server_keys) == 1:
-            return server_keys[0]
-        last_used = getattr(get_overpass_data, "last_key", None)
-        other_keys = [k for k in server_keys if k != last_used]
-        return random.choice(other_keys if other_keys else server_keys)
-    if overpass_server_choice not in server_keys:
-        UI.lvprint(
-            1,
-            "Selected overpass server not found in overpass_servers.txt, using:",
-            server_keys[0],
+        if not shuffle:
+            return keys
+        random.shuffle(keys)
+        return keys
+    if overpass_server_choice in keys:
+        keys.remove(overpass_server_choice)
+        keys.insert(0, overpass_server_choice)
+    elif keys:
+        UI.vprint(
+            1, "Selected overpass server not found in overpass_servers.txt, "
+            "using:", keys[0],
         )
-        return server_keys[0]
-    # A fixed choice used to send all tentatives to the same server, so one
-    # overloaded server failed the whole tile. Keep the chosen server for the
-    # first half, then alternate with the others (odd tentatives).
-    others = [k for k in server_keys if k != overpass_server_choice]
-    if others and tentative > max_osm_tentatives // 2 and tentative % 2:
-        fallback = others[(tentative // 2) % len(others)]
-        UI.vprint(1, f"      Falling back to OSM server {fallback}")
-        return fallback
-    return overpass_server_choice
+    return keys
+
+
+# Kinds of failed requests (#83). DOWN: no connection, HTTP 429/5xx - the
+# server is unavailable, a smaller request would fail the same way. TIMEOUT:
+# connected but no answer in time - overloaded, or the request was too big.
+# SIZE: the server answered that it could not do the request (a <remark>,
+# an error answer, a cut answer) - one request per query may work. DOWN and
+# TIMEOUT count towards skipping the server; TIMEOUT and SIZE allow the
+# one-request-per-query fallback of a layer.
+DOWN, TIMEOUT, SIZE = "down", "timeout", "size"
+
+
+def _health_path():
+    return os.path.join(FNAMES.OSM_dir, OVERPASS_HEALTH_FILE)
+
+
+def _with_health(change):
+    """Run change(health) on the shared server health record, under a lock.
+
+    health maps a server URL to {"fails": n, "skip_until": time,
+    "probation": bool}; change returns (result, changed) and the file is
+    only written when changed (a cached build never writes it). Shared by
+    all Ortho4XP processes of a parallel batch, so one dead server is found
+    out once, not by every worker and layer on its own. Any OSError: the
+    record is treated as empty and not written (requests still go out).
+    """
+    path = _health_path()
+    try:
+        os.makedirs(FNAMES.OSM_dir, exist_ok=True)
+        lock = open(path + ".lock", "a+")
+    except OSError:
+        return change({})[0]
+    locked = False
+    try:
+        for _ in range(200):
+            try:
+                _lock_file(lock)
+                locked = True
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            return change({})[0]  # never blocks a download for long
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                health = json.load(f)
+            if not isinstance(health, dict):
+                health = {}
+        except (OSError, ValueError):
+            health = {}
+        (result, changed) = change(health)
+        if changed:
+            tmp = path + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(health, f)
+                os.replace(tmp, path)
+            except OSError as e:
+                UI.vprint(1, f"      Could not write {path}: {e}")
+        return result
+    finally:
+        if locked:
+            _release_overpass_slot(lock)
+        else:
+            lock.close()
+
+
+def _skipped_servers():
+    """{url: skip_until} of the servers to leave out for now."""
+    now = time.time()
+
+    def change(health):
+        return ({url: entry.get("skip_until", 0)
+                 for (url, entry) in health.items()
+                 if isinstance(entry, dict)
+                 and entry.get("skip_until", 0) > now}, False)
+
+    return _with_health(change)
+
+
+def _record_server(url, failed):
+    """Record a request's result; True when the server starts being skipped.
+
+    overpass_skip_after DOWN/TIMEOUT failures in a row (from any process)
+    skip it for overpass_skip_time; afterwards it is on probation: the next
+    failure skips it again at once, a success clears it.
+    """
+    now = time.time()
+
+    def change(health):
+        entry = health.get(url)
+        if not isinstance(entry, dict):
+            entry = {}
+        if not failed:
+            if not entry:
+                return (False, False)
+            del health[url]
+            return (False, True)
+        if entry.get("skip_until", 0) > now:
+            return (False, False)  # another process skipped it meanwhile
+        fails = entry.get("fails", 0) + 1
+        if entry.get("probation") or fails >= overpass_skip_after:
+            health[url] = {"fails": 0, "skip_until": now + overpass_skip_time,
+                           "probation": True}
+            return (True, True)
+        health[url] = {"fails": fails, "skip_until": 0,
+                       "probation": False}
+        return (False, True)
+
+    return _with_health(change)
+
+
+_OSM_BASE = re.compile(rb'osm_base="([^"]+)"')
+
+
+def osm_base_of(content) -> str:
+    """The data date (osm_base) of an Overpass answer, or ""."""
+    m = _OSM_BASE.search(content[:2000]) if content else None
+    return m.group(1).decode("ascii", "replace") if m else ""
+
+
+def data_age_days(osm_base, now=None):
+    """Age in days of an osm_base date, or None if it cannot be read."""
+    try:
+        when = datetime.datetime.fromisoformat(osm_base.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    return (now - when).total_seconds() / 86400
 
 
 def overpass_answers(bbox=None) -> bool:
     """True if some configured Overpass server answers a small query now.
 
-    Used by a batch to wait out an outage before it tries the tiles that
-    lost step 1 to it again (#46). Without bbox the query asks for the
-    nodes of an empty box, which costs the server nothing. With bbox
-    (lat0, lon0, lat1, lon1) it counts the aeroway elements there, a real
-    database query: on 2026-11-10 an overloaded DE answered the empty one
-    while real requests kept failing, and the batch spent 20 h retrying
-    (#78).
+    Used by a batch to wait out an outage before it starts the tiles held
+    back by it (#46, #81). Without bbox the query asks for the nodes of an
+    empty box, which costs the server nothing. With bbox (lat0, lon0,
+    lat1, lon1) it counts the aeroway elements there, a real database
+    query: on 2026-11-10 an overloaded DE answered the empty one while real
+    requests kept failing, and the batch spent 20 h retrying (#78). Asks
+    every server, skipped ones too: a server that answers is no longer
+    skipped (#83).
     """
     _prefer_ipv4_without_ipv6_route()
     s = requests.Session()
@@ -771,7 +956,8 @@ def overpass_answers(bbox=None) -> bool:
     else:
         query, read_timeout = "node(0,0,0,0);out;", 60
     try:
-        for (key, url) in overpass_servers.items():
+        for key in _server_order(overpass_servers, shuffle=False):
+            url = overpass_servers[key]
             slot = _acquire_overpass_slot()
             if slot is None:
                 return False
@@ -793,6 +979,7 @@ def overpass_answers(bbox=None) -> bool:
                 and (not bbox or b"<count" in r.content)
             ):
                 UI.vprint(2, f"      Overpass check: {key} answers.")
+                _record_server(url, failed=False)
                 return True
             UI.vprint(2, f"      Overpass check: {key}: HTTP {r.status_code}")
         return False
@@ -800,27 +987,76 @@ def overpass_answers(bbox=None) -> bool:
         s.close()
 
 
-def get_overpass_data(
-    query: str, bbox: tuple, tentatives: int = 0, server_timeout: int = 0
-) -> bytes:
-    """Fetch data from OSM overpass servers.
+def _overpass_request(session, key, url, timeout):
+    """One request: (content, None, "") or (0, kind, reason, wait)."""
+    slot = _acquire_overpass_slot()
+    if slot is None:
+        return (0, None, "stopped", 0)
+    try:
+        try:
+            r = session.get(url, timeout=timeout)
+        finally:
+            _release_overpass_slot(slot)
+    except requests.ReadTimeout as e:
+        UI.vprint(1, f"      OSM server {key} did not answer in time ({e})")
+        return (0, TIMEOUT, "ReadTimeout", 0)
+    except Exception as e:
+        # Name the actual error: a timeout, a refused connection and a TLS
+        # problem need different remedies, "too busy" hid all three.
+        UI.vprint(
+            1, f"      OSM server {key} did not answer ({type(e).__name__}: {e})"
+        )
+        return (0, DOWN, type(e).__name__, 0)
+    if r.status_code != 200:
+        UI.vprint(
+            1, f"      OSM server {key} rejected our query (HTTP {r.status_code})"
+        )
+        if r.status_code == 429:  # Overpass rate limiting us
+            try:
+                retry_after = int(r.headers.get("Retry-After", 0))
+            except ValueError:
+                retry_after = 0
+            return (0, DOWN, "HTTP 429",
+                    max(retry_after, overpass_rate_limit_wait))
+        kind = DOWN if r.status_code >= 500 else SIZE
+        return (0, kind, f"HTTP {r.status_code}", 0)
+    if b"</osm>" not in r.content[-10:] and b"</OSM>" not in r.content[-10:]:
+        UI.vprint(1, f"      OSM server {key} sent a cut answer (no </osm>)")
+        return (0, SIZE, "corrupted answer (no closing </osm> tag)", 0)
+    # A <remark> is Overpass saying the query failed (timeout, out of
+    # memory); the answer may still carry part of the data, which used to
+    # pass as complete when it was over 1000 bytes.
+    if b"<remark>" in r.content or (
+            len(r.content) <= 1000 and b"error" in r.content):
+        UI.vprint(1, f"      OSM server {key} could not run the query "
+                  "(remark or error in its answer)")
+        return (0, SIZE, "error answer", 0)
+    return (r.content, None, "", 0)
 
-    tentatives defaults to max_osm_tentatives; server_timeout, when given,
-    is sent as [timeout:...] and the read timeout is raised to match.
-    On failure returns 0 and leaves the reason of the last tentative in
-    get_overpass_data.last_error, for the caller's error message.
+
+def get_overpass_data(query, bbox: tuple, server_timeout: int = 0) -> bytes:
+    """Fetch data from the Overpass servers (#83).
+
+    The first server (overpass_server_choice) gets overpass_primary_tries
+    tries, overpass_primary_retry_wait seconds apart (after HTTP 429 at
+    least overpass_rate_limit_wait), then each other server one. Servers
+    skipped after repeated failures (_record_server, shared by all
+    processes) are left out. No wait after the last try: the caller or
+    the batch decides what comes next. server_timeout, when given, is sent
+    as [timeout:...] and the read timeout is raised to match.
+
+    Returns the answer, or 0. Sets get_overpass_data.last_error (reason of
+    the last try), .size_failure (some server connected but could not do
+    the request, so smaller requests may work) and .last_source ((server,
+    osm_base) of the answer).
     """
     get_overpass_data.last_error = ""
+    get_overpass_data.size_failure = False
+    get_overpass_data.last_source = ("", "")
     if not overpass_servers:
         UI.lvprint(1, "No overpass servers configured. Check overpass_servers.txt.")
+        get_overpass_data.last_error = "no server configured"
         return 0
-    _prefer_ipv4_without_ipv6_route()
-    s = requests.Session()
-    s.headers.update(
-        {"User-Agent": f"Ortho4XP/{O4XP_VERSION} (https://github.com/shred86/Ortho4XP)"}
-    )
-    server_keys = list(overpass_servers.keys())
-
     if isinstance(query, str):
         overpass_query = query + str(bbox) + ";"
     else:
@@ -829,76 +1065,69 @@ def get_overpass_data(
     if server_timeout:
         settings = f"[timeout:{server_timeout}];"
         timeout = (overpass_timeout[0], server_timeout + 10)
-
-    for tentative in range(1, (tentatives or max_osm_tentatives) + 1):
-        current_key = _pick_overpass_server(tentative, server_keys)
-        get_overpass_data.last_key = current_key
-
-        UI.vprint(2, f"      Using OSM server {current_key}")
-        url = (
-            overpass_servers[current_key]
-            + "?data="
-            + settings
-            + "("
-            + overpass_query
-            + ");(._;>>;);out meta;"
-        )
-        UI.vprint(3, url)
-        wait = 2**tentative
-        slot = _acquire_overpass_slot()
-        if slot is None:
-            return 0
-        try:
-            try:
-                r = s.get(url, timeout=timeout)
-            finally:
-                _release_overpass_slot(slot)
-            if r.status_code == 200:
-                if (
-                    b"</osm>" not in r.content[-10:]
-                    and b"</OSM>" not in r.content[-10:]
-                ):
-                    get_overpass_data.last_error = (
-                        f"{current_key}: corrupted answer (no closing </osm> tag)"
-                    )
-                    UI.vprint(
-                        1,
-                        f"      OSM server {current_key} sent a corrupted answer ",
-                        f"(no closing </osm> tag in answer), "
-                        f"new tentative in {wait} sec...",
-                    )
-                elif len(r.content) <= 1000 and b"error" in r.content:
-                    get_overpass_data.last_error = f"{current_key}: error answer"
-                    UI.vprint(
-                        1,
-                        f"      OSM server {current_key} sent us an error code "
-                        f"(data too big ?), new tentative in {wait} sec...",
-                    )
+    skipped = _skipped_servers()
+    plan = []
+    for key in _server_order(overpass_servers):
+        if overpass_servers[key] in skipped:
+            UI.vprint(1, f"      Skipping OSM server {key} (failed repeatedly, "
+                      "until " + time.strftime(
+                          "%H:%M", time.localtime(skipped[overpass_servers[key]]))
+                      + ")")
+            continue
+        plan += [key] * (overpass_primary_tries if not plan else 1)
+    if not plan:
+        get_overpass_data.last_error = "all servers skipped after repeated failures"
+        return 0
+    _prefer_ipv4_without_ipv6_route()
+    s = requests.Session()
+    s.headers.update(
+        {"User-Agent": f"Ortho4XP/{O4XP_VERSION} (https://github.com/shred86/Ortho4XP)"}
+    )
+    try:
+        wait = 0
+        dropped = set()  # servers skipped since this request started
+        for (n, key) in enumerate(plan):
+            url = overpass_servers[key]
+            if key in dropped:
+                continue
+            if n:
+                if key == plan[n - 1]:
+                    if url in _skipped_servers():  # by another process
+                        continue
+                    wait = max(wait, overpass_primary_retry_wait)
+                    UI.vprint(1, f"      New try on {key} in {wait} sec...")
+                    time.sleep(wait)
                 else:
-                    return r.content
-            else:
-                if r.status_code == 429:  # 429 is overpass software rate limiting us
-                    wait = max(int(r.headers.get("Retry-After", 0)), wait,
-                               overpass_rate_limit_wait)
-                get_overpass_data.last_error = f"{current_key}: HTTP {r.status_code}"
-                UI.vprint(
-                    1,
-                    f"      OSM server {current_key} rejected our query "
-                    f"(HTTP {r.status_code}), new tentative in {wait} sec...",
+                    UI.vprint(1, f"      Trying OSM server {key}")
+                if UI.red_flag:
+                    return 0
+            UI.vprint(2, f"      Using OSM server {key}")
+            full_url = (url + "?data=" + settings + "(" + overpass_query
+                        + ");(._;>>;);out meta;")
+            UI.vprint(3, full_url)
+            (content, kind, reason, wait) = _overpass_request(
+                s, key, full_url, timeout)
+            if content:
+                _record_server(url, failed=False)
+                get_overpass_data.last_source = (key, osm_base_of(content))
+                return content
+            if kind is None:  # stopped while waiting for the slot
+                return 0
+            get_overpass_data.last_error = f"{key}: {reason}"
+            if kind in (TIMEOUT, SIZE):
+                get_overpass_data.size_failure = True
+            if kind in (DOWN, TIMEOUT) and _record_server(url, failed=True):
+                dropped.add(key)
+                UI.lvprint(
+                    0, f"Overpass server {key} failed repeatedly: all "
+                    "Ortho4XP processes leave it out for "
+                    f"{UI.nicer_timer(overpass_skip_time)}.",
                 )
-        except Exception as e:
-            # Name the actual error: a timeout, a refused connection and a
-            # TLS problem need different remedies, "too busy" hid all three.
-            get_overpass_data.last_error = f"{current_key}: {type(e).__name__}"
-            UI.vprint(
-                1,
-                f"      OSM server {current_key} did not answer "
-                f"({type(e).__name__}: {e}), new tentative in {wait} sec...",
-            )
-        if UI.red_flag:
-            return 0
-        time.sleep(wait)
-    return 0
+            if UI.red_flag:
+                return 0
+        return 0
+    finally:
+        s.close()
 
 
 def OSM_to_MultiLineString(osm_layer, lat, lon, tags_for_exclusion=set(), filter=None):

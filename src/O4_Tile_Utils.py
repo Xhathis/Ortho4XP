@@ -720,8 +720,10 @@ OVERPASS_EXIT_CODE = 4
 # answered, asked every overpass_probe_interval seconds, at most
 # overpass_wait_max. A tile that lost step 1 to Overpass goes back into the
 # queue, not before overpass_retry_wait seconds, and fails for good after
-# overpass_tile_tries such failures.
-overpass_pause_after = 3
+# overpass_tile_tries such failures. Since #83 a failed step 1 has already
+# asked every server (in ~1 min when they are down), so the batch pauses on
+# the first such tile (was 3).
+overpass_pause_after = 1
 overpass_tile_tries = 3
 overpass_retry_wait = 600
 overpass_probe_interval = 300

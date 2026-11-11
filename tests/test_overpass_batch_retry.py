@@ -27,6 +27,12 @@ def lines(monkeypatch):
     monkeypatch.setattr(UI, "vprint", lambda *a: None)
     monkeypatch.setattr(UI, "exit_message_and_bottom_line", lambda *a: None)
     monkeypatch.setattr(TILE, "overpass_retry_wait", 0)
+    # The batch pauses on the first Overpass failure (#83): no 5 min wait
+    # for the probe on the real clock (tests of the probe set it).
+    monkeypatch.setattr(TILE, "overpass_probe_interval", 0)
+    # The tests below were written for a pause after 3 tiles in a row (#81);
+    # test_gate_pauses_on_first_failure checks the default (1, #83).
+    monkeypatch.setattr(TILE, "overpass_pause_after", 3)
     monkeypatch.setattr(OSM, "overpass_gave_up", False)
     # Never ask the real Overpass from a test (#46).
     monkeypatch.setattr(OSM, "overpass_answers", lambda bbox=None: True)
@@ -279,6 +285,7 @@ def cached(monkeypatch, tiles):
 
 
 def test_gate_pauses_after_three_in_a_row(lines, monkeypatch):
+    monkeypatch.setattr(TILE, "overpass_pause_after", 3)
     clock = fake_clock(monkeypatch)
     cached(monkeypatch, [(60, 5)])
     monkeypatch.setattr(TILE, "overpass_retry_wait", 600)
@@ -568,3 +575,13 @@ def test_parallel_batch_requeue(lines, monkeypatch, tmp_path, second,
     summary = [l for l in lines if l.startswith("Tiles built")]
     assert summary == [f"Tiles built: {3 if built_ok else 2}, failed: "
                        f"{0 if built_ok else 1}."]
+
+
+def test_gate_pauses_on_first_failure(monkeypatch):
+    # Default since #83: a failed step 1 has already asked every server.
+    monkeypatch.setattr(UI, "lvprint", lambda *a: None)
+    assert TILE.overpass_pause_after == 1
+    gate = TILE._OverpassGate()
+    gate.failed(60, 0)
+    assert gate.paused is not None
+    assert not gate.can_start(60, 1) or not gate.needs_overpass(60, 1)
