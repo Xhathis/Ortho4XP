@@ -27,10 +27,13 @@ class parallel_worker(threading.Thread):
         while True:
             args = self._queue.get()
             if isinstance(args, str) and args == "quit":
-                try:
-                    UI.progress_bar(self._progress["bar"], 100)
-                except Exception:  # cosmetic: no progress dict, GUI closed
-                    pass
+                if self._progress:
+                    # No progress dict was a TypeError swallowed here (#95);
+                    # only a closed GUI is still ignored.
+                    try:
+                        UI.progress_bar(self._progress["bar"], 100)
+                    except Exception:  # cosmetic: GUI closed meanwhile
+                        pass
                 return 1
             try:
                 result = self._task(*args)
