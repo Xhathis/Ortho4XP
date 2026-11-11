@@ -1,5 +1,6 @@
 """#49: a DDS is written under a temporary name and moved into place."""
 import os
+from pathlib import Path
 import time
 import types
 
@@ -60,7 +61,7 @@ def test_success_puts_the_dds_in_place(setup, monkeypatch):
     calls = _fake_converter(monkeypatch, 0)
     IMG.convert_texture(tile, *ATTRS)
     assert calls[0][-1] != target  # written under another name
-    assert open(target, "rb").read() == b"DDS complete"
+    assert Path(target).read_bytes() == b"DDS complete"
     assert _textures(tile) == [os.path.basename(target)]
     assert IMG.failed_conversions == []
 
@@ -79,7 +80,7 @@ def test_failed_converter_keeps_the_old_dds(setup, monkeypatch):
         f.write(b"old DDS")
     _fake_converter(monkeypatch, 1, b"DDS cut off")
     IMG.convert_texture(tile, *ATTRS)
-    assert open(target, "rb").read() == b"old DDS"
+    assert Path(target).read_bytes() == b"old DDS"
     assert _textures(tile) == [os.path.basename(target)]
 
 

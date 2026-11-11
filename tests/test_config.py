@@ -4,6 +4,7 @@ conftest.py runs the tests in an empty temporary folder, so importing
 O4_Config_Utils creates a default Ortho4XP.cfg there, not in the repo.
 """
 import os
+from pathlib import Path
 
 import pytest
 
@@ -104,7 +105,7 @@ def test_write_to_config_keeps_a_backup(tile):
     tile.default_zl = 17
     tile.write_to_config()
     bak = os.path.join(tile.build_dir, "Ortho4XP_+55+012.cfg.bak")
-    assert "default_zl=16" in open(bak).read()
+    assert "default_zl=16" in Path(bak).read_text()
 
 
 def test_write_to_config_to_given_file(tile, tmp_path):
@@ -113,10 +114,10 @@ def test_write_to_config_to_given_file(tile, tmp_path):
     path = str(tmp_path / "copy.cfg")
     tile.default_zl = 15
     assert tile.write_to_config(path) == 1
-    assert "default_zl=15" in open(path).read()
+    assert "default_zl=15" in Path(path).read_text()
     tile.default_zl = 14
     assert tile.write_to_config(path) == 1
-    assert "default_zl=15" in open(path + ".bak").read()
+    assert "default_zl=15" in Path(path + ".bak").read_text()
 
 
 def test_no_config_found(tmp_path, monkeypatch):
