@@ -208,6 +208,23 @@ def since_date(path, margin=DEFAULT_MARGIN):
     )
 
 
+def check_server_date(osm_base, path):
+    """Raise ValueError if the server's data is older than the cache file.
+
+    newer: can only see edits the server already has: a lagging server
+    (FR was a month behind on 2026-11-11) would report every layer
+    unchanged. ISO dates in UTC compare as strings.
+    """
+    written = since_date(path, 0)
+    if not osm_base:
+        raise ValueError("answer without osm_base date")
+    if osm_base < written:
+        raise ValueError(
+            f"server data of {osm_base[:16]} is older than the cache "
+            f"({written[:16]})"
+        )
+
+
 def count_query(statements, bbox, since, server_timeout=300):
     """Overpass QL giving two counts: matches now, then edited since."""
     union = "".join(s + str(bbox) + ";" for s in statements)

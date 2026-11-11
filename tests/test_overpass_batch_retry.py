@@ -26,7 +26,7 @@ def lines(monkeypatch):
     monkeypatch.setattr(TILE, "overpass_retry_wait", 0)
     monkeypatch.setattr(OSM, "overpass_gave_up", False)
     # Never ask the real Overpass from a test (#46).
-    monkeypatch.setattr(OSM, "overpass_answers", lambda: True)
+    monkeypatch.setattr(OSM, "overpass_answers", lambda bbox=None: True)
     UI.is_working = False
     UI.stop_requested = False
     UI.red_flag = False
@@ -143,8 +143,8 @@ def fake_clock(monkeypatch, on_sleep=None):
 def answers(monkeypatch, replies):
     asked = []
 
-    def probe():
-        asked.append(1)
+    def probe(bbox=None):
+        asked.append(bbox)
         return replies[min(len(asked), len(replies)) - 1]
 
     monkeypatch.setattr(OSM, "overpass_answers", probe)
@@ -203,6 +203,9 @@ def fake_session(monkeypatch, replies):
 
     class Session:
         headers = {}
+
+        def close(self):
+            pass
 
         def get(self, url, timeout):
             asked.append(url)
@@ -401,3 +404,113 @@ def test_parallel_batch_retries_once(lines, monkeypatch, tmp_path, second,
                        f"{0 if built_ok else 1}."]
     assert any("Overpass gave no answer for 1 tile(s): +64-014" in l
                for l in lines)
+
+
+def test_wait_asks_about_the_first_tile(lines, monkeypatch):
+    # The check is a real query on the first tile to retry (#78), not the
+    # empty box an overloaded server still answered.
+    fake_clock(monkeypatch)
+    asked = answers(monkeypatch, [True])
+    assert TILE._wait_for_overpass_retry([(64, -14), (65, -14)], 0.0)
+    assert asked == [(64, -14, 65, -13)]
+
+
+COUNT_ANSWER = (b'<?xml version="1.0"?>\n<osm version="0.6">\n'
+                b'  <count id="0"><tag k="total" v="12"/></count>\n</osm>\n')
+REMARK_ANSWER = (b'<?xml version="1.0"?>\n<osm version="0.6">\n<remark> '
+                 b'runtime error: Query timed out </remark>\n</osm>\n')
+
+
+@pytest.mark.parametrize("first, second, expected, tries", [
+    (FakeResponse(200, COUNT_ANSWER), None, True, 1),
+    # HTTP 200 with a remark is Overpass's way of saying it failed.
+    (FakeResponse(200, REMARK_ANSWER), FakeResponse(200, COUNT_ANSWER), True, 2),
+    (FakeResponse(200, REMARK_ANSWER), OSM.requests.ReadTimeout("r"), False, 2),
+    # The empty-box answer has no count: not an answer to the count query.
+    (FakeResponse(200, OSM_EMPTY), FakeResponse(504, b"Gateway"), False, 2),
+])
+def test_overpass_answers_with_bbox(monkeypatch, first, second, expected, tries):
+    monkeypatch.setattr(UI, "vprint", lambda *a: None)
+    monkeypatch.setattr(OSM, "_prefer_ipv4_without_ipv6_route", lambda: None)
+    asked = fake_session(monkeypatch, {"http://a": first, "http://b": second})
+    assert OSM.overpass_answers((64, -14, 65, -13)) is expected
+    assert len(asked) == tries
+    assert all(u.endswith('?data=[out:xml][timeout:60];'
+                          'nwr["aeroway"](64, -14, 65, -13);out count;')
+               for u in asked)
+
+
+# --- #78: the retry pass ends after overpass_retry_give_up failures in a row ---
+SIX = [(60, 0), (60, 1), (60, 2), (60, 3), (60, 4), (60, 5)]
+
+
+@pytest.mark.parametrize("second_try, tried_again, built", [
+    # Outage still on: 3 tiles in a row fail again, the other 3 are not tried.
+    ({}, SIX[:3], []),
+    # A success resets the count: 60,1 builds, then 60,2-60,4 fail in a row.
+    ({(60, 1): 0}, SIX[:5], [(60, 1)]),
+])
+def test_sequential_retry_gives_up(lines, monkeypatch, second_try,
+                                   tried_again, built):
+    monkeypatch.setattr(TILE, "batch_parallel_tiles", 1)
+    fails = {t: 2 for t in SIX}
+    for t, n in second_try.items():
+        fails[t] = 1 + n
+    calls = []
+    monkeypatch.setattr(TILE, "_build_one_tile", fake_one(calls, fails))
+    TILE.build_tile_list(FakeTile(), SIX, 1, 1, 1, 1, 0, 0)
+    phase1 = [t for (t, osm) in calls if osm]
+    assert phase1 == SIX + tried_again
+    assert [t for (t, osm) in calls if not osm] == built
+    gave_up = [l for l in lines if "in a row again" in l]
+    assert len(gave_up) == 1
+    rest = [t for t in SIX if t not in tried_again]
+    assert gave_up[0].endswith(
+        " ".join(FNAMES.short_latlon(*t) for t in rest))
+
+
+def test_sequential_retry_no_give_up_at_the_end(lines, monkeypatch):
+    # Failing again on the last 3 tiles leaves nothing to give up.
+    monkeypatch.setattr(TILE, "batch_parallel_tiles", 1)
+    calls = []
+    monkeypatch.setattr(TILE, "_build_one_tile",
+                        fake_one(calls, {t: 2 for t in SIX[:3]}))
+    TILE.build_tile_list(FakeTile(), SIX[:3], 1, 1, 1, 1, 0, 0)
+    assert [t for (t, osm) in calls if osm] == SIX[:3] * 2
+    assert not any("in a row again" in l for l in lines)
+
+
+@pytest.mark.parametrize("codes, started_n", [
+    ([TILE.OVERPASS_EXIT_CODE] * 6, 3),
+    # The success of the 2nd resets the count.
+    ([TILE.OVERPASS_EXIT_CODE, 0] + [TILE.OVERPASS_EXIT_CODE] * 4, 5),
+    # Another step 1 error is not an Overpass failure either.
+    ([TILE.OVERPASS_EXIT_CODE, 10] + [TILE.OVERPASS_EXIT_CODE] * 4, 5),
+])
+def test_parallel_retry_gives_up(lines, monkeypatch, tmp_path, codes,
+                                 started_n):
+    monkeypatch.setattr(FNAMES, "Tmp_dir", str(tmp_path))
+    monkeypatch.setattr(TILE.time, "sleep", lambda s: None)
+    started = fake_popen(monkeypatch, {t: [c] for t, c in zip(SIX, codes)})
+    result = TILE._run_batch_phase(
+        FakeTile(), SIX, (1, 1, 0, 0, 0, 0), 1, last_phase=False,
+        context_file="", give_up_after=TILE.overpass_retry_give_up)
+    assert [t for (t, _) in started] == SIX[:started_n]
+    # Every tile not built is in the result, tried or not.
+    not_ok = [FNAMES.short_latlon(*t) for t, c in zip(SIX, codes) if c]
+    not_ok += [FNAMES.short_latlon(*t) for t in SIX[started_n:]
+               if FNAMES.short_latlon(*t) not in not_ok]
+    assert sorted(c for (c, _) in result) == sorted(not_ok)
+    assert sum("in a row again" in l for l in lines) == 1
+
+
+def test_parallel_first_pass_never_gives_up(lines, monkeypatch, tmp_path):
+    monkeypatch.setattr(FNAMES, "Tmp_dir", str(tmp_path))
+    monkeypatch.setattr(TILE.time, "sleep", lambda s: None)
+    started = fake_popen(monkeypatch,
+                         {t: [TILE.OVERPASS_EXIT_CODE] for t in SIX})
+    retry = {}
+    TILE._run_batch_phase(
+        FakeTile(), SIX, (1, 1, 0, 0, 0, 0), 1, last_phase=False,
+        context_file="", retry=retry)
+    assert len(started) == 6 and sorted(retry) == SIX
