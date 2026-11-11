@@ -208,7 +208,10 @@ and gui_smoke still run in G:\Ortho4XP (other tiles; see their notes).
 Since 2026-11-03 the user's global `Ortho4XP.cfg` holds their own build
 settings; since 2026-11-08 13:41 (saved from the GUI after the
 +65-019 DEM experiment, see Performance notes; the 1.0 state is in
-Ortho4XP.cfg.bak): curvature_tol 0.5, limit_tris 5, mesh_zl 19,
+Ortho4XP.cfg.bak): curvature_tol 0.25, limit_tris 10, mesh_zl 18 (all
+three since 2026-11-11, from the mesh budget measurement in Performance
+notes; were 0.5 / 5 / 19, backups of the global and all 133 tile
+configs in G:\Ortho4XP_tests\cfg_backups\2026-11-11_mesh_budget),
 min_angle 10, mask_zl 16, airport cover at ZL18 for all airports
 (cover_airports_with_highres=True, cover_extent 3 km, apt_smoothing_pix
 8; was ICAO only, see .before-bushflying.bak), road_level 4,
