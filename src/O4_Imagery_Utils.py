@@ -1546,19 +1546,14 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
             s_lrx = s_box_lrx
             s_lry = s_box_lry
             crop_needed = True
-        downscale = (
-            int(
-                min(log(width * parts_x / t_sizex), log(height / t_sizey))
-                / log(2)
-            )
-            - 1
-        )
-        if downscale >= 1:
-            width /= 2 ** downscale
-            height /= 2 ** downscale
-            subt_size = (width, height)
-        else:
-            subt_size = None
+        # A "downscale" of each piece used to be computed here, for a
+        # mosaic much larger than the target. Its test used height /
+        # t_sizey (no parts_y), always < 1 for a 4096 px texture, so it
+        # never ran; had it run, its float sizes would have failed in
+        # Image.new and its crop box would have been in the wrong pixels.
+        # Removed (#91): resizing the whole mosaic once at the end (below)
+        # is also better than shrinking each piece apart (seams).
+        subt_size = None
     big_image = Image.new("RGB", (width * parts_x, height * parts_y))
     max_threads = _max_threads(provider)
     http_session = texture_session(max_threads)
