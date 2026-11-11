@@ -326,6 +326,8 @@ def build_tile(tile, white_retry_follows=False):
         except Exception:
             UI.lvprint(0, "ERROR: building the DSF failed:")
             UI.lvprint(0, traceback.format_exc())
+        finally:
+            MASK.clear_mask_cache()  # up to 8 x 16 MB (#88)
 
     build_dsf_thread = threading.Thread(target=_build_dsf)
     producer_done_event = threading.Event()

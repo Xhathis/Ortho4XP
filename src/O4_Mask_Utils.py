@@ -1,7 +1,9 @@
 import os
 import sys
+import threading
 import time
 import queue
+from collections import OrderedDict
 from math import atan, ceil, floor
 import numpy
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
@@ -33,6 +35,39 @@ def mask_name_for_texture(tile, til_x_left, til_y_top, zl, *args):
 ################################################################################
 
 ################################################################################
+# Decoded mask images for needs_mask (#88). build_dsf asks once per texture,
+# and a mask at mask_zl covers up to (2 ** (zl - mask_zl)) ** 2 textures:
+# +55+012 (ZL17, mask_zl 14) decoded its 17 masks 566 times, 6 s of step 3.
+# The triangles come in mesh order, not texture order: 8 masks (16 MB
+# each) kept 48 decodes in a test, 4 kept 85. Keyed by path, mtime and size,
+# so a rebuilt mask is read again.
+_MASK_CACHE_SIZE = 8
+_mask_cache = OrderedDict()
+_mask_cache_lock = threading.Lock()
+
+
+def _decoded_mask(mask_file):
+    st = os.stat(mask_file)
+    key = (mask_file, st.st_mtime_ns, st.st_size)
+    with _mask_cache_lock:
+        if key in _mask_cache:
+            _mask_cache.move_to_end(key)
+            return _mask_cache[key]
+    with Image.open(mask_file) as im:
+        im.load()
+        img = im.copy()
+    with _mask_cache_lock:
+        _mask_cache[key] = img
+        while len(_mask_cache) > _MASK_CACHE_SIZE:
+            _mask_cache.popitem(last=False)
+    return img
+
+
+def clear_mask_cache():
+    with _mask_cache_lock:
+        _mask_cache.clear()
+
+
 def needs_mask(tile, til_x_left, til_y_top, zl, *args):
     if int(zl) < tile.mask_zl:
         return False
@@ -47,7 +82,7 @@ def needs_mask(tile, til_x_left, til_y_top, zl, *args):
         )
     if not os.path.isfile(mask_file):
         return False
-    big_img = Image.open(mask_file)
+    big_img = _decoded_mask(mask_file)
     x0 = int(rx * 4096 / factor)
     y0 = int(ry * 4096 / factor)
     small_img = big_img.crop((x0, y0, x0 + 4096 // factor, y0 + 4096 // factor))
