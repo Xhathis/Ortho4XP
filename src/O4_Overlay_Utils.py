@@ -104,6 +104,7 @@ def _run_dsftool(option, src, dst):
         UI.vprint(1, "     " + line.decode("utf-8", "replace").rstrip())
     # returncode is None until the process is waited for: reading stdout to
     # its end only means the pipe closed, so the old check never fired.
+    process.stdout.close()  # read to its end; close the pipe
     returncode = process.wait()
     if returncode:
         code = returncode & 0xFFFFFFFF

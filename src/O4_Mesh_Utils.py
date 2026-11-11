@@ -716,6 +716,7 @@ def build_mesh(tile):
                 pass
     # wait(), not poll(): an exit code of None (process not finished yet)
     # would count as success and the mesh would be read half-written.
+    fingers_crossed.stdout.close()  # read to its end; close the pipe
     fingers_crossed.wait()
     if fingers_crossed.returncode:
         min_angles = [8, 6, 4, 2, 0]
@@ -754,6 +755,7 @@ def build_mesh(tile):
                         print(line.decode("utf-8")[:-1])
                     except (UnicodeDecodeError, OSError):
                         pass
+            fingers_crossed.stdout.close()  # read to its end; close the pipe
             fingers_crossed.wait()
             if fingers_crossed.returncode == 0:
                 break
@@ -860,6 +862,7 @@ def sort_mesh(tile):
             print(line.decode("utf-8", errors="replace")[:-1])
     # The pipe closes when the tool ends, but its exit code is only known
     # after wait(); a crash used to be reported as "Moulinette applied".
+    moulinette.stdout.close()  # read to its end; close the pipe
     if moulinette.wait() != 0:
         UI.exit_message_and_bottom_line(
             "\nERROR: moulinette failed for tile",
@@ -910,6 +913,7 @@ def triangulate(name, path_to_Ortho4XP_dir):
             break
         else:
             print(line.decode("utf-8")[:-1])
+    fingers_crossed.stdout.close()  # read to its end; close the pipe
     fingers_crossed.wait()
     if fingers_crossed.returncode:
         print("\nERROR: triangle crashed, check osm mask data.\n")
