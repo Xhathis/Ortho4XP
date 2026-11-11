@@ -1022,6 +1022,32 @@ def has_data(
 ################################################################################
 
 ################################################################################
+def _server_retry_wait(r, tries_before):
+    """Seconds to wait before asking an imagery server again (#86).
+
+    2 s after a server error, as before. After HTTP 429 (rate limited) or
+    503 (overloaded) the server's Retry-After when it sends one, else a
+    wait doubling from 2 s with each try; 2 to 60 s.
+    """
+    if r.status_code not in (429, 503):
+        return 2
+    try:
+        wait = float(r.headers.get("Retry-After", ""))
+    except ValueError:
+        wait = 2 * 2 ** tries_before
+    return min(max(wait, 2), 60)
+
+
+def _sleep_unless_stopped(seconds, step=0.25):
+    """Sleep, but return False as soon as Stop is pressed."""
+    while seconds > 0:
+        if UI.red_flag:
+            return False
+        time.sleep(min(step, seconds))
+        seconds -= step
+    return not UI.red_flag
+
+
 def http_request_to_image(width, height, url, request_headers, http_session):
     # Sessions made here after a connection failure belong to this call and
     # are closed when it ends (with their sockets); the one passed in is
@@ -1054,6 +1080,7 @@ def _http_request_to_image(
             else:
                 r = http_session.get(url, timeout=http_timeout)
             status_code = str(r)
+            status = r.status_code
             # Bing white image with small camera or Arcgis no data yet =>
             # try to downsample to lower ZL
             if ("Content-Length" in r.headers) and int(
@@ -1069,8 +1096,10 @@ def _http_request_to_image(
                 ):
                     UI.vprint(3, url, r.headers)
                     return (0, "[404]")
+            # .get: an answer without Content-Type raised KeyError here,
+            # which is no RequestException, so it was not retried.
             if ("[200]" in status_code) and (
-                "image" in r.headers["Content-Type"]
+                "image" in r.headers.get("Content-Type", "")
             ):
                 try:
                     small_image = Image.open(io.BytesIO(r.content))
@@ -1100,11 +1129,17 @@ def _http_request_to_image(
                 UI.vprint(2, "Server said 'Forbidden' ! (IP banned?)")
                 UI.vprint(3, url, r.headers, r.content)
                 break
-            elif "[5" in status_code:
+            elif status in (408, 429) or "[5" in status_code:
+                # Server error, overload (503), rate limit (429) or request
+                # timeout (408): worth another try after a wait. 429 and 408
+                # used to give a white piece at once (#86).
                 UI.vprint(2, "Server said 'Internal Error'.", status_code)
                 if not check_tms_response:
                     break
-                time.sleep(2)
+                if not _sleep_unless_stopped(
+                    _server_retry_wait(r, tentative_image)
+                ):
+                    return (0, "Stopped")
             else:
                 UI.vprint(2, "Unmanaged Server answer:", status_code)
                 UI.vprint(3, url, r.headers)
