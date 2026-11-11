@@ -3,6 +3,7 @@ import sys
 import time
 import shutil
 import json
+import re
 import subprocess
 import queue
 import threading
@@ -601,6 +602,9 @@ def build_tile_list(
     flags = (do_osm, do_mesh, do_mask, do_dsf, do_ovl, override_cfg)
     global keep_mesh_after_step3
     keep_mesh_after_step3 = True
+    _batch_leftover.clear()
+    _batch_leftover.extend(list_lat_lon)
+    write_leftover_tiles(_batch_leftover)
     try:
         if batch_parallel_tiles > 1 and len(list_lat_lon) > 1:
             return _build_tile_list_parallel(tile, list_lat_lon, flags)
@@ -897,7 +901,77 @@ def _build_one_tile_steps(
     return None
 
 
+# The tiles of the last batch not done yet, kept in a file so that the
+# tile window can select them again after the GUI (or the PC: a Windows
+# Update restart killed a 346-tile batch on 2026-11-11) was closed.
+LEFTOVER_FILE = ".last_batch_tiles.txt"
+_batch_leftover = []  # (lat, lon) of the running batch not done yet
+
+
+def leftover_tiles_path():
+    return FNAMES.resource_path(LEFTOVER_FILE)
+
+
+def write_leftover_tiles(tiles):
+    """Record tiles ([(lat, lon)]) as the last batch's tiles not done.
+
+    No tiles: the file is removed. A failed write only costs the
+    preselection, so it is reported and the batch goes on.
+    """
+    path = leftover_tiles_path()
+    try:
+        if not tiles:
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        FNAMES.write_text_atomic(
+            path,
+            "# Tiles of the last batch not built yet (failed, stopped or not"
+            " started), " + time.strftime("%Y-%m-%d %H:%M") + ".\n"
+            "# The tile window selects them when it opens.\n"
+            + "".join(FNAMES.short_latlon(lat, lon) + "\n"
+                      for (lat, lon) in tiles),
+        )
+    except OSError as e:
+        UI.vprint(1, "   Could not update", path, f"({e})")
+
+
+def read_leftover_tiles():
+    """[(lat, lon)] from the leftover file, [] if there is none.
+
+    The file is plain text and may have been edited by hand: lines that
+    are not a tile are skipped, duplicates dropped.
+    """
+    tiles = []
+    try:
+        with open(leftover_tiles_path(), encoding="utf-8",
+                  errors="replace") as f:
+            for line in f:
+                tile = _parse_short_latlon(line.strip())
+                if tile and tile not in tiles:
+                    tiles.append(tile)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        UI.vprint(1, "   Could not read", leftover_tiles_path(), f"({e})")
+    return tiles
+
+
+def _parse_short_latlon(text):
+    m = re.fullmatch(r"([+-]\d{2})([+-]\d{3})", text)
+    if not m:
+        return None
+    (lat, lon) = (int(m.group(1)), int(m.group(2)))
+    if -90 <= lat < 90 and -180 <= lon < 180:
+        return (lat, lon)
+    return None
+
+
 def _remove_from_todo_map(lat, lon):
+    """A tile of the batch is done: off the map's selection and the file."""
+    if (lat, lon) in _batch_leftover:
+        _batch_leftover.remove((lat, lon))
+        write_leftover_tiles(_batch_leftover)
     try:
         UI.gui.earth_window.canvas.delete(
             UI.gui.earth_window.dico_tiles_todo[(lat, lon)]
