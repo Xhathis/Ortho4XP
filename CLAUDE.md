@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 453
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 465
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -628,6 +628,18 @@ Test results:
   tests (no ResourceWarning), pyflakes 0, regression PASS (DSF, 17/17
   masks, app log identical, 74 s), sims_in_ws all 15/15 (Triangle4XP
   pipe change through sim_mesh_failure), sim_overlay 7/7 (DSFTool).
+- #97 `fix/custom-dem-coverage` @ c67f9e8 (the Nov 8 work rebased on
+  dev e62595e, plus the total-sample limit): 12 new unit tests (10
+  fail on dev; the 2 "stays quiet" pass there), regression PASS (DSF,
+  17/17 masks, app log identical; the tile has no custom_dem),
+  sim_dem_failure 9/9, sims_in_ws all 15/15. #98 `fix/test-lint` @
+  58588f0: same 453 tests, pyflakes 0 incl. tests. `test` @ a6bbe04:
+  465 unit tests, pyflakes 0, regression PASS (DSF, 17/17 masks, app
+  log identical). `sim_custom_dem_gap.py <scratch>` (new, cwd =
+  regression worktree; steps 1-2 of +55+012 with an east-half raster
+  cut from the frozen N55E012.hgt, build dir in <scratch>): 7/7, one
+  WARNING "(missing: west)", west half at the edge value (36 m at
+  55.7 N), mesh built, no second WARNING in step 2.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -692,8 +704,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 5. **FIXED** (`20dbfe3`). **No `.gitattributes`.** Add `* text=auto eol=lf` for source files and
    keep `*.bat` as `eol=crlf`, to avoid whole-file CRLF diffs.
 6. **FIXED** (`fc5914a`). pyflakes is installed in the venv
-   (`venv\Scripts\python.exe -m pyflakes Ortho4XP.py src/O4_*.py` must
-   stay at 0 findings). The IMG/OSM/OVL/TILE/UI imports in
+   (`venv\Scripts\python.exe -m pyflakes Ortho4XP.py check_osm_cache.py
+   src/O4_*.py tests/*.py` must stay at 0 findings; tests since #98). The IMG/OSM/OVL/TILE/UI imports in
    O4_Config_Utils are setattr targets (`_CFG_MODULES`, #84), not unused.
    Minor (pyflakes): 10 unused imports, 9 unused local variables, 3 f-strings
    without placeholders, 1 unused `global extents_dict`.
@@ -1308,6 +1320,23 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     switch), insert_edge (~21 s) and blur_mask (~17 s) (change the
     output, see item 12 below), the log write race (3 processes x 4000
     lines, none lost).
+97. **FIXED** (`c67f9e8`; started 2026-11-08 in an uncommitted
+    worktree, finished 2026-11-11): outside a custom_dem raster the
+    altitude is the raster's nearest edge value (alt_nostrict clamps,
+    so does Triangle4XP), but the config hint said zero and nothing was
+    logged. Step 1 now logs a WARNING naming the tile, file and
+    uncovered sides (DEM.raster_gaps_in_tile; one sample spacing short
+    is no gap, e.g. Copernicus). Composite local sources, iterate's
+    LIDAR and step 2.5's reread pass partial_ok (quiet), info_only
+    reads too. A GDAL raster over 65535 samples per side (uint16
+    indices in alt_vec_*) or over 2^31 - 1 in all (Triangle4XP's
+    alt[ny * nxdem + nx] is a C int: 46341 x 46341 overflows) gave wrong
+    altitudes silently; now DEMError stops step 1. Hint documents
+    {latlon} (N55E012). Viewfinder and .hgt paths unchanged.
+98. **DONE** (`58588f0`, tests only): the batch tests' shared `lines`
+    fixture moved to conftest.py (O4 imports inside the fixture, after
+    pytest_collection's cwd switch); pyflakes is 0 for tests/ too
+    (was 10: fixture imports, one unused variable).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1332,8 +1361,18 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
   same DSF. Profile of a cached build: insert_edge/rtree ~21 s,
   blur_mask ~17 s; both left (they would change mesh/mask bytes).
 - Imagery downloads (#87): ~1.5-1.9 s per texture whatever the pool;
-  2 textures in parallel ~20% faster. max_download_slots=2 is an
-  option for the user's config (not changed).
+  2 textures in parallel ~20% faster. The user set max_download_slots=2
+  on 2026-11-11 (old cfg: Ortho4XP.cfg.before-download-slots.bak).
+- Mesh accuracy vs DEM source, 2026-11-08 (+65-019 Iceland, steps 1-2,
+  limit_tris 5; mesh altitude error on land against IslandsDEM v1
+  native (~8 x 20 m) as truth, so the IslandsDEM builds are favoured):
+  Viewfinder ct 1.0: RMSE 1.68 m, p99 6.2 m, 3.96 M tris;
+  Viewfinder ct 0.5: 1.37 / 5.2 m, 4.37 M; IslandsDEM native ct 1.0:
+  1.76 / 6.3 m, 4.16 M; native ct 0.5: 1.22 / 4.5 m, 4.41 M;
+  IslandsDEM 1" ct 1.0: 2.71 / 9.7 m, 2.43 M. So curvature_tol matters
+  more than the DEM here; a 1" resample of a finer DEM is worse than
+  Viewfinder. Source rasters kept in G:\Ortho4XP_tests\dem_data
+  (98 MB); the experiment's worktree dem_ws was removed 2026-11-11.
 
 ## Planned order of work
 
@@ -1385,6 +1424,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     fix/mask-cache (#88), fix/small-hygiene (#89, #90, #92; branched
     from fix/config-literal-eval: same reader code), fix/dsf-writer
     (#93; from fix/small-hygiene), fix/airport-dead-block (#94-#96).
+21. ~~#97, #98~~ — the leftover custom_dem worktree finished and the
+    test lint cleaned, 2026-11-11.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
