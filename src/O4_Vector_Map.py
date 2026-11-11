@@ -20,6 +20,42 @@ good_imagery_list = ()
 # (CLI, build_all, batches) stop the tile after step 1 on it.
 SEA_ONLY = 2
 
+# The Overpass queries of each cached OSM layer (OSM_data/<tile>/
+# <tile>_<suffix>.osm.bz2). Module constants so that check_osm_cache.py asks
+# the server for exactly what a build downloads.
+COASTLINE_QUERIES = ('way["natural"="coastline"]',)
+AIRPORT_QUERIES = (('node["aeroway"]', 'way["aeroway"]', 'rel["aeroway"]'),)
+BIG_ROAD_QUERIES = (
+    'way["highway"="motorway"]',
+    'way["highway"="trunk"]',
+    'way["highway"="primary"]',
+    'way["highway"="secondary"]',
+    'way["railway"="rail"]',
+    'way["railway"="narrow_gauge"]',
+)
+WATER_QUERIES = (
+    'rel["natural"="water"]',
+    'rel["waterway"="riverbank"]',
+    'way["natural"="water"]',
+    'way["waterway"="riverbank"]',
+    'way["waterway"="dock"]',
+)
+
+
+def small_road_queries(road_level):
+    """Queries of the small_roads layer for road_level >= 2."""
+    queries = ['way["highway"="tertiary"]']
+    if road_level >= 3:
+        queries += [
+            'way["highway"="unclassified"]',
+            'way["highway"="residential"]',
+        ]
+    if road_level >= 4:
+        queries += ['way["highway"="service"]']
+    if road_level >= 5:
+        queries += ['way["highway"="track"]']
+    return queries
+
 
 ################################################################################
 def sea_only_tile(tile):
@@ -43,7 +79,7 @@ def sea_only_tile(tile):
         return False
     sea_layer = OSM.OSM_layer()
     if not OSM.OSM_queries_to_OSM_layer(
-        ['way["natural"="coastline"]'],
+        COASTLINE_QUERIES,
         sea_layer,
         tile.lat,
         tile.lon,
@@ -248,7 +284,7 @@ def build_poly_file(tile):
 def include_airports(vector_map, tile):
     UI.vprint(0, "-> Dealing with airports")
     airport_layer = OSM.OSM_layer()
-    queries = [('node["aeroway"]', 'way["aeroway"]', 'rel["aeroway"]')]
+    queries = AIRPORT_QUERIES
     tags_of_interest = ["all"]
     if not OSM.OSM_queries_to_OSM_layer(
         queries,
@@ -335,14 +371,7 @@ def include_roads(vector_map, tile, apt_array, apt_area):
     tags_for_exclusion = set(["bridge", "tunnel"])
     # tags_for_exclusion=set(["tunnel"])
     road_layer = OSM.OSM_layer()
-    queries = [
-        'way["highway"="motorway"]',
-        'way["highway"="trunk"]',
-        'way["highway"="primary"]',
-        'way["highway"="secondary"]',
-        'way["railway"="rail"]',
-        'way["railway"="narrow_gauge"]',
-    ]
+    queries = BIG_ROAD_QUERIES
     if not OSM.OSM_queries_to_OSM_layer(
         queries,
         road_layer,
@@ -364,16 +393,7 @@ def include_roads(vector_map, tile, apt_array, apt_area):
         return 0
     if tile.road_level >= 2:
         road_layer = OSM.OSM_layer()
-        queries = ['way["highway"="tertiary"]']
-        if tile.road_level >= 3:
-            queries += [
-                'way["highway"="unclassified"]',
-                'way["highway"="residential"]',
-            ]
-        if tile.road_level >= 4:
-            queries += ['way["highway"="service"]']
-        if tile.road_level >= 5:
-            queries += ['way["highway"="track"]']
+        queries = small_road_queries(tile.road_level)
         if not OSM.OSM_queries_to_OSM_layer(
             queries,
             road_layer,
@@ -461,7 +481,7 @@ def include_sea(vector_map, tile):
             return 0
         custom_source = True
     else:
-        queries = ['way["natural"="coastline"]']
+        queries = COASTLINE_QUERIES
         tags_of_interest = []
         if not OSM.OSM_queries_to_OSM_layer(
             queries,
@@ -602,13 +622,7 @@ def include_water(vector_map, tile):
         ):
             return 0
     else:
-        queries = [
-            'rel["natural"="water"]',
-            'rel["waterway"="riverbank"]',
-            'way["natural"="water"]',
-            'way["waterway"="riverbank"]',
-            'way["waterway"="dock"]',
-        ]
+        queries = WATER_QUERIES
         tags_of_interest = ["name"]
         if not OSM.OSM_queries_to_OSM_layer(
             queries,
