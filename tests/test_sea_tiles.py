@@ -130,7 +130,7 @@ def test_sea_tile(monkeypatch):
     queries = overpass(monkeypatch)
     assert VMAP.sea_only_tile(FakeTile())
     # One request, cached under the name include_sea reads it from.
-    assert queries == [(['way["natural"="coastline"]'], "coastline")]
+    assert queries == [(('way["natural"="coastline"]',), "coastline")]
 
 
 def test_coastline_means_build(monkeypatch):
