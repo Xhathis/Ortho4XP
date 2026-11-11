@@ -26,7 +26,7 @@ def lines(monkeypatch):
     monkeypatch.setattr(TILE, "overpass_retry_wait", 0)
     monkeypatch.setattr(OSM, "overpass_gave_up", False)
     # Never ask the real Overpass from a test (#46).
-    monkeypatch.setattr(OSM, "overpass_answers", lambda: True)
+    monkeypatch.setattr(OSM, "overpass_answers", lambda bbox=None: True)
     UI.is_working = False
     UI.stop_requested = False
     UI.red_flag = False
@@ -143,8 +143,8 @@ def fake_clock(monkeypatch, on_sleep=None):
 def answers(monkeypatch, replies):
     asked = []
 
-    def probe():
-        asked.append(1)
+    def probe(bbox=None):
+        asked.append(bbox)
         return replies[min(len(asked), len(replies)) - 1]
 
     monkeypatch.setattr(OSM, "overpass_answers", probe)
@@ -203,6 +203,9 @@ def fake_session(monkeypatch, replies):
 
     class Session:
         headers = {}
+
+        def close(self):
+            pass
 
         def get(self, url, timeout):
             asked.append(url)
@@ -401,3 +404,37 @@ def test_parallel_batch_retries_once(lines, monkeypatch, tmp_path, second,
                        f"{0 if built_ok else 1}."]
     assert any("Overpass gave no answer for 1 tile(s): +64-014" in l
                for l in lines)
+
+
+def test_wait_asks_about_the_first_tile(lines, monkeypatch):
+    # The check is a real query on the first tile to retry (#78), not the
+    # empty box an overloaded server still answered.
+    fake_clock(monkeypatch)
+    asked = answers(monkeypatch, [True])
+    assert TILE._wait_for_overpass_retry([(64, -14), (65, -14)], 0.0)
+    assert asked == [(64, -14, 65, -13)]
+
+
+COUNT_ANSWER = (b'<?xml version="1.0"?>\n<osm version="0.6">\n'
+                b'  <count id="0"><tag k="total" v="12"/></count>\n</osm>\n')
+REMARK_ANSWER = (b'<?xml version="1.0"?>\n<osm version="0.6">\n<remark> '
+                 b'runtime error: Query timed out </remark>\n</osm>\n')
+
+
+@pytest.mark.parametrize("first, second, expected, tries", [
+    (FakeResponse(200, COUNT_ANSWER), None, True, 1),
+    # HTTP 200 with a remark is Overpass's way of saying it failed.
+    (FakeResponse(200, REMARK_ANSWER), FakeResponse(200, COUNT_ANSWER), True, 2),
+    (FakeResponse(200, REMARK_ANSWER), OSM.requests.ReadTimeout("r"), False, 2),
+    # The empty-box answer has no count: not an answer to the count query.
+    (FakeResponse(200, OSM_EMPTY), FakeResponse(504, b"Gateway"), False, 2),
+])
+def test_overpass_answers_with_bbox(monkeypatch, first, second, expected, tries):
+    monkeypatch.setattr(UI, "vprint", lambda *a: None)
+    monkeypatch.setattr(OSM, "_prefer_ipv4_without_ipv6_route", lambda: None)
+    asked = fake_session(monkeypatch, {"http://a": first, "http://b": second})
+    assert OSM.overpass_answers((64, -14, 65, -13)) is expected
+    assert len(asked) == tries
+    assert all(u.endswith('?data=[out:xml][timeout:60];'
+                          'nwr["aeroway"](64, -14, 65, -13);out count;')
+               for u in asked)

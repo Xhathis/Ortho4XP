@@ -737,9 +737,9 @@ def _wait_for_overpass_retry(retry, last_failure):
     """Announce the retry of the tiles in retry and wait for it.
 
     Waits until overpass_retry_wait seconds after last_failure (time.time()
-    of the last Overpass failure), then until Overpass answers a tiny
-    query (OSM.overpass_answers), at most overpass_wait_max. Returns False
-    if Stop was pressed.
+    of the last Overpass failure), then until Overpass answers a small
+    query on the first tile (OSM.overpass_answers), at most
+    overpass_wait_max. Returns False if Stop was pressed.
     """
     wait = max(0.0, overpass_retry_wait - (time.time() - last_failure))
     UI.lvprint(
@@ -753,7 +753,8 @@ def _wait_for_overpass_retry(retry, last_failure):
         return False
     start = time.time()
     checks = 0
-    while not OSM.overpass_answers():
+    (lat, lon) = retry[0]
+    while not OSM.overpass_answers((lat, lon, lat + 1, lon + 1)):
         if UI.stop_requested:
             return False
         if time.time() - start >= overpass_wait_max:

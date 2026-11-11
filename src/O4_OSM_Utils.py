@@ -725,36 +725,55 @@ def _pick_overpass_server(tentative: int, server_keys: list) -> str:
     return overpass_server_choice
 
 
-def overpass_answers() -> bool:
-    """True if some configured Overpass server answers a tiny query now.
+def overpass_answers(bbox=None) -> bool:
+    """True if some configured Overpass server answers a small query now.
 
     Used by a batch to wait out an outage before it tries the tiles that
-    lost step 1 to it again (#46): the query asks for the nodes of an
-    empty box, so it costs the server nothing.
+    lost step 1 to it again (#46). Without bbox the query asks for the
+    nodes of an empty box, which costs the server nothing. With bbox
+    (lat0, lon0, lat1, lon1) it counts the aeroway elements there, a real
+    database query: on 2026-11-10 an overloaded DE answered the empty one
+    while real requests kept failing, and the batch spent 20 h retrying
+    (#78).
     """
     _prefer_ipv4_without_ipv6_route()
     s = requests.Session()
     s.headers.update(
         {"User-Agent": f"Ortho4XP/{O4XP_VERSION} (https://github.com/shred86/Ortho4XP)"}
     )
-    for (key, url) in overpass_servers.items():
-        slot = _acquire_overpass_slot()
-        if slot is None:
-            return False
-        try:
+    if bbox:
+        query = f'[out:xml][timeout:60];nwr["aeroway"]{tuple(bbox)};out count;'
+        read_timeout = 90
+    else:
+        query, read_timeout = "node(0,0,0,0);out;", 60
+    try:
+        for (key, url) in overpass_servers.items():
+            slot = _acquire_overpass_slot()
+            if slot is None:
+                return False
             try:
-                r = s.get(url + "?data=node(0,0,0,0);out;",
-                          timeout=(overpass_timeout[0], 60))
-            finally:
-                _release_overpass_slot(slot)
-        except requests.RequestException as e:
-            UI.vprint(2, f"      Overpass check: {key}: {type(e).__name__}")
-            continue
-        if r.status_code == 200 and b"</osm>" in r.content[-20:]:
-            UI.vprint(2, f"      Overpass check: {key} answers.")
-            return True
-        UI.vprint(2, f"      Overpass check: {key}: HTTP {r.status_code}")
-    return False
+                try:
+                    r = s.get(url + "?data=" + query,
+                              timeout=(overpass_timeout[0], read_timeout))
+                finally:
+                    _release_overpass_slot(slot)
+            except requests.RequestException as e:
+                UI.vprint(2, f"      Overpass check: {key}: {type(e).__name__}")
+                continue
+            # Overpass reports a timeout or an overload with HTTP 200 and a
+            # <remark>: that is no answer.
+            if (
+                r.status_code == 200
+                and b"</osm>" in r.content[-20:]
+                and b"<remark>" not in r.content
+                and (not bbox or b"<count" in r.content)
+            ):
+                UI.vprint(2, f"      Overpass check: {key} answers.")
+                return True
+            UI.vprint(2, f"      Overpass check: {key}: HTTP {r.status_code}")
+        return False
+    finally:
+        s.close()
 
 
 def get_overpass_data(
