@@ -1161,6 +1161,18 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     triangle.exe adds exactly int(S) points, checked by a test). None
     of the user's 90 tiles came near it (largest DSF 67 MB, ~1.9 M
     triangles; cap ~5.2 M at limit_tris 5).
+    **REOPENED 2026-11-11: the WARNING never fires on a real tile.**
+    Triangle4XP.exe (not the plain triangle.exe of the test) stops
+    with only ~83 % of -S as new vertices: +65-019 at curvature_tol 0.5,
+    limit_tris 5: -S 2,515,274, 2,074,524 added, 4.19 M bad triangles
+    left (-V statistics), no WARNING; uncapped the same tile needs 10.08
+    M triangles. An uncapped 1.0 mesh used 78 % of its -S, so the
+    vertex count cannot tell capped from not; where the budget goes is
+    not found (only 2.42 M circumcenters computed). A fix needs
+    Triangle4XP to report steinerleft (rebuild the exe) or another
+    signal. Also the "~1.9 M triangles" above was wrong: DSFs hold ~15
+    bytes per triangle (+65-019: 60 MB, 4.12 M), so 67 MB is ~4.5 M:
+    the user's largest tiles were at the cap.
 76. **FIXED** (`5534d9c`): use_decal_on_terrain put the decal on
     masked sea terrain too (tri_type != 1); now land only, as the
     option is documented. No effect with the option off.
@@ -1383,6 +1395,25 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
   more than the DEM here; a 1" resample of a finer DEM is worse than
   Viewfinder. Source rasters kept in G:\Ortho4XP_tests\dem_data
   (98 MB); the experiment's worktree dem_ws was removed 2026-11-11.
+- Mesh budget, 2026-11-11 (+65-019, dev 84d09cd, Viewfinder input,
+  the user's tile config: apt 0.25, coast 0.5; error in m on land vs
+  IslandsDEM native; vs Viewfinder itself within ~0.07 m, so the error
+  is the mesh simplifying the DEM, not the DEM). Results and -V log in
+  G:\Ortho4XP_tests\dem_results\2026-11-11_+65-019\.
+  ct / limit_tris -> triangles, RMSE, p99, steep (>20 deg) p99:
+  1.0/5 -> 4.12 M, 1.68, 6.2, 7.3 (not capped: same with 40);
+  0.5/5 (user) -> 4.37 M, 1.37, 5.2, 6.6 (CAPPED, no WARNING, #75);
+  0.5/5 mesh_zl 18 -> 4.76 M, 1.26, 4.7, 6.1 (fewer input nodes leave
+  more of the -S budget; imagery max is ZL18, so no loss);
+  0.25/5 -> 4.38 M (same as 0.5/5: the cap decides);
+  0.25/10 -> 9.13 M, 0.87, 3.2, 4.2 (capped);
+  0.5/40 -> 10.08 M, 0.90, 3.2, 3.8 (uncapped);
+  0.35/40 -> 15.8 M, 0.70, 2.5, 3.1; 0.25/40 -> 23.6 M, 0.60, 2.1, 2.8.
+  The cap refines worst triangles first (priority queue), so a low ct
+  with the cap as budget is as good per triangle as an uncapped
+  higher ct (0.25/10 vs 0.5/40), and flat tiles stay under any cap.
+  Step 2: 36 s at 4.4 M, 72 s at 9 M, 171 s at 23.6 M; mesh file
+  ~63 MB per M triangles (removed at cleaning_level 3).
 
 ## Planned order of work
 
