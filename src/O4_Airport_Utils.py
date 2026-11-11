@@ -1080,59 +1080,9 @@ def encode_runways_taxiways_and_aprons(
         )  
         # Keep track of encoded pols to later plant seeds inside crossings etc
         ## First runways
-        # First runways as lines
-        for (
-            runway_pol,
-            runway_start,
-            runway_end,
-            runway_width,
-        ) in []:  # apt['runway'][2]:
-            runway_length = VECT.length_in_meters(
-                numpy.vstack((runway_start, runway_end))
-            )
-            refine_size = max(runway_length // runway_chunks, chunk_min_size)
-            for pol in VECT.ensure_MultiPolygon(VECT.cut_to_tile(runway_pol)):
-                way = numpy.round(
-                    VECT.refine_way(
-                        numpy.array(pol.exterior.coords), refine_size
-                    ),
-                    7,
-                )
-                alti_way = numpy.array(
-                    [
-                        VECT.weighted_alt(node, alt_idx, alt_dico, tile.dem)
-                        for node in way
-                    ]
-                ).reshape((len(way), 1))
-                vector_map.insert_way(
-                    numpy.hstack([way, alti_way]), "RUNWAY", check=True
-                )
-                pols.append(pol)
-            way = VECT.refine_way(
-                numpy.vstack((runway_start, runway_end)), refine_size
-            )
-            way_r = VECT.shift_way(way, 0.6 * runway_width, "right")
-            way_l = VECT.shift_way(way, 0.6 * runway_width, "left")
-            for k in range(1, len(way)):
-                try:
-                    lin = geometry.LineString(
-                        [way_r[k], way_l[k]]
-                    ).intersection(runway_pol)
-                    if lin.geom_type == "LineString" and not lin.is_empty:
-                        trav = numpy.round(numpy.array(lin), 7)
-                        alti_trav = numpy.array(
-                            [
-                                VECT.weighted_alt(
-                                    node, alt_idx, alt_dico, tile.dem
-                                )
-                                for node in trav
-                            ]
-                        ).reshape((len(trav), 1))
-                        vector_map.insert_way(
-                            numpy.hstack([trav, alti_trav]), "DUMMY", check=True
-                        )
-                except Exception:
-                    pass
+        # (A block for runways as lines, disabled upstream with `in []`,
+        # was removed: it could not have worked with shapely 2 either,
+        # numpy.array(LineString) is no coordinate array there, #94.)
         # Next runways as area
         for (runway_pol, runway_start, runway_end, runway_width) in (
             apt["runway"][1] + apt["runway"][2]
