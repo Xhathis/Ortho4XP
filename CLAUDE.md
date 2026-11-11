@@ -62,7 +62,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~14 s, 360
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 366
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -147,9 +147,10 @@ build with a simulated Overpass failure on the water layer) and
 `sim_water_geometry_failure.py` (CLI build where cleaning the inland
 water geometry fails), `sim_mask_dem_failure.py` (CLI build where the
 DEM for masks fails in step 2.5), `sim_batch.py error|stop` (batch
-of 3, steps 1-2.5, with an error or a Stop on tile 2; since #44 the
-Overpass error fails tile 2 and its retry, `error-once` only the
-first try, so the retry builds it) and
+of 3, steps 1-2.5, with an error or a Stop on tile 2; since #81 the
+Overpass error fails all 3 tries of tile 2 (step 1 calls 2, 4, 5;
+before: tile 2 and its one retry, calls 2 and 4), `error-once` only
+the first try, so the next try builds it) and
 `gui_smoke.py` (scripted run of the real GUI: Earth and config
 windows, tile selection; no downloads, no Custom Scenery links; back
 up .last_gui_params.txt around it) and `cache_roundtrip.py
@@ -186,8 +187,8 @@ GO2 ZL16, user's global cfg, custom build dir; ~7 min for all three
 modes; writes Masks\+40-070 as usual; back up Ortho4XP.log around it;
 mode `context`: no tile configs, provider only as CFG globals like the
 GUI, DSFs must equal those of `par`), `check_overpass_slot.py`
-(#30: 3 processes never query a mock server at once; killed slot
-holder; 429 wait), `check_step3_provider.py [tile_dir]` (#31: empty,
+(#30, #80: 3 processes query a mock server at most 2 at once, and
+do reach 2; a killed slot holder frees its slot; 429 wait), `check_step3_provider.py [tile_dir]` (#31: empty,
 unknown and zone providers stop build_tile at once, GO2/Arc pass; uses
 an existing tile's mesh read-only and silences UI.logprint, which
 build_tile calls directly).
@@ -1128,6 +1129,41 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Build carries on after a crash, a restart or failures. New button
     "Clear selection": unselects all, and removes the file when no
     batch runs. Plain text, one +LL+LLL per line, # comments.
+    Choke points of the 346-tile batch (2026-11-08..11, from its logs):
+    phase 1 took 52.8 h and 154.7 worker-hours, 121.4 of them (78 %) in
+    221 step 1 tries lost to Overpass (median 28 min each); the 127
+    successful step 1 downloads spent 30.9 of 31.9 h waiting for
+    Overpass (0.3 min computing each); good hours saturated the single
+    Overpass slot (40-87 layers/h), ~40 bad hours gave 0-3. Steps 2,
+    2.5 and cached step 1 took under 2 min per tile: CPU is not a
+    choke point. 178 tiles with finished meshes waited for phase 2.
+80. **DONE** (`ba2dad2`): two Overpass requests at a time
+    (OSM.overpass_max_parallel = 2, a module constant): overpass-api.de
+    grants 2 per IP; lock files .overpass.lock and .overpass.lock1, a
+    request takes the first free one (three at once got HTTP 429, #30).
+81. **DONE** (`12119d7`): batches (sequential and parallel) hold step 1
+    back during Overpass outages (_OverpassGate): after 3 tiles in a
+    row lost step 1 to Overpass (overpass_pause_after), tiles whose 5
+    OSM layers are not all cached do not start; cached tiles go on. A
+    real query on the first held tile (OSM.overpass_answers with bbox,
+    in a thread) every 5 min, or a running tile getting through step 1,
+    reopens it; after 6 h it reopens anyway. A tile that lost step 1 to
+    Overpass goes back into the queue, not before 10 min
+    (overpass_retry_wait), and fails after 3 such tries
+    (overpass_tile_tries). Replaces #44's end-of-phase retry pass,
+    #46's wait before it and #78's give-up (overpass_retry_give_up and
+    _wait_for_overpass_retry are gone). A tile at road_level < 2 has no
+    small_roads cache and counts as needing Overpass (held during a
+    pause only).
+82. **DONE** (`736e9c1`): parallel batches start steps 2.5-3 of a tile
+    once it and its neighbours in the batch (the 8 around it, whose
+    meshes step 2.5 reads, #28) have ended steps 1-2 (built, failed or
+    sea), not once all tiles have; up to batch_parallel_tiles workers
+    per phase (so up to 2 x N processes), and imagery downloads overlap
+    other tiles' Overpass requests. Masks and DSFs as with the global
+    barrier (a neighbour's mesh is final once its phase 1 ended;
+    cleanup still waits for the batch end, #42). Sequential batches
+    keep the strict two phases (#28).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1190,6 +1226,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 15. ~~#77~~ — OSM cache check, 2026-11-11.
 16. ~~#78~~ — Overpass outage of the 346-tile batch, 2026-11-11.
 17. ~~#79~~ — tile window selects the last batch's leftover tiles.
+18. ~~#80-#82~~ — choke points of the 346-tile batch, 2026-11-11.
+    Not done: one Overpass request per tile instead of per layer
+    (measure first).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
