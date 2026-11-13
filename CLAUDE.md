@@ -724,7 +724,21 @@ Test results:
   overpass (both are about Overpass). `test` @ b515416: 521 unit tests,
   regression PASS (DSF, 17/17 masks, app log identical, nothing
   downloaded: every layer of the tile is cached), sims_in_ws all 15/15
-  (no Geofabrik download in any of them).
+  (no Geofabrik download in any of them). → `dev` fast-forwarded to
+  476f330 on 2026-11-13 (not pushed).
+- Asia check 2026-11-13: of the 1° tiles Asia's outline touches, 6,922
+  with land have a country/sub-region extract; only 4 land tiles are
+  continent-only, all Chagos: -08+072 (Diego Garcia), -07+071, -06+071,
+  -06+072. The scan used DEM.default_source_has_no_land, which downloads
+  missing Viewfinder zones: 7,071 new .hgt (23.8 GB, nothing replaced)
+  landed in Elevation_data; the user keeps them. Use
+  DEM.world_tile_has_land for read-only land checks.
+  The 4 Chagos tiles came from the main OSM API instead (user's OK):
+  `G:\Ortho4XP_tests\tools\fetch_osm_api.py <out_dir> <tiles>` (4 map
+  calls of 0.5 x 0.5 degrees per tile; 16 calls, 19 MB, files in
+  G:\Ortho4XP_tests\osm_api\<tile>), then prepare_osm_extracts.py with
+  those files and --no-coverage: all 4 OK (coastline 26/10/32/16 ways;
+  -08+072's airports and big_roads were already cached, 8 runway ways).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
