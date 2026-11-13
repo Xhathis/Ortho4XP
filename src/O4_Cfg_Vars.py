@@ -39,6 +39,19 @@ cfg_app_vars = {
         "values": overpass_server_values,
         "hint": "OSM Overpass server used to grab vector data. Servers are specified in overpass_servers.txt.",
     },
+    "osm_source": {
+        "module": "GEOFABRIK",
+        "type": str,
+        "default": "geofabrik",
+        "values": ("geofabrik", "overpass"),
+        "hint": "Where step 1 gets the OSM data of a tile that is not cached yet. geofabrik: from Geofabrik's regional extracts (downloaded once into geofabrik_dir and updated with Geofabrik's daily changes), Overpass only for what they cannot give (a tile only a continent extract covers, a failed download); overpass: always from the Overpass servers. Cached layers are used either way.",
+    },
+    "geofabrik_max_age": {
+        "module": "GEOFABRIK",
+        "type": float,
+        "default": 1.0,
+        "hint": "Days: an extract whose data is older gets Geofabrik's daily changes before it is read (a few MB a day; Geofabrik publishes them once a day).",
+    },
     "skip_downloads": {
         "module": "TILE",
         "type": bool,
@@ -104,6 +117,12 @@ cfg_app_vars = {
         "type": list,
         "default": [],
         "hint": "Indices of road types which one would like to left aside in the extraction of overlays. The list of these indices is can be in the roads.net file within X-Plane Resources, but some sceneries use their own corresponding net definition file. Powerlines have index 22001 in XP11 roads.net default file.",
+    },
+    "geofabrik_dir": {
+        "module": "GEOFABRIK",
+        "type": str,
+        "default": "",
+        "hint": "Folder for Geofabrik's extracts (.osm.pbf, kept with Geofabrik's folder layout). Empty: OSM_data/Geofabrik. A fast disk helps: each build of a fresh tile reads its extracts a few times.",
     },
     "custom_scenery_dir": {
         "type": str,
@@ -373,6 +392,8 @@ list_app_vars = [
     "verbosity",
     "cleaning_level",
     "overpass_server_choice",
+    "osm_source",
+    "geofabrik_max_age",
     "skip_downloads",
     "skip_converts",
     "max_download_slots",
@@ -384,14 +405,15 @@ list_app_vars = [
     "max_baddata_retries",
     "ovl_exclude_pol",
     "ovl_exclude_net",
+    "geofabrik_dir",
     "custom_scenery_dir",
     "custom_overlay_src",
     "custom_overlay_src_alternate",
 ]
 
-gui_app_vars_short = list_app_vars[:-3]
+gui_app_vars_short = list_app_vars[:-4]
 
-gui_app_vars_long = list_app_vars[-3:]
+gui_app_vars_long = list_app_vars[-4:]
 
 list_vector_vars = [
     "apt_smoothing_pix",

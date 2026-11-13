@@ -23,6 +23,7 @@ import O4_File_Names as FNAMES
 sys.path.append(FNAMES.Provider_dir)
 import O4_Imagery_Utils as IMG
 import O4_Vector_Map as VMAP
+import O4_Geofabrik as GEOFABRIK
 import O4_Mesh_Utils as MESH
 import O4_Mask_Utils as MASK
 import O4_Tile_Utils as TILE
@@ -68,6 +69,9 @@ if __name__ == '__main__':
                 CFG.default_website = context["default_website"]
                 CFG.default_zl = context["default_zl"]
                 CFG.zone_list = context["zone_list"]
+                # The batch prepared the Geofabrik data already (#101).
+                GEOFABRIK.batch_prepared = context.get(
+                    "geofabrik_prepared", False)
             tile = CFG.Tile(int(sys.argv[2]), int(sys.argv[3]),
                             sys.argv[5] if len(sys.argv) > 5 else '')
             sys.exit(TILE.batch_worker(tile, sys.argv[4]))

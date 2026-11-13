@@ -10,6 +10,7 @@ import O4_UI_Utils as UI
 import O4_OSM_Utils as OSM
 import O4_Vector_Utils as VECT
 import O4_File_Names as FNAMES
+import O4_Geofabrik as GEOFABRIK
 import O4_Geo_Utils as GEO
 import O4_Airport_Utils as APT
 
@@ -130,6 +131,12 @@ def build_poly_file(tile):
     vector_map = VECT.Vector_Map()
 
     if UI.red_flag:
+        UI.exit_message_and_bottom_line()
+        return 0
+
+    # Missing OSM layers from Geofabrik's extracts first (#101); false
+    # only on Stop, else whatever is still missing comes from Overpass.
+    if not GEOFABRIK.prepare_tile(tile):
         UI.exit_message_and_bottom_line()
         return 0
 

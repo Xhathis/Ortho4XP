@@ -13,6 +13,7 @@ from shapely import geometry
 
 import O4_DEM_Utils as DEM
 import O4_File_Names as FNAMES
+import O4_Geofabrik as GEOFABRIK
 import O4_Imagery_Utils as IMG
 import O4_OSM_Utils as OSM
 import O4_Overlay_Utils as OVL
@@ -45,7 +46,8 @@ from O4_Cfg_Vars import (
 
 # The modules named in cfg_vars[...]["module"]: such a setting lives
 # there (e.g. IMG.http_timeout), the others in this module.
-_CFG_MODULES = {"IMG": IMG, "OSM": OSM, "OVL": OVL, "TILE": TILE, "UI": UI}
+_CFG_MODULES = {"GEOFABRIK": GEOFABRIK, "IMG": IMG, "OSM": OSM, "OVL": OVL,
+                "TILE": TILE, "UI": UI}
 
 
 def _cfg_owner(var):

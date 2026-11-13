@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 import time
@@ -14,6 +15,7 @@ import O4_Imagery_Utils as IMG
 import O4_Vector_Map as VMAP
 import O4_OSM_Utils as OSM
 import O4_OSM_Extract as EXTRACT
+import O4_Geofabrik as GEOFABRIK
 import O4_Mesh_Utils as MESH
 import O4_Mask_Utils as MASK
 import O4_DSF_Utils as DSF
@@ -609,11 +611,43 @@ def build_tile_list(
     _batch_leftover.extend(list_lat_lon)
     write_leftover_tiles(_batch_leftover)
     try:
+        if do_osm:
+            # One read of the Geofabrik extracts for all tiles (#101).
+            UI.is_working = 1
+            try:
+                ok = _prepare_batch_osm(tile, list_lat_lon, override_cfg)
+            finally:
+                UI.is_working = 0
+            if not ok:
+                UI.exit_message_and_bottom_line()
+                return 0
+            GEOFABRIK.batch_prepared = True
         if batch_parallel_tiles > 1 and len(list_lat_lon) > 1:
             return _build_tile_list_parallel(tile, list_lat_lon, flags)
         return _build_tile_list_sequential(tile, list_lat_lon, flags)
     finally:
         keep_mesh_after_step3 = False
+        GEOFABRIK.batch_prepared = False
+
+
+def _prepare_batch_osm(tile, list_lat_lon, override_cfg):
+    """The batch's missing OSM layers from Geofabrik, before phase 1.
+
+    Each tile's road_level comes from its config as in _build_one_tile_steps,
+    read into a copy: tile carries the GUI's provider for the workers.
+    False on Stop.
+    """
+    if GEOFABRIK.osm_source != "geofabrik":
+        return True
+    wanted = {}
+    probe = copy.copy(tile)
+    for (lat, lon) in list_lat_lon:
+        (probe.lat, probe.lon) = (lat, lon)
+        probe.build_dir = FNAMES.build_dir(lat, lon, probe.custom_build_dir)
+        probe.read_from_config(use_global=override_cfg)
+        wanted[(lat, lon)] = GEOFABRIK.needed_layers(lat, lon,
+                                                     probe.road_level)
+    return GEOFABRIK.prepare_batch(wanted)
 
 
 def _build_tile_list_sequential(tile, list_lat_lon, flags):
@@ -1185,6 +1219,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
                 "default_website": tile.default_website,
                 "default_zl": tile.default_zl,
                 "zone_list": tile.zone_list,
+                "geofabrik_prepared": GEOFABRIK.batch_prepared,
             },
             f,
         )
