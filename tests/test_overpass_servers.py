@@ -109,6 +109,11 @@ def test_de_answers_first(net):
     (Resp(200, b'<osm version="0.6"><node id="1"/>'), True),  # cut
     (Resp(504, b"Gateway"), False),
     (Resp(503, b""), False),
+    # FR since 2026-11: refuses everyone not white-listed (#101): no
+    # per-query fallback, which would only be refused again.
+    (Resp(403, b"This service is only available to white-listed usages"),
+     False),
+    (Resp(401, b""), False),
 ])
 def test_failure_kinds(net, reply, size):
     (replies, asked, _, _) = net

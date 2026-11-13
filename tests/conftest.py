@@ -38,6 +38,17 @@ def pytest_unconfigure(config):
         shutil.rmtree(_state["sandbox"], ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+def no_geofabrik(monkeypatch):
+    """Step 1 and batches take OSM data from Overpass (faked by the tests),
+    never from a real Geofabrik download (#101). Not at collection time:
+    importing O4_Config_Utils sets every setting to its default again.
+    The Geofabrik tests switch it back on with monkeypatch."""
+    import O4_Geofabrik as GEOFABRIK
+    monkeypatch.setattr(GEOFABRIK, "osm_source", "overpass")
+    monkeypatch.setattr(GEOFABRIK, "batch_prepared", False)
+
+
 @pytest.fixture
 def lines(monkeypatch):
     """lvprint lines of a batch run, with Overpass and the clock faked.

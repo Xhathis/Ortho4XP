@@ -587,16 +587,9 @@ def read_custom_osm_dir(osm_layer, src_dir, merged_file):
     return True
 
 
-def OSM_queries_to_OSM_layer(
-    queries,
-    osm_layer,
-    lat,
-    lon,
-    tags_of_interest=[],
-    cached_suffix="",
-):
-    # this one is a bit complicated by a few checks of existing cached data
-    # which had different filenames is versions prior to 1.30
+def layer_tags(queries, tags_of_interest):
+    """(input_tags, target_tags) for update_dicosm from a layer's queries
+    (str or tuples of str) and the tags kept besides the queried ones."""
     target_tags = {"n": [], "w": [], "r": []}
     input_tags = {"n": [], "w": [], "r": []}
     for query in queries:
@@ -616,6 +609,20 @@ def OSM_queries_to_OSM_layer(
                 else:
                     if tag not in target_tags[osm_type]:
                         target_tags[osm_type].append(tag)
+    return (input_tags, target_tags)
+
+
+def OSM_queries_to_OSM_layer(
+    queries,
+    osm_layer,
+    lat,
+    lon,
+    tags_of_interest=[],
+    cached_suffix="",
+):
+    # this one is a bit complicated by a few checks of existing cached data
+    # which had different filenames is versions prior to 1.30
+    (input_tags, target_tags) = layer_tags(queries, tags_of_interest)
     cached_data_filename = FNAMES.osm_cached(lat, lon, cached_suffix)
     if cached_suffix and os.path.isfile(cached_data_filename):
         UI.vprint(1, "    * Recycling OSM data from", cached_data_filename)
@@ -708,7 +715,13 @@ def _layer_from_extract(queries, osm_layer, lat, lon, input_tags, target_tags,
         return False
     _note_old_data(cached_suffix, lat, lon,
                    [("local extract", osm_base_of(content))])
-    osm_layer.write_to_file(cached_data_filename)
+    if osm_layer.write_to_file(cached_data_filename):
+        # The cache now wins over the answer (#101): it would only take
+        # the same space again.
+        try:
+            os.remove(path)
+        except OSError as e:
+            UI.vprint(1, "    Could not remove", path, f"({e})")
     return True
 
 
@@ -831,7 +844,7 @@ def _server_order(server_keys, shuffle=True) -> list:
     return keys
 
 
-# Kinds of failed requests (#83). DOWN: no connection, HTTP 429/5xx - the
+# Kinds of failed requests (#83). DOWN: no connection, HTTP 401/403/429/5xx - the
 # server is unavailable, a smaller request would fail the same way. TIMEOUT:
 # connected but no answer in time - overloaded, or the request was too big.
 # SIZE: the server answered that it could not do the request (a <remark>,
@@ -1073,7 +1086,10 @@ def _overpass_request(session, key, url, timeout):
                 retry_after = 0
             return (0, DOWN, "HTTP 429",
                     max(retry_after, overpass_rate_limit_wait))
-        kind = DOWN if r.status_code >= 500 else SIZE
+        # 401/403: the server refuses us (FR since 2026-11: "only available
+        # to white-listed usages"); a smaller request is refused the same.
+        refused = r.status_code >= 500 or r.status_code in (401, 403)
+        kind = DOWN if refused else SIZE
         return (0, kind, f"HTTP {r.status_code}", 0)
     if b"</osm>" not in r.content[-10:] and b"</OSM>" not in r.content[-10:]:
         UI.vprint(1, f"      OSM server {key} sent a cut answer (no </osm>)")
