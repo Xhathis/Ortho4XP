@@ -381,3 +381,35 @@ def test_prepare_tool(tmp_path, osm_dir, monkeypatch, capsys):
     assert ids(small, "way") == []  # service roads only from level 4
     assert tool.main([pbf, "--tiles", "+55+012"]) == 0  # nothing to do
     assert "0 with layers to prepare" in capsys.readouterr().out
+
+
+def test_offshore_only():
+    assert EXTRACT.offshore_only(["europe"])
+    assert EXTRACT.offshore_only(["africa", "europe"])
+    assert not EXTRACT.offshore_only(["sweden", "europe"])
+    assert not EXTRACT.offshore_only(["russia"])  # a country, land
+    assert not EXTRACT.offshore_only([])
+
+
+def test_prepare_tool_offshore(tmp_path, osm_dir, monkeypatch, capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "prepare_osm_extracts",
+        os.path.join(os.path.dirname(__file__), "..", "prepare_osm_extracts.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    monkeypatch.setattr(FNAMES, "Tile_dir", str(tmp_path / "Tiles"))
+    pbf = osm_file(tmp_path / "denmark-latest.osm", NODES, WAYS, RELS)
+    # Denmark's file ends at 55.9 N; Europe covers the sea around it.
+    index_file(tmp_path / "index-v1.json", [
+        ("denmark", "denmark-latest.osm", box(11, 54, 14, 55.9)),
+        ("europe", "europe-latest.osm.pbf", box(-10, 35, 30, 70))])
+    rc = tool.main([pbf, "--tiles", "+55+012", "+58+012"])
+    out = capsys.readouterr().out
+    assert "NOTE +55+012: part of it is sea beyond the given files (only " \
+        "europe)" in out
+    assert "OK   +55+012" in out
+    # nothing of +58+012 in the file: its land may be in the gap
+    assert "FAIL +58+012: no data in the given files" in out
+    assert rc == 1
+    assert not os.path.exists(EXTRACT.answer_path(58, 12, "coastline"))

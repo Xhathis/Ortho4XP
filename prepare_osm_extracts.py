@@ -74,6 +74,21 @@ def road_level_of(lat, lon, default):
     return default
 
 
+def cached_nodes(lat, lon):
+    """True if an already cached layer of the tile holds a node."""
+    import bz2
+    for layer in ("coastline", "airports", "big_roads", "small_roads",
+                  "water"):
+        try:
+            with bz2.open(FNAMES.osm_cached(lat, lon, layer), "rt",
+                          encoding="utf-8") as f:
+                if any("<node id=" in line for line in f):
+                    return True
+        except (OSError, EOFError):
+            continue
+    return False
+
+
 def given_areas(files, regions):
     """Areas of the files (by Geofabrik file name), or the names unknown."""
     by_name = {name: area for (_, name, area) in regions}
@@ -114,6 +129,7 @@ def main(argv):
         print("ERROR: no such file:", ", ".join(missing))
         return 2
     tiles = list(dict.fromkeys(tiles))
+    offshore = set()  # tiles partly beyond the files, only at sea
 
     if not opts.get("no-coverage"):
         index = opts["index"] or os.path.join(
@@ -131,9 +147,17 @@ def main(argv):
             return 2
         gaps = EXTRACT.coverage_gaps(tiles, given, regions)
         for ((lat, lon), fill) in sorted(gaps.items()):
-            print(f"SKIP {FNAMES.short_latlon(lat, lon)}: reaches outside "
-                  "the given files; add one of: " + ", ".join(fill[:4]))
-        tiles = [t for t in tiles if t not in gaps]
+            if EXTRACT.offshore_only(fill):
+                offshore.add((lat, lon))
+                print(f"NOTE {FNAMES.short_latlon(lat, lon)}: part of it is "
+                      "sea beyond the given files (only " + ", ".join(fill)
+                      + "): offshore objects there are not included")
+            else:
+                print(f"SKIP {FNAMES.short_latlon(lat, lon)}: reaches "
+                      "outside the given files; add one of: "
+                      + ", ".join(fill[:4]))
+        tiles = [t for t in tiles
+                 if t not in gaps or t in offshore]
 
     wanted = {}
     for (lat, lon) in tiles:
@@ -158,6 +182,13 @@ def main(argv):
 
     start = time.time()
     (answers, failed) = EXTRACT.extract_answers(files, wanted)
+    for tile in [t for t in answers if t in offshore]:
+        if not (EXTRACT.has_objects(answers[tile]) or cached_nodes(*tile)):
+            # Nothing of the tile in the files although it reaches beyond
+            # them: its land, if any, is in the gap.
+            del answers[tile]
+            failed[tile] = ("no data in the given files, and part of the "
+                            "tile lies beyond them (its land may be there)")
     written = 0
     for ((lat, lon), layers) in sorted(answers.items()):
         for (layer, content) in layers.items():

@@ -175,6 +175,27 @@ def coverage_gaps(tiles, given, regions):
     return gaps
 
 
+# Geofabrik's continents reach far out to sea (africa covers the Atlantic
+# around the Canaries); a country file's boundary keeps a few km of sea.
+# Russia is top-level too, but it is a country (land), so not listed.
+CONTINENTS = {"africa", "antarctica", "asia", "australia-oceania",
+              "central-america", "europe", "north-america", "south-america"}
+
+
+def offshore_only(fill):
+    """True when only continents fill a tile's gap: the gap is sea beyond
+    every country file (only offshore objects such as platforms can be
+    missing). The tool still refuses such a tile when the given files have
+    nothing in it at all (its land would be in the gap, e.g. Diego Garcia,
+    in no country file)."""
+    return bool(fill) and set(fill) <= CONTINENTS
+
+
+def has_objects(answers):
+    """True if any answer of a tile holds a node."""
+    return any(b"<node id=" in content for content in answers.values())
+
+
 # --- XML as Overpass writes it ----------------------------------------------
 def xml_escape(s):
     """Overpass's escaping: & " < > and control characters (&#x0a;)."""
@@ -303,12 +324,30 @@ def _osm_base(files):
     return min(dates)
 
 
-def _reader(files):
+def _run(files, *handlers, locations=False):
+    """Apply the handlers (filters first) to each file in turn.
+
+    One file at a time: pyosmium's MergeInputReader keeps every object of
+    every file in memory (42 GB for norway + sweden + finland). An object
+    in two neighbouring extracts is simply seen twice; the collections are
+    keyed by id. Geofabrik ships every node of the ways in a file, so each
+    file's own location index is enough. sparse_mem_array: 16 bytes per
+    node of the file (flex_mem may switch to a dense array sized by the
+    highest node id, ~100 GB today).
+    """
     import osmium
-    reader = osmium.MergeInputReader()
     for f in files:
-        reader.add_file(f)
-    return reader
+        chain = list(handlers)
+        if locations:
+            lh = osmium.NodeLocationsForWays(
+                osmium.index.create_map("sparse_mem_array"))
+            lh.ignore_errors()  # a missing node: an invalid location
+            chain.insert(0, lh)
+        reader = osmium.io.Reader(f)
+        try:
+            osmium.apply(reader, *chain)
+        finally:
+            reader.close()
 
 
 def extract_answers(files, wanted, log=print):
@@ -350,6 +389,20 @@ def extract_answers(files, wanted, log=print):
                 take.setdefault((tile, layer), {"n": set(), "w": set(),
                                                 "r": set()})[otype].add(oid)
 
+    # Each pass puts a C++ filter in front of Python: of the hundreds of
+    # millions of objects in a country file only the matching ones reach a
+    # callback; the location index (idx) is filled in C++ for every node.
+    def geometry(w):
+        (refs, xs, ys, ok) = ([], [], [], True)
+        for n in w.nodes:
+            refs.append(n.ref)
+            if n.location.valid():
+                xs.append(n.x)
+                ys.append(n.y)
+            else:
+                ok = False
+        return (refs, xs, ys, ok)
+
     # Pass 1: relations matching a statement.
     rels = {}  # id -> (members, tags, (tile, layer)s)
 
@@ -361,63 +414,77 @@ def extract_answers(files, wanted, log=print):
                 rels[r.id] = ([(m.type, m.ref, m.role) for m in r.members],
                               tags, hit)
 
-    log("    pass 1/4: relations")
-    _reader(files).apply(osmium.filter.KeyFilter(*keys), Rels())
+    log("    pass 1: relations")
+    _run(files, osmium.filter.KeyFilter(*keys), Rels())
     member_ways = {ref for (mem, _, _) in rels.values()
                    for (t, ref, _) in mem if t == "w"}
     member_nodes = {ref for (mem, _, _) in rels.values()
                     for (t, ref, _) in mem if t == "n"}
 
-    # Pass 2: nodes and ways, with node locations.
     node_xy = {}  # id -> (x, y) of nodes output by themselves
-    member_tiles = {}  # member way/node id -> tiles it touches
+    member_tiles = {}  # ("w"|"n", id) -> tiles it touches
     way_data = {}  # id -> (refs, xs, ys, tags)
     broken = {}  # way id -> tiles it touches (some node without location)
 
-    class NodesWays(osmium.SimpleHandler):
-        def node(self, n):
-            hit = matches("n", [(t.k, t.v) for t in n.tags]) if n.tags \
-                else set()
-            if not hit and n.id not in member_nodes:
-                return
-            (x, y) = (n.location.x, n.location.y)
-            hit_tiles = point_tiles(x, y, tiles)
-            if hit and hit_tiles:
-                node_xy[n.id] = (x, y)
-                add(hit, hit_tiles, "n", n.id)
-            if n.id in member_nodes:
-                node_xy[n.id] = (x, y)
-                member_tiles[("n", n.id)] = hit_tiles
+    def keep_way(w, hit, is_member):
+        (refs, xs, ys, ok) = geometry(w)
+        hit_tiles = way_tiles(xs, ys, tiles)
+        if is_member:
+            member_tiles[("w", w.id)] = hit_tiles
+        if not hit_tiles:
+            return
+        if not ok:
+            broken[w.id] = hit_tiles
+        if w.id not in way_data:
+            way_data[w.id] = (refs, xs, ys, [(t.k, t.v) for t in w.tags])
+        add(hit, hit_tiles, "w", w.id)
 
+    # Pass 2: ways matching a statement.
+    class Ways(osmium.SimpleHandler):
         def way(self, w):
-            is_member = w.id in member_ways
-            tags = [(t.k, t.v) for t in w.tags]
-            hit = matches("w", tags) if tags else set()
-            if not hit and not is_member:
-                return
-            (refs, xs, ys, ok) = ([], [], [], True)
-            for n in w.nodes:
-                refs.append(n.ref)
-                if n.location.valid():
-                    xs.append(n.x)
-                    ys.append(n.y)
-                else:
-                    ok = False
-            hit_tiles = way_tiles(xs, ys, tiles)
-            if is_member:
-                member_tiles[("w", w.id)] = hit_tiles
-            if not hit_tiles:
-                return
-            if not ok:
-                broken[w.id] = hit_tiles
-            way_data[w.id] = (refs, xs, ys, tags)
-            add(hit, hit_tiles, "w", w.id)
+            hit = matches("w", [(t.k, t.v) for t in w.tags])
+            if hit:
+                keep_way(w, hit, w.id in member_ways)
 
-    log("    pass 2/4: nodes and ways")
-    _reader(files).apply(NodesWays(), idx="flex_mem")
+    log("    pass 2: ways")
+    _run(files, osmium.filter.KeyFilter(*keys), Ways(), locations=True)
+
+    # Pass 3: member ways of the relations (mostly untagged).
+    class MemberWays(osmium.SimpleHandler):
+        def way(self, w):
+            if ("w", w.id) not in member_tiles:
+                keep_way(w, set(), True)
+
+    if member_ways:
+        log(f"    pass 3: {len(member_ways)} relation member ways")
+        _run(files, osmium.filter.IdFilter(member_ways), MemberWays(),
+             locations=True)
+
+    # Pass 4: nodes matching a statement, and relation member nodes.
+    class Nodes(osmium.SimpleHandler):
+        def node(self, n):
+            hit = matches("n", [(t.k, t.v) for t in n.tags])
+            if hit:
+                hit_tiles = point_tiles(n.location.x, n.location.y, tiles)
+                if hit_tiles:
+                    node_xy[n.id] = (n.location.x, n.location.y)
+                    add(hit, hit_tiles, "n", n.id)
+
+    class MemberNodes(osmium.SimpleHandler):
+        def node(self, n):
+            node_xy[n.id] = (n.location.x, n.location.y)
+            member_tiles[("n", n.id)] = point_tiles(
+                n.location.x, n.location.y, tiles)
+
+    node_keys = sorted(index["n"])
+    if node_keys:
+        log("    pass 4: nodes")
+        _run(files, osmium.filter.KeyFilter(*node_keys), Nodes())
+    if member_nodes:
+        _run(files, osmium.filter.IdFilter(member_nodes),
+             MemberNodes())
 
     # Relations in a tile: one of their members is.
-    rel_missing = {}  # rel id -> member ways absent from the files
     for (rid, (members, tags, hit)) in rels.items():
         hit_tiles = set()
         for (t, ref, _) in members:
@@ -428,34 +495,26 @@ def extract_answers(files, wanted, log=print):
     fetch = {ref for rid in needed_rels for (t, ref, _) in rels[rid][0]
              if t == "w" and ref not in way_data}
 
-    # Pass 3: member ways of those relations outside the tiles.
+    # Pass 5: their member ways outside the tiles (complete relations).
     class MoreWays(osmium.SimpleHandler):
         def way(self, w):
-            if w.id not in fetch:
-                return
-            (refs, xs, ys, ok) = ([], [], [], True)
-            for n in w.nodes:
-                refs.append(n.ref)
-                if n.location.valid():
-                    xs.append(n.x)
-                    ys.append(n.y)
-                else:
-                    ok = False
+            (refs, xs, ys, ok) = geometry(w)
             if not ok:
                 broken[w.id] = set()
             way_data[w.id] = (refs, xs, ys, [(t.k, t.v) for t in w.tags])
 
     if fetch:
-        log(f"    pass 3/4: {len(fetch)} member ways outside the tiles")
-        _reader(files).apply(osmium.filter.IdFilter(fetch), MoreWays(),
-                             idx="flex_mem")
+        log(f"    pass 5: {len(fetch)} member ways outside the tiles")
+        _run(files, osmium.filter.IdFilter(fetch), MoreWays(),
+             locations=True)
+    rel_missing = {}  # rel id -> member ways absent from the files
     for rid in needed_rels:
         absent = [ref for (t, ref, _) in rels[rid][0]
                   if t == "w" and ref not in way_data]
         if absent:
             rel_missing[rid] = absent
 
-    # Pass 4: tags of every node in a layer that queries nodes (airports).
+    # Pass 6: tags of every node in a layer that queries nodes (airports).
     tag_ids = set()
     for ((tile, layer), sets) in take.items():
         if (tile, layer) in node_layers:
@@ -470,8 +529,8 @@ def extract_answers(files, wanted, log=print):
                 node_tags[n.id] = [(t.k, t.v) for t in n.tags]
 
     if tag_ids:
-        log(f"    pass 4/4: tags of {len(tag_ids)} airport nodes")
-        _reader(files).apply(osmium.filter.IdFilter(tag_ids), NodeTags())
+        log(f"    pass 6: tags of {len(tag_ids)} airport nodes")
+        _run(files, osmium.filter.IdFilter(tag_ids), NodeTags())
 
     # Assemble each tile's answers; a tile with any gap gets none.
     answers, failed = {}, {}
