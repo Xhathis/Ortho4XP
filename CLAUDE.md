@@ -64,7 +64,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 535
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 539
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -762,9 +762,17 @@ Test results:
   and hash-checked; DSF same hash as the 5765e46 run), repeat run PASS
   (DSF, 17/17 masks, app log identical), sims_in_ws all 15/15.
   regression.py and
-  sim_batch_cleaning.py now point at it. A C compiler for #75 (zig from
-  PyPI into a separate venv) was blocked by the permission check: not
-  installed, waits for the user.
+  sim_batch_cleaning.py now point at it. #75 `fix/triangle4xp-steiner-
+  report` @ 6d270a5 + 7ee9509 (zig installed with the user's OK, see
+  #75): 4 new unit tests (2 run the exe on a synthetic 1000 m peak:
+  20 points capped -> "left: 0", 49 nodes; uncapped 48 used, 77 nodes;
+  both fail with the old exe), meshes identical to the old exe at 9
+  option sets. `test` @ fcf243d: 539 unit tests, regression PASS (DSF,
+  17/17 masks, app log identical: not capped at the regression cfg,
+  986,227 left); probe_mesh --skip-step1 curvature_tol=0.25
+  limit_tris=1 in the worktree: "Steiner points left: 0" and the NOTE
+  in the log; sims_in_ws all 15/15 (sim_mesh_failure through
+  _run_triangle4xp).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1289,6 +1297,30 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     signal. Also the "~1.9 M triangles" above was wrong: DSFs hold ~15
     bytes per triangle (+65-019: 60 MB, 4.12 M), so 67 MB is ~4.5 M:
     the user's largest tiles were at the cap.
+    **FIXED 2026-11-13** (`6d270a5` exe, `7ee9509`): the budget goes to
+    vertices Chew's refinement deletes again: splitencsegs removes free
+    vertices from the diametral circle of a segment it splits
+    (deletevertex), and their -S budget stays spent (instrumented build,
+    +55+012 at -S 200000: 135,761 segment splits + 64,239 circumcenters
+    = 200,000 spent, 17,556 deleted, 182,444 added, 0 left).
+    Triangle4XP.c now prints "Steiner points left: N" after the
+    refinement (also with -Q); build_mesh reads it (_run_triangle4xp,
+    parse_steiner_left) and logs, at 0, "NOTE: Triangle4XP used the
+    whole limit_tris budget of tile ... coarser than curvature_tol ..."
+    (a NOTE: the user's ct 0.25 / limit_tris 10 use the cap as a budget
+    on purpose). Exes without the line (Linux, macOS: not rebuilt) keep
+    the old count test. Utils\win\Triangle4XP.exe was rebuilt with zig
+    cc 0.17.1 (`G:\Ortho4XP_tests\tools\zigenv`, PyPI ziglang, user's
+    OK; `zigenv\Scripts\python.exe -m ziglang cc -O2 -target
+    x86_64-windows-gnu -mcpu=baseline -ffp-contract=off
+    -fno-strict-aliasing -w -Wl,--stack,268435456 -o Triangle4XP.exe
+    Triangle4XP.c`, then `pe_stack.py <exe> 256 <out>` for the PE
+    checksum). Upstream's exe came from mingw-w64 gcc; on +55+012 at 9
+    option sets (min_angle 0-20, curvature_tol 0.25-4, capped or not)
+    the old exe, the unchanged source and the patched source built this
+    way give identical .1.node/.1.ele (comment lines aside). Note: when
+    the budget is exactly enough, the report says 0 too (seen on a test
+    tile with 20 points needed).
 76. **FIXED** (`5534d9c`): use_decal_on_terrain put the decal on
     masked sea terrain too (tri_type != 1); now land only, as the
     option is documented. No effect with the option off.
@@ -1704,11 +1736,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 23. ~~#100~~ — local OSM extracts; on `dev` since 2026-11-13.
 24. #101 — Geofabrik first; on `test`, to `dev` with the user's OK.
     Not done: `out` instead of `out meta` for Overpass.
-25. #102, #103 — fourth review, 2026-11-13; on `test`. Open: #75 needs
-    a C compiler to rebuild Triangle4XP.exe with a steinerleft report
-    (user's OK to install one); every place in Triangle4XP.c that
-    spends -S budget also keeps a vertex, so the missing 17 % needs an
-    instrumented build.
+25. #102, #103, #75 — fourth review, 2026-11-13; on `test`.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
