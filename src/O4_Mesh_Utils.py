@@ -236,6 +236,36 @@ def build_curv_tol_weight_map(tile, weight_array):
 
 
 ################################################################################
+# Sweeps of smooth_water_altitudes per water_smoothing pass: 3 flatten
+# +55+012's lakes as much as one pass of the old sequential loop did (mean
+# altitude spread within a triangle 1.40 vs 1.44 cm, same mean change).
+WATER_SWEEPS_PER_PASS = 3
+
+
+def smooth_water_altitudes(vertices, water_tris, passes):
+    """Smooth the altitudes (vertices[6 * i + 2]) of inland water.
+
+    Each sweep sets every water vertex to the mean of the altitude means of
+    its water triangles, all from the previous sweep. The old loop
+    overwrote the three vertices of one triangle after another, in the
+    order of a Python set: the result depended on the vertex numbering, so
+    a small change anywhere in a tile moved water altitudes everywhere
+    (up to 2.7 m on +55+012 for another order).
+    """
+    if not water_tris or passes <= 0:
+        return
+    z = vertices[2::6]  # a view: assignments go to vertices
+    tris = numpy.array(sorted(water_tris), dtype=numpy.int64)
+    flat = tris.ravel()
+    count = numpy.bincount(flat, minlength=len(z))
+    used = count > 0
+    for _ in range(passes * WATER_SWEEPS_PER_PASS):
+        means = z[tris].mean(axis=1)
+        sums = numpy.bincount(flat, weights=numpy.repeat(means, 3),
+                              minlength=len(z))
+        z[used] = sums[used] / count[used]
+
+
 def post_process_nodes_altitudes(tile):
     dico_attributes = VECT.Vector_Map.dico_attributes
     with open(FNAMES.output_node_file(tile), "r") as f_node:
@@ -274,16 +304,7 @@ def post_process_nodes_altitudes(tile):
     f_ele.close()  # was never closed
     if tile.water_smoothing:
         UI.vprint(1, "   Smoothing inland water.")
-        for j in range(tile.water_smoothing):
-            for v1, v2, v3 in water_tris:
-                zmean = (
-                    vertices[6 * v1 + 2]
-                    + vertices[6 * v2 + 2]
-                    + vertices[6 * v3 + 2]
-                ) / 3
-                vertices[6 * v1 + 2] = zmean
-                vertices[6 * v2 + 2] = zmean
-                vertices[6 * v3 + 2] = zmean
+        smooth_water_altitudes(vertices, water_tris, tile.water_smoothing)
     UI.vprint(1, "   Smoothing of sea water.")
     for v1, v2, v3 in sea_tris:
         if tile.sea_smoothing_mode == "zero":
