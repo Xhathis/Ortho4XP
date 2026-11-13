@@ -423,3 +423,138 @@ def test_compare_with_cache(fake_files, gf, tmp_path):
             "water", statements, answer.replace("Sø".encode(), b"Old")))
     assert GEOFABRIK.compare_with_cache(55, 12, "water", statements,
                                         answer) == (False, 1, 1)
+
+
+# --- robustness (2026-11-13 review) ------------------------------------------------
+
+
+INDEX = ('{"features": [{"type": "Feature", "properties": {"id": "dk", '
+         '"urls": {"pbf": "' + B + 'europe/dk-latest.osm.pbf"}}, '
+         '"geometry": {"type": "Polygon", "coordinates": '
+         '[[[11,54],[13,54],[13,56],[11,56],[11,54]]]}}]}').encode()
+
+
+def test_index_error_page_is_refused(gf, server):
+    server[GEOFABRIK.INDEX_URL] = (b"<html>Server busy</html>",)
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="not a valid"):
+        GEOFABRIK.load_index()
+    assert not os.path.exists(GEOFABRIK.index_path())
+    assert os.listdir(GEOFABRIK.data_dir()) == []  # no temp file
+    # An old good index is kept and used.
+    with open(GEOFABRIK.index_path(), "wb") as fh:
+        fh.write(INDEX)
+    old = os.path.getmtime(GEOFABRIK.index_path()) - 40 * 86400
+    os.utime(GEOFABRIK.index_path(), (old, old))
+    assert [r.id for r in GEOFABRIK.load_index()] == ["dk"]
+    with open(GEOFABRIK.index_path(), "rb") as fh:
+        assert fh.read() == INDEX
+
+
+def test_broken_index_file_is_fetched_again(gf, server):
+    os.makedirs(GEOFABRIK.data_dir())
+    with open(GEOFABRIK.index_path(), "w") as fh:
+        fh.write("<html>kept by an older version</html>")
+    server[GEOFABRIK.INDEX_URL] = (INDEX,)
+    assert [r.id for r in GEOFABRIK.load_index()] == ["dk"]
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="not a valid"):
+        GEOFABRIK.read_index(__file__)  # not JSON
+    # Without downloads a broken file is an error, not a crash.
+    with open(GEOFABRIK.index_path(), "w") as fh:
+        fh.write('{"no": "features"}')
+    t = os.path.getmtime(GEOFABRIK.index_path()) - 10  # not the cached one
+    os.utime(GEOFABRIK.index_path(), (t, t))
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="KeyError"):
+        GEOFABRIK.load_index(download=False)
+
+
+@pytest.mark.parametrize("answer", [b"", b"<html>404</html>", b"xyz  f\n"])
+def test_md5_answer_without_checksum(gf, server, answer):
+    url = B + "europe/x-latest.osm.pbf"
+    server[url] = (b"data",)
+    server[url + ".md5"] = (answer,)
+    path = GEOFABRIK.local_path(url)
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="no checksum"):
+        GEOFABRIK._download(url, path)
+    assert os.listdir(os.path.dirname(path)) == []
+
+
+class FakeUpdate:
+    """pyosmium-up-to-date that writes its -o file and runs until killed
+    (exit code 1 then, as on Windows) or ends with exit_code."""
+    exit_code = None
+
+    def __init__(self, args, **kw):
+        import io
+        self.tmp = args[args.index("-o") + 1]
+        with open(self.tmp, "wb") as fh:
+            fh.write(b"half a file")
+        self.returncode = self.exit_code
+        self.stdout = io.BytesIO(b"log")
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = 1
+
+    def wait(self):
+        return self.returncode
+
+
+def test_stop_during_update_leaves_no_temp_file(gf, monkeypatch, tmp_path):
+    path = str(tmp_path / "x-latest.osm.pbf")
+    with open(path, "wb") as fh:
+        fh.write(b"pbf")
+    monkeypatch.setattr(GEOFABRIK.subprocess, "Popen", FakeUpdate)
+    monkeypatch.setattr(GEOFABRIK.time, "sleep",
+                        lambda s: setattr(UI, "stop_requested", True))
+    with pytest.raises(GEOFABRIK.Stopped):
+        GEOFABRIK._update(path)
+    assert sorted(os.listdir(tmp_path)) == ["x-latest.osm.pbf"]
+    with open(path, "rb") as fh:
+        assert fh.read() == b"pbf"
+
+
+def test_failed_update_leaves_no_temp_file(gf, monkeypatch, tmp_path):
+    path = str(tmp_path / "x-latest.osm.pbf")
+    with open(path, "wb") as fh:
+        fh.write(b"pbf")
+    monkeypatch.setattr(FakeUpdate, "exit_code", 3)
+    monkeypatch.setattr(GEOFABRIK.subprocess, "Popen", FakeUpdate)
+    assert GEOFABRIK._update(path) is False
+    assert sorted(os.listdir(tmp_path)) == ["x-latest.osm.pbf"]
+    assert any("could not update" in line for line in gf)
+
+
+def test_ensure_file_removes_leftover_temp_files(gf, monkeypatch):
+    url = B + "europe/x-latest.osm.pbf"
+    path = GEOFABRIK.local_path(url)
+    os.makedirs(os.path.dirname(path))
+    for name in ("x-latest.osm.pbf", ".tmp12_34_x-latest.osm.pbf",
+                 ".tmp56_78_y-latest.osm.pbf"):
+        with open(os.path.join(os.path.dirname(path), name), "wb") as fh:
+            fh.write(b"pbf")
+    monkeypatch.setattr(GEOFABRIK, "_age_days", lambda p: 0.1)
+    assert GEOFABRIK.ensure_file(url) == path
+    assert sorted(os.listdir(os.path.dirname(path))) == [
+        ".tmp56_78_y-latest.osm.pbf", "x-latest.osm.pbf",
+        "x-latest.osm.pbf.lock"]
+
+
+def test_unreadable_extract_answer_goes_to_overpass(gf, monkeypatch):
+    statements = EXTRACT.layer_statements(1)["water"]
+    EXTRACT.write_answer(EXTRACT.answer_path(55, 12, "water"),
+                         EXTRACT.answer_xml(statements, "x", "2026", {}, {},
+                                            {}))
+
+    def half_read(self, content, *a):
+        self.dicosmn[1] = (12.5, 55.5)
+        return 0
+
+    monkeypatch.setattr(OSM.OSM_layer, "update_dicosm", half_read)
+    layer = OSM.OSM_layer()
+    assert not OSM._layer_from_extract(
+        VMAP.WATER_QUERIES, layer, 55, 12, {}, {}, "water",
+        FNAMES.osm_cached(55, 12, "water"))
+    assert layer.dicosmn == {}
+    assert any("could not be read" in line for line in gf)

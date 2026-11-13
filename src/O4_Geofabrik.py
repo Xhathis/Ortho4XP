@@ -138,14 +138,32 @@ def parse_index(text):
     return mark_containers(regions)
 
 
+def read_index(path):
+    """[Region] of an index file; GeofabrikError if it is not a valid index
+    (e.g. an HTML error page the server sent with HTTP 200)."""
+    from shapely.errors import ShapelyError
+    try:
+        with open(path, encoding="utf-8") as f:
+            return parse_index(f.read())
+    except (ValueError, KeyError, TypeError, AttributeError,
+            ShapelyError) as e:
+        # ValueError covers JSONDecodeError and UnicodeDecodeError.
+        raise GeofabrikError(f"{path} is not a valid Geofabrik index "
+                             f"({type(e).__name__}: {e})")
+
+
 def load_index(download=True):
-    """The regions of Geofabrik's index, fetched when missing or old."""
+    """The regions of Geofabrik's index, fetched when missing, old or
+    broken. A download is checked before it replaces the old file, so a
+    bad answer never stays for INDEX_MAX_AGE days."""
     path = index_path()
     old = (not os.path.isfile(path)
            or time.time() - os.path.getmtime(path) > INDEX_MAX_AGE * 86400)
+    fetched = False
     if old and download:
         try:
-            _download(INDEX_URL, path, md5=False)
+            _download(INDEX_URL, path, md5=False, check=read_index)
+            fetched = True
         except (OSError, GeofabrikError) as e:
             if not os.path.isfile(path):
                 raise GeofabrikError(f"no Geofabrik index ({e})")
@@ -154,8 +172,16 @@ def load_index(download=True):
         raise GeofabrikError(f"no Geofabrik index {path}")
     mtime = os.path.getmtime(path)
     if _index_cache.get(path, (None,))[0] != mtime:
-        with open(path, encoding="utf-8") as f:
-            _index_cache[path] = (mtime, parse_index(f.read()))
+        try:
+            regions = read_index(path)
+        except GeofabrikError as e:
+            if fetched or not download:
+                raise
+            # A broken file kept by an older version: fetch it again.
+            UI.vprint(1, f"    {e}; fetching it again.")
+            _download(INDEX_URL, path, md5=False, check=read_index)
+            (mtime, regions) = (os.path.getmtime(path), read_index(path))
+        _index_cache[path] = (mtime, regions)
     return _index_cache[path][1]
 
 
@@ -223,9 +249,20 @@ def _session():
     return s
 
 
-def _download(url, path, md5=True):
+def _md5_of(text, url):
+    """The checksum of a .md5 answer ("<32 hex digits>  name")."""
+    parts = text.split()
+    digest = parts[0].lower() if parts else ""
+    if len(digest) != 32 or any(c not in "0123456789abcdef" for c in digest):
+        raise GeofabrikError(f"{url}.md5: no checksum in the answer "
+                             f"({text[:60]!r})")
+    return digest
+
+
+def _download(url, path, md5=True, check=None):
     """Download url to path (temp name, os.replace). With md5, check the
-    file against Geofabrik's url.md5."""
+    file against Geofabrik's url.md5; check(temp path) may raise
+    GeofabrikError to refuse the file."""
     import requests
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = FNAMES.temp_path_for(path)
@@ -233,9 +270,9 @@ def _download(url, path, md5=True):
         with _session() as s:
             expected = None
             if md5:
-                r = s.get(url + ".md5", timeout=(30, 60))
-                r.raise_for_status()
-                expected = r.text.split()[0].lower()
+                with s.get(url + ".md5", timeout=(30, 60)) as r:
+                    r.raise_for_status()
+                    expected = _md5_of(r.text, url)
             with s.get(url, stream=True, timeout=(30, 120)) as r:
                 r.raise_for_status()
                 total = int(r.headers.get("Content-Length", 0))
@@ -252,6 +289,8 @@ def _download(url, path, md5=True):
                                       f"{total / 1e6:.0f} MB")
         if expected and h.hexdigest() != expected:
             raise GeofabrikError(f"{url}: MD5 mismatch (download cut?)")
+        if check:
+            check(tmp)
         os.replace(tmp, path)
     except requests.RequestException as e:
         raise GeofabrikError(f"{url}: {type(e).__name__}: {e}")
@@ -296,6 +335,7 @@ def _update(path):
              "-o", tmp, path],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env=UI.subprocess_env())
+        complete = False
         try:
             while proc.poll() is None:
                 if UI.stop_requested:
@@ -304,15 +344,17 @@ def _update(path):
                     raise Stopped()
                 time.sleep(0.5)
             out = proc.stdout.read().decode("utf-8", "replace")
+            complete = proc.returncode in (0, 1)
         finally:
             proc.stdout.close()
-            if proc.returncode not in (0, 1) and os.path.exists(tmp):
+            # Not on the exit code alone: on Windows a killed process
+            # exits 1, the code for "more changes to come" (Stop used to
+            # leave a temp file as big as the extract).
+            if not complete and os.path.exists(tmp):
                 os.remove(tmp)
-        if proc.returncode not in (0, 1):
+        if not complete:
             UI.lvprint(1, f"   WARNING: could not update {path} (exit "
                        f"{proc.returncode}): {out.strip()[-300:]}")
-            if os.path.exists(tmp):
-                os.remove(tmp)
             return False
         if os.path.exists(tmp):
             os.replace(tmp, path)
@@ -325,12 +367,30 @@ def _checked_path(path):
     return path + ".checked"
 
 
+def _remove_leftover_temps(path):
+    """Temp files of path (FNAMES.temp_path_for) that a killed run left.
+    Called under path's lock: no other process is writing one."""
+    (folder, name) = os.path.split(path)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for n in names:
+        if n.startswith(".tmp") and n.endswith("_" + name):
+            try:
+                os.remove(os.path.join(folder, n))
+                UI.vprint(1, f"    Removed the leftover temp file {n}.")
+            except OSError as e:
+                UI.vprint(1, f"    Could not remove {n} ({e}).")
+
+
 def ensure_file(url):
     """The local file for url: downloaded if missing, updated if older
     than geofabrik_max_age days. Locked against other processes."""
     path = local_path(url)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with _FileLock(path + ".lock"):
+        _remove_leftover_temps(path)
         if not os.path.isfile(path):
             UI.vprint(1, f"    Downloading {url}")
             start = time.time()
