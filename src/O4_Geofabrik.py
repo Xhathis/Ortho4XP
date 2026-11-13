@@ -22,8 +22,10 @@ answers Overpass would give; the build reads them as before, #100):
 
 Anything that fails here (no index, a download, an extraction gap) only
 logs: the layer then comes from Overpass as before. Layers already cached
-are never touched; keeping them current is the job of
-prepare_osm_extracts.py --check (compare_with_cache).
+are kept, unless osm_cache_max_age is set: a cached layer older than that
+many days is prepared again, and step 1 then prefers the newer answer to
+the cache (the cache stays in use when no answer comes). Without it,
+prepare_osm_extracts.py --check (compare_with_cache) shows what changed.
 """
 import bz2
 import datetime
@@ -43,6 +45,7 @@ import O4_UI_Utils as UI
 osm_source = "geofabrik"  # "geofabrik": Geofabrik, then Overpass; "overpass"
 geofabrik_dir = ""  # empty: OSM_data/Geofabrik
 geofabrik_max_age = 1.0  # days: older data is updated before it is read
+osm_cache_max_age = 0.0  # days: older cached layers are refreshed; 0 = never
 
 BASE_URL = "https://download.geofabrik.de/"
 INDEX_URL = BASE_URL + "index-v1.json"
@@ -460,9 +463,23 @@ class _FileLock:
 
 
 # --- what a tile needs ------------------------------------------------------------
+def cache_is_stale(path, now=None):
+    """A cached layer older than osm_cache_max_age days (file time: the
+    cache is written when its data is fetched)."""
+    if osm_cache_max_age <= 0:
+        return False
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return False
+    return ((now or time.time()) - mtime) / 86400 > osm_cache_max_age
+
+
 def needed_layers(lat, lon, road_level, force=False):
-    """{layer: statements} of the layers step 1 will ask Overpass for:
-    not cached, no extract answer, no custom coastline/water file."""
+    """{layer: statements} of the layers step 1 would otherwise ask
+    Overpass for or take from a stale cache: no extract answer, not cached
+    or cached longer than osm_cache_max_age, no custom coastline/water
+    file."""
     layers = EXTRACT.layer_statements(road_level)
     if os.path.isfile(FNAMES.custom_coastline(lat, lon)) or \
             os.path.isdir(FNAMES.custom_coastline_dir(lat, lon)):
@@ -472,9 +489,18 @@ def needed_layers(lat, lon, road_level, force=False):
         layers.pop("water")
     if force:
         return layers
-    return {layer: st for (layer, st) in layers.items()
-            if not os.path.isfile(FNAMES.osm_cached(lat, lon, layer))
-            and not os.path.isfile(EXTRACT.answer_path(lat, lon, layer))}
+    wanted = {}
+    for (layer, st) in layers.items():
+        if os.path.isfile(EXTRACT.answer_path(lat, lon, layer)):
+            continue
+        cache = FNAMES.osm_cached(lat, lon, layer)
+        if not os.path.isfile(cache) or cache_is_stale(cache):
+            wanted[layer] = st
+    return wanted
+
+
+def _cached(lat, lon, layer):
+    return os.path.isfile(FNAMES.osm_cached(lat, lon, layer))
 
 
 def _sea_answers(layers):
@@ -527,7 +553,12 @@ def prepare_tiles(wanted, write=True):
                 layers = {layer: len(c) for (layer, c) in layers.items()}
             done[(lat, lon)] = layers
 
-    keep({tile: _sea_answers(wanted[tile]) for tile in sea})
+    # A refresh never replaces a cache with an empty sea answer: the
+    # cache may hold an islet outside every region (Overpass had it).
+    keep({tile: _sea_answers({layer: st
+                              for (layer, st) in wanted[tile].items()
+                              if not _cached(*tile, layer)})
+          for tile in sea})
     for (urls, tiles) in group_tiles(plan):
         names = ", ".join(u.rsplit("/", 1)[-1] for u in urls)
         try:
@@ -558,14 +589,20 @@ def prepare_tiles(wanted, write=True):
     return (done, left)
 
 
-def _report(done, left):
+def _report(done, left, wanted):
+    done = [t for (t, layers) in done.items() if layers]
     if done:
         UI.lvprint(1, "    Geofabrik: OSM data prepared for "
                    + " ".join(FNAMES.short_latlon(*t) for t in sorted(done)))
     for (tile, reason) in sorted(left.items()):
-        UI.lvprint(1, f"    Geofabrik: no local OSM data for "
-                   f"{FNAMES.short_latlon(*tile)} ({reason}); Overpass will "
-                   "be asked.")
+        name = FNAMES.short_latlon(*tile)
+        if all(_cached(*tile, layer) for layer in wanted.get(tile, ())):
+            # Only stale caches were asked for: they stay in use.
+            UI.lvprint(1, f"    Geofabrik: OSM data of {name} not "
+                       f"refreshed ({reason}); its cached layers are used.")
+        else:
+            UI.lvprint(1, f"    Geofabrik: no local OSM data for {name} "
+                       f"({reason}); Overpass will be asked.")
 
 
 def prepare_tile(tile):
@@ -578,7 +615,8 @@ def prepare_tile(tile):
         return True
     UI.vprint(0, "-> Preparing OSM data from Geofabrik")
     try:
-        _report(*prepare_tiles({(tile.lat, tile.lon): wanted}))
+        wanted = {(tile.lat, tile.lon): wanted}
+        _report(*prepare_tiles(wanted), wanted)
     except Stopped:
         return False
     except (GeofabrikError, OSError) as e:
@@ -599,7 +637,7 @@ def prepare_batch(wanted):
               "tile(s).")
     start = time.time()
     try:
-        _report(*prepare_tiles(wanted))
+        _report(*prepare_tiles(wanted), wanted)
     except Stopped:
         UI.lvprint(0, "Batch stopped while preparing OSM data.")
         return False

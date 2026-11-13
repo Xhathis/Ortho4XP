@@ -2,6 +2,7 @@
 import bz2
 import hashlib
 import os
+import time
 
 import pytest
 
@@ -586,3 +587,153 @@ def test_unreadable_extract_answer_goes_to_overpass(gf, monkeypatch):
         FNAMES.osm_cached(55, 12, "water"))
     assert layer.dicosmn == {}
     assert any("could not be read" in line for line in gf)
+
+
+# --- refresh of old caches (osm_cache_max_age) -------------------------------------
+DAY = 86400
+
+
+def _old_cache(lat, lon, layer, days, layer_obj=None):
+    path = FNAMES.osm_cached(lat, lon, layer)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    assert (layer_obj or OSM.OSM_layer()).write_to_file(path)
+    t = time.time() - days * DAY
+    os.utime(path, (t, t))
+    return path
+
+
+def test_cache_is_stale(gf, monkeypatch):
+    path = _old_cache(55, 12, "water", 31)
+    assert not GEOFABRIK.cache_is_stale(path)  # 0: never
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    assert GEOFABRIK.cache_is_stale(path)
+    assert not GEOFABRIK.cache_is_stale(path, now=time.time() - 2 * DAY)
+    assert not GEOFABRIK.cache_is_stale(path + ".missing")
+
+
+def test_needed_layers_takes_stale_caches(gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    for layer in ("coastline", "airports", "big_roads"):
+        _old_cache(55, 12, layer, 1)
+    _old_cache(55, 12, "water", 40)
+    assert set(GEOFABRIK.needed_layers(55, 12, 1)) == {"water"}
+    # An answer already prepared for it: not again.
+    open(EXTRACT.answer_path(55, 12, "water"), "wb").close()
+    assert GEOFABRIK.needed_layers(55, 12, 1) == {}
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 0.0)
+    os.remove(EXTRACT.answer_path(55, 12, "water"))
+    assert GEOFABRIK.needed_layers(55, 12, 1) == {}
+
+
+def _all_cached(days, water_days=None):
+    for layer in ("coastline", "airports", "big_roads"):
+        _old_cache(55, 12, layer, days)
+    return _old_cache(55, 12, "water", water_days or days)
+
+
+def test_stale_cache_is_refreshed(fake_files, gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    cache = _all_cached(1, water_days=40)
+    assert GEOFABRIK.prepare_tile(FakeTile(55, 12))
+    assert fake_files == [B + "europe/denmark-latest.osm.pbf"]
+    assert os.path.isfile(EXTRACT.answer_path(55, 12, "water"))
+    assert not os.path.exists(EXTRACT.answer_path(55, 12, "airports"))
+    # Step 1 prefers the newer answer to the old (empty) cache.
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+    assert len(layer.dicosmw) == 1
+    assert not os.path.exists(EXTRACT.answer_path(55, 12, "water"))
+    assert time.time() - os.path.getmtime(cache) < 600
+    reread = OSM.OSM_layer()
+    assert reread.update_dicosm(cache, {}, {}) and len(reread.dicosmw) == 1
+    assert any("water layer of +55+012 was 40 days old, refreshed" in line
+               for line in gf)
+    # Fresh now: nothing to prepare next time.
+    assert GEOFABRIK.needed_layers(55, 12, 1) == {}
+
+
+def test_refresh_failure_keeps_the_cache(fake_files, gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    cache = _all_cached(40)
+    before = open(cache, "rb").read()
+
+    def broken(url):
+        raise GEOFABRIK.GeofabrikError("HTTPError: 503")
+    monkeypatch.setattr(GEOFABRIK, "ensure_file", broken)
+    assert GEOFABRIK.prepare_tile(FakeTile(55, 12))
+    assert any("+55+012 not refreshed" in line and "cached layers are used"
+               in line for line in gf)
+    assert not any("Overpass will be asked" in line for line in gf)
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+    assert open(cache, "rb").read() == before
+
+
+def test_unusable_refresh_answer_keeps_the_cache(gf, monkeypatch):
+    cache = _old_cache(55, 12, "water", 40)
+    before = open(cache, "rb").read()
+    # Made for other queries (as after a road_level change).
+    EXTRACT.write_answer(EXTRACT.answer_path(55, 12, "water"),
+                         EXTRACT.answer_xml(["way[x=y]"], "x", "2026",
+                                            {}, {}, {}))
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+    assert open(cache, "rb").read() == before
+    assert any("keeping the cached layer" in line for line in gf)
+
+
+def test_answer_older_than_the_cache_is_not_used(fake_files, gf):
+    assert GEOFABRIK.prepare_tile(FakeTile(55, 12))
+    answer = EXTRACT.answer_path(55, 12, "water")
+    t = time.time() - 2 * DAY
+    os.utime(answer, (t, t))
+    cache = _old_cache(55, 12, "water", 1)
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+    assert layer.dicosmw == {}
+    assert os.path.isfile(answer)
+    assert not any("refreshed" in line for line in gf)
+    assert os.path.getmtime(cache) < time.time() - DAY / 2
+
+
+def test_sea_refresh_never_empties_a_cache(fake_files, gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    _old_cache(-40, -30, "coastline", 40)
+    assert GEOFABRIK.prepare_tile(FakeTile(-40, -30))
+    assert not os.path.exists(EXTRACT.answer_path(-40, -30, "coastline"))
+    assert os.path.isfile(EXTRACT.answer_path(-40, -30, "water"))
+
+
+def test_cache_write_is_atomic(gf, monkeypatch):
+    layer = OSM.OSM_layer()
+    layer.dicosmn[1] = (12.5, 55.5)
+    cache = _old_cache(55, 12, "water", 1, layer)
+    before = open(cache, "rb").read()
+    folder = os.path.dirname(cache)
+
+    def cut(self, fout):
+        fout.write("<?xml")
+        raise RuntimeError("killed")
+    monkeypatch.setattr(OSM.OSM_layer, "_write", cut)
+    with pytest.raises(RuntimeError):
+        OSM.OSM_layer().write_to_file(cache)
+
+    def full(self, fout):
+        fout.write("<?xml")
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(OSM.OSM_layer, "_write", full)
+    assert OSM.OSM_layer().write_to_file(cache) == 0
+    assert open(cache, "rb").read() == before
+    assert sorted(os.listdir(folder)) == [os.path.basename(cache)]
+    assert any("could not write" in line for line in gf)
+
+
+def test_osm_cache_max_age_setting():
+    import O4_Cfg_Vars as VARS
+    assert VARS.cfg_vars["osm_cache_max_age"]["default"] == 0.0
+    assert "osm_cache_max_age" in VARS.gui_app_vars_short
+    assert GEOFABRIK.osm_cache_max_age == 0.0
