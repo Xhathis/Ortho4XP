@@ -16728,6 +16728,14 @@ int main(int argc, char **argv)
 		enforcequality(&m,
 			       &b); /* Enforce angle and area constraints. */
 	}
+	/* Ortho4XP: report what is left of the -S budget, also with -Q.
+	 * 0 means the refinement stopped at the cap. The final vertex count
+	 * cannot tell: Chew's refinement deletes free vertices from the
+	 * diametral circle of a segment it splits (splitencsegs), and their
+	 * budget is spent for good. */
+	if (b.steiner >= 0) {
+		printf("Steiner points left: %d\n", m.steinerleft);
+	}
 #endif /* not CDT_ONLY */
 
 #ifndef NO_TIMER
