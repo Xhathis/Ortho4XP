@@ -688,6 +688,9 @@ Test results:
   afterwards. Answers prepared into the user's OSM_data for the 32
   leftover tiles that lack layers, except -08+072 (Diego Garcia: only
   asia covers it) and +07+072/+07+073 (need india/southern-zone).
+  `test` @ 0d70495 (#99 + #100): 493 unit tests, pyflakes 0,
+  regression PASS (DSF, 17/17 masks, app log identical), sims_in_ws
+  all 15/15.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
