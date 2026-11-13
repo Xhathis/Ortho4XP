@@ -1734,14 +1734,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     test lint cleaned, 2026-11-11.
 22. ~~#99~~ — on `dev` since 2026-11-13.
 23. ~~#100~~ — local OSM extracts; on `dev` since 2026-11-13.
-24. #101 — Geofabrik first; on `test`, to `dev` with the user's OK.
+24. ~~#101~~ — Geofabrik first; on `dev` since 2026-11-13.
     Not done: `out` instead of `out meta` for Overpass.
-25. #102, #103, #75 — fourth review, 2026-11-13; on `test`.
+25. ~~#102, #103, #75~~ — fourth review; `dev` fast-forwarded to
+    8708c90 and pushed on 2026-11-13, the three fix branches and
+    worktrees removed. Not run on it: gui_smoke, test_parallel_batch
+    (last on #101 / #82), the Linux/macOS Triangle4XP (not rebuilt:
+    no "Steiner points left" line, the count test stays there).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
-    baseline). Noted, not changed: build_mesh's inline water
-    smoothing depends on set order (see the #73 result); making it
-    order-independent would change every tile with inland water.
+    baseline). The inline water smoothing's dependence on set order
+    (see the #73 result) was fixed later by #103.
 
 ## Coding style
 
