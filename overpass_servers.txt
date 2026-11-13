@@ -4,11 +4,17 @@
 #
 # With overpass_server_choice = DE (Ortho4XP.cfg) a request goes to DE
 # twice, then once to each other server, in this order (#83).
+# Since #101 Overpass is only the backup: step 1 takes OSM data from
+# Geofabrik's extracts first (osm_source in Ortho4XP.cfg).
 # FR has the whole planet and answers fast, but its data may lag weeks
 # behind (2026-11-11: data of 2026-10-10): a fallback, not a first choice.
-# overpass.private.coffee (KU) and overpass.kumi.systems timed out on every
-# request in November 2026; mail.ru, openstreetmap.ru and osm.jp did not
-# answer; osm.ch only has Switzerland.
+# Since 2026-11-13 FR answers HTTP 403 ("only available to white-listed
+# usages"), counted as a dead server.
+# Checked again 2026-11-13: overpass.kumi.systems and
+# overpass.private.coffee are one server; it answers, but took 80-115 s
+# for a one-node query and its data was of 2026-05-31 (5.5 months old):
+# not used. maps.mail.ru gave HTTP 504, osm.jp no connection,
+# openstreetmap.ru did not answer (11-11); osm.ch only has Switzerland.
 
 DE = https://overpass-api.de/api/interpreter
 FR = https://overpass.openstreetmap.fr/api/interpreter

@@ -831,7 +831,7 @@ def _server_order(server_keys, shuffle=True) -> list:
     return keys
 
 
-# Kinds of failed requests (#83). DOWN: no connection, HTTP 429/5xx - the
+# Kinds of failed requests (#83). DOWN: no connection, HTTP 401/403/429/5xx - the
 # server is unavailable, a smaller request would fail the same way. TIMEOUT:
 # connected but no answer in time - overloaded, or the request was too big.
 # SIZE: the server answered that it could not do the request (a <remark>,
@@ -1073,7 +1073,10 @@ def _overpass_request(session, key, url, timeout):
                 retry_after = 0
             return (0, DOWN, "HTTP 429",
                     max(retry_after, overpass_rate_limit_wait))
-        kind = DOWN if r.status_code >= 500 else SIZE
+        # 401/403: the server refuses us (FR since 2026-11: "only available
+        # to white-listed usages"); a smaller request is refused the same.
+        refused = r.status_code >= 500 or r.status_code in (401, 403)
+        kind = DOWN if refused else SIZE
         return (0, kind, f"HTTP {r.status_code}", 0)
     if b"</osm>" not in r.content[-10:] and b"</OSM>" not in r.content[-10:]:
         UI.vprint(1, f"      OSM server {key} sent a cut answer (no </osm>)")
