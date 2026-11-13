@@ -660,10 +660,34 @@ Test results:
   4 new tests (3 fail on dev, the layer one with the batch's KeyError),
   469 pass, pyflakes 0; real request: FR's water answer for +02+072
   rejected naming node 29171402 (the batch's), no per-query fallback.
-  `test` @ fb8c19f: 469 unit tests. Not run while the batch runs (one
-  build at a time): regression (reads only cached OSM, so it cannot
-  reach this code; expected PASS) and sims_in_ws. Not on `dev` yet: the
-  batch starts every worker from G:\Ortho4XP.
+  `test` @ fb8c19f: 469 unit tests. After the batch, `test` @ 46e0393:
+  regression PASS (DSF, 17/17 masks, app log identical), sims_in_ws
+  all 15/15. → `dev` fast-forwarded to 46e0393 (not pushed).
+- The 455-tile batch was killed by the user on 2026-11-13 ~07:07 (396
+  built; 58 left in .last_batch_tiles.txt, 32 of them missing OSM
+  layers). Cause: overpass-api.de dropped every TCP connection from
+  the user's home IP (the same server answered the user's phone, "2/2
+  slots available": a block of this IP, not an outage), and FR
+  answered HTTP 403 ("white-listed usages" only). The batch ended
+  without its cleanup, so all 396 meshes (142 GB) are still in Tiles
+  (the user deletes them, or a later batch over the same tiles does).
+- #100 `fix/local-osm-extracts` @ 9212bb9 (from dev 07a3f65), 2026-11-13:
+  24 new unit tests (489 pass), pyflakes 0 (incl. prepare_osm_extracts.py).
+  pyosmium 4.3.2 installed in the venv (user's OK). Geofabrik files in
+  F:\Ortho4XP_data\OSM_extracts (11 files, 6.7 GB, MD5 checked, +
+  index-v1.json). compare_extract.py (answers and caches in a scratch
+  folder, ways by tags and coordinates against the user's caches):
+  +68+016 (Norway, DE caches of 11-09) all 5 layers identical, the
+  decompressed cache files byte-identical; +28-016 (Gran Canaria, FR
+  caches with data of ~10-20) differs only by OSM edits since then.
+  Norway alone: 343 s, peak 4.6 GB (the first version, all files in
+  one MergeInputReader with a Python callback per node, reached 42 GB).
+  sim_extract_step1.py 9212bb9 28 -18 (La Palma; Overpass replaced by a
+  function that raises): build_poly_file 1, 0 Overpass calls, the 3
+  answered layers read from the extract and cached; worktree clean
+  afterwards. Answers prepared into the user's OSM_data for the 32
+  leftover tiles that lack layers, except -08+072 (Diego Garcia: only
+  asia covers it) and +07+072/+07+073 (need india/southern-zone).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1385,6 +1409,33 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     server, no per-query fallback; all servers BROKEN = Overpass layer
     failure (overpass_gave_up), so batches retry the tile. Cached and
     custom OSM files are not checked (written by Ortho4XP or the user).
+100. **DONE** (`c0f727e`, `9212bb9`, new tool, needs pyosmium): OSM
+    layers from local Geofabrik extracts when Overpass blocks the IP
+    (2026-11-13, see the 455-tile batch above).
+    `prepare_osm_extracts.py FILE.osm.pbf ... --tiles ... | --tile-file
+    .last_batch_tiles.txt [--road-level N --force --dry-run --index F
+    --no-coverage]` writes, per tile and layer not yet cached, the
+    answer Overpass would give ((stmts)(bbox);(._;>>;);out meta;: a way
+    with any segment touching the tile, a relation with any member
+    there, completed downwards, sorted by id, Overpass's escaping) to
+    OSM_data/<10x10>/<tile>/<tile>_<layer>.extract.osm.bz2. Before asking
+    Overpass, OSM_queries_to_OSM_layer reads such an answer through the
+    same update_dicosm/write_to_file, so the cache is the same bytes a
+    download of that data gives (unit test for all 5 layers); the log
+    line names the file, the old-data NOTE (#83) applies with source
+    "local extract". An answer made for other queries (road_level
+    changed), cut or unreadable is not used (WARNING, Overpass as
+    before). The #81 gate counts an answer as cached. road_level of
+    each tile from its tile config, else the global cfg.
+    Coverage: from Geofabrik's index-v1.json; a tile reaching into a
+    region whose file is not given is skipped with the regions that
+    would fill it; a gap only continents fill (sea beyond a country
+    file) is a NOTE, unless the tile then has no data at all (its land
+    may be in the gap). A tile whose ways or relations need nodes or
+    member ways outside the files gets no answer (FAIL). The files are
+    read one at a time in 6 filtered passes (pyosmium KeyFilter/IdFilter
+    in C++, sparse_mem_array node locations); memory follows the tiles'
+    data. O4_OSM_Extract.py holds the rules.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1493,8 +1544,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (#93; from fix/small-hygiene), fix/airport-dead-block (#94-#96).
 21. ~~#97, #98~~ — the leftover custom_dem worktree finished and the
     test lint cleaned, 2026-11-11.
-22. #99 — on `test`; to `dev` after the 455-tile batch, with a
-    regression and sims_in_ws run first.
+22. ~~#99~~ — on `dev` since 2026-11-13.
+23. #100 — local OSM extracts; on `test`, to `dev` with the user's OK.
+    Not done: classify Overpass HTTP 403 as refused (now SIZE, so a
+    per-query fallback follows), `out` instead of `out meta`.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
