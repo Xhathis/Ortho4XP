@@ -426,6 +426,23 @@ def test_compare_with_cache(fake_files, gf, tmp_path):
 
 
 # --- robustness (2026-11-13 review) ------------------------------------------------
+def test_group_tiles_reads_a_shared_file_once(monkeypatch):
+    (n, s, f) = ("norway", "sweden", "finland")
+    plan = {(60, 11): frozenset({n, s}), (69, 25): frozenset({n, f}),
+            (66, 22): frozenset({s, f}), (59, 9): frozenset({n})}
+    assert GEOFABRIK.group_tiles(plan) == [
+        ([f, n, s], [(59, 9), (60, 11), (66, 22), (69, 25)])]
+    # Above the cap groups that only share a file stay apart (borders
+    # chain whole continents); a subset still joins as before.
+    monkeypatch.setattr(GEOFABRIK, "MAX_MERGED_TILES", 2)
+    (a, b, c, d) = ("a", "b", "c", "d")
+    plan = {(1, 1): frozenset({a, b}), (1, 2): frozenset({b, c}),
+            (1, 3): frozenset({c, d}), (1, 4): frozenset({c})}
+    assert GEOFABRIK.group_tiles(plan) == [
+        ([a, b], [(1, 1)]), ([b, c], [(1, 2), (1, 4)]), ([c, d], [(1, 3)])]
+    monkeypatch.setattr(GEOFABRIK, "MAX_MERGED_TILES", 3)
+    assert GEOFABRIK.group_tiles(plan) == [
+        ([a, b, c], [(1, 1), (1, 2), (1, 4)]), ([c, d], [(1, 3)])]
 
 
 INDEX = ('{"features": [{"type": "Feature", "properties": {"id": "dk", '
@@ -539,6 +556,17 @@ def test_ensure_file_removes_leftover_temp_files(gf, monkeypatch):
     assert sorted(os.listdir(os.path.dirname(path))) == [
         ".tmp56_78_y-latest.osm.pbf", "x-latest.osm.pbf",
         "x-latest.osm.pbf.lock"]
+
+
+def test_prepare_tiles_writes_each_group_at_once(fake_files, gf):
+    statements = EXTRACT.layer_statements(1)["water"]
+    (done, left) = GEOFABRIK.prepare_tiles({(55, 12): {"water": statements}})
+    assert left == {}
+    size = done[(55, 12)]["water"]
+    assert isinstance(size, int) and size > 0
+    path = EXTRACT.answer_path(55, 12, "water")
+    with bz2.open(path, "rb") as fh:
+        assert len(fh.read()) == size
 
 
 def test_unreadable_extract_answer_goes_to_overpass(gf, monkeypatch):

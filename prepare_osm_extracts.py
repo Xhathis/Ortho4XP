@@ -234,7 +234,7 @@ def prepare_auto(tiles, opts):
         return 1
     for ((lat, lon), layers) in sorted(done.items()):
         print(f"OK   {FNAMES.short_latlon(lat, lon)}: "
-              + ", ".join(f"{k} {len(v) / 1e6:.1f} MB"
+              + ", ".join(f"{k} {v / 1e6:.1f} MB"
                           for (k, v) in layers.items()))
     for ((lat, lon), reason) in sorted(left.items()):
         print(f"FAIL {FNAMES.short_latlon(lat, lon)}: {reason}")

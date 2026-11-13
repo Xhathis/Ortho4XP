@@ -50,6 +50,9 @@ INDEX_MAX_AGE = 30  # days
 UPDATE_RUNS = 30  # pyosmium-up-to-date runs of up to 1 GB of changes each
 UPDATE_RECHECK = 3600  # s: an update that found nothing waits this long
 CHUNK = 1 << 22
+# group_tiles: groups that share a file are read as one up to this many
+# tiles (a group that is bigger on its own is never split).
+MAX_MERGED_TILES = 16
 # Set while a batch runs after it prepared its tiles (prepare_batch): step 1
 # of those tiles does not try again (a parallel worker gets it through the
 # batch context).
@@ -229,15 +232,31 @@ def choose_regions(lat, lon, regions):
 def group_tiles(plan):
     """[(urls, tiles)] from plan {tile: frozenset(urls)}: tiles needing the
     same files share one read, and a tile whose files are a subset of a
-    bigger group's joins that group (an extra file costs only its read)."""
+    bigger group's joins that group (an extra file costs only its read).
+    Then groups that share a file are read together (norway for the tiles
+    on the Swedish and on the Finnish border was read twice, ~6 min each)
+    while the merged group stays within MAX_MERGED_TILES: the extraction
+    holds the data of all tiles of a group at once (up to ~1 GB for a
+    dense tile), and borders chain whole continents. So no group is
+    bigger than without the merging, or than MAX_MERGED_TILES."""
     groups = {}
     for (tile, urls) in plan.items():
         groups.setdefault(urls, []).append(tile)
     merged = {}
-    for urls in sorted(groups, key=len, reverse=True):
+    for urls in sorted(groups, key=lambda u: (-len(u), sorted(u))):
         home = next((u for u in merged if urls <= u), None)
         merged.setdefault(home or urls, []).extend(groups[urls])
-    return [(sorted(urls), sorted(tiles)) for (urls, tiles) in merged.items()]
+    out = []  # [[set of urls, [tiles]]]
+    for urls in sorted(merged, key=lambda u: (len(merged[u]), sorted(u))):
+        tiles = merged[urls]
+        home = next((g for g in out if urls & g[0] and len(g[1]) + len(tiles)
+                     <= MAX_MERGED_TILES), None)
+        if home:
+            home[0].update(urls)
+            home[1].extend(tiles)
+        else:
+            out.append([set(urls), list(tiles)])
+    return sorted((sorted(u), sorted(t)) for (u, t) in out)
 
 
 # --- files: download and update --------------------------------------------------
@@ -486,18 +505,29 @@ def plan_tiles(wanted, regions):
 def prepare_tiles(wanted, write=True):
     """Prepare answers for wanted {(lat, lon): {layer: statements}}.
 
-    Returns ({tile: {layer: bytes}} of the answers, {tile: reason} of the
-    tiles left to Overpass). With write, the answers are stored where
-    step 1 reads them. Raises Stopped on Stop, GeofabrikError when the
-    index cannot be had.
+    Returns ({tile: {layer: answer}}, {tile: reason} of the tiles left to
+    Overpass). With write, the answers are stored where step 1 reads them
+    as soon as their group is read, and answer is the answer's size in
+    bytes (a batch's answers would not fit in memory together); without,
+    answer is the content. Raises Stopped on Stop, GeofabrikError when
+    the index cannot be had.
     """
     if not wanted:
         return ({}, {})
     regions = load_index()
     (plan, left, sea) = plan_tiles(wanted, regions)
     done = {}
-    for tile in sea:
-        done[tile] = _sea_answers(wanted[tile])
+
+    def keep(answers):
+        for ((lat, lon), layers) in answers.items():
+            if write:
+                for (layer, content) in layers.items():
+                    EXTRACT.write_answer(EXTRACT.answer_path(lat, lon, layer),
+                                         content)
+                layers = {layer: len(c) for (layer, c) in layers.items()}
+            done[(lat, lon)] = layers
+
+    keep({tile: _sea_answers(wanted[tile]) for tile in sea})
     for (urls, tiles) in group_tiles(plan):
         names = ", ".join(u.rsplit("/", 1)[-1] for u in urls)
         try:
@@ -522,13 +552,9 @@ def prepare_tiles(wanted, write=True):
                 left[tile] = f"reading {names} failed ({e})"
             continue
         UI.vprint(1, f"    {names}: {time.time() - start:.0f} s")
-        done.update(answers)
+        keep(answers)
+        del answers
         left.update(failed)
-    if write:
-        for ((lat, lon), layers) in done.items():
-            for (layer, content) in layers.items():
-                EXTRACT.write_answer(EXTRACT.answer_path(lat, lon, layer),
-                                     content)
     return (done, left)
 
 
