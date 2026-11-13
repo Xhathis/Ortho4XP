@@ -690,7 +690,41 @@ Test results:
   asia covers it) and +07+072/+07+073 (need india/southern-zone).
   `test` @ 0d70495 (#99 + #100): 493 unit tests, pyflakes 0,
   regression PASS (DSF, 17/17 masks, app log identical), sims_in_ws
-  all 15/15.
+  all 15/15. → `dev` fast-forwarded to f2d3362 on 2026-11-13 (not
+  pushed).
+- Overpass servers checked 2026-11-13 from this PC (small aeroway query
+  on Copenhagen): DE no TCP connection (IP block, see above), FR HTTP
+  403 "only available to white-listed usages", overpass.kumi.systems =
+  overpass.private.coffee (one server) answers a one-node query in
+  80-115 s with data of 2026-05-31 (not usable), maps.mail.ru 504,
+  osm.jp no connection, osm.ch Switzerland only.
+- #101 `fix/geofabrik-auto` @ f2cb7d3 (6bb73cd: 403; from dev f2d3362),
+  2026-11-13: 28 new unit tests (521 pass; the 2 new 403/401 cases fail
+  on dev), pyflakes 0. The user's 10 extracts moved (rename on F:) from
+  F:\Ortho4XP_data\OSM_extracts into OSM_data\Geofabrik with Geofabrik's
+  folder layout. Real runs: region choice for 14 tiles (provinces for
+  +52+004, NJ/NY/CT for +40-074, oberbayern/austria/nord-est for
+  +47+011, nord-norge for +68+016, -08+072 to Overpass); --check of
+  +52+004 downloaded the 3 Dutch provinces (503 MB, 62 s, MD5 ok), read
+  them in 39 s and gave the same differences as the whole netherlands
+  file (so the provinces hold that tile's data); vs the caches of 11-09
+  and 11-11 (FR, October data) airports -453 +446 ways, 445 of them the
+  same geometry with surface concrete -> asphalt (Schiphol mass edit):
+  real edits. Update: a scratch copy of maldives with its header set 2
+  days back got Geofabrik's 2 daily diffs through ensure_file in 1.1 s
+  (header 2026-11-12 21:23, sequence 4053); a second call within the
+  hour did not update. `sim_geofabrik_step1.py 46e0393 28 -18 --overlay
+  G:\Ortho4XP_wt\geofabrik-auto` (new; regression worktree, no OSM data
+  for the tile, Overpass and downloads raise, the user's Geofabrik
+  folder read only): build_poly_file 1, all 5 layers read from the
+  canary-islands extract and cached. gui_smoke against the branch's src
+  7/7 (config window with the new settings; the user's
+  .last_gui_params.txt, log and cfg unchanged). sim_osm_failure now
+  stubs GEOFABRIK.prepare_tile, cache_roundtrip sets osm_source
+  overpass (both are about Overpass). `test` @ b515416: 521 unit tests,
+  regression PASS (DSF, 17/17 masks, app log identical, nothing
+  downloaded: every layer of the tile is cached), sims_in_ws all 15/15
+  (no Geofabrik download in any of them).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1439,6 +1473,44 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     read one at a time in 6 filtered passes (pyosmium KeyFilter/IdFilter
     in C++, sparse_mem_array node locations); memory follows the tiles'
     data. O4_OSM_Extract.py holds the rules.
+101. **DONE** (`6bb73cd`, `f2cb7d3`; new app settings): Geofabrik first,
+    Overpass as backup. osm_source = geofabrik (default) | overpass;
+    geofabrik_dir (empty = OSM_data\Geofabrik, so on F: here);
+    geofabrik_max_age 1.0 days. O4_Geofabrik:
+    - build_poly_file calls prepare_tile before the sea check: the
+      layers step 1 would ask Overpass for (not cached, no answer, no
+      custom coastline/water; needed_layers) are prepared from the
+      extracts; False only on Stop. build_tile_list (do_osm) runs
+      prepare_batch for all its tiles first (road_level from each tile
+      config, read into a copy of the GUI's tile) and sets
+      batch_prepared, so the batch's step 1 and its workers
+      (batch_context.json "geofabrik_prepared") do not try again.
+    - Regions: index-v1.json in geofabrik_dir (fetched when missing or
+      30 days old; invalid outlines make_valid'ed). choose_regions:
+      greedy cover of the part of the tile inside regions that hold no
+      other region (mark_containers: netherlands holds its provinces,
+      us-northeast the states, alps/dach countries; the index's parent
+      field misses composites), by covered area per region area, then
+      redundant picks dropped. A container's or continent's extra area
+      is sea. No region at all: open sea, empty answers written (the
+      #41 check then skips the tile). Only continents: Overpass.
+      group_tiles: tiles needing the same files (or a subset) share one
+      read.
+    - ensure_file: download once (MD5, temp name, file lock against
+      other processes) to geofabrik_dir/<server path>; data older than
+      geofabrik_max_age -> pyosmium-up-to-date (subprocess, -o temp,
+      --size 1024, rerun while exit 1), a .checked marker stops
+      re-asking within an hour when Geofabrik has nothing newer. Any
+      failure (no index, download, update, extraction gap) is logged
+      and the layer goes to Overpass as before.
+    - A used extract answer is removed once its cache is written.
+    - prepare_osm_extracts.py without files: the same for a tile list
+      (--dry-run lists files per tile); --check: compare cached layers
+      with the extracts now (way keys by tags and coordinates), the
+      caches are never replaced (delete a layer and rebuild).
+    Memory: ~3.5 x the largest file read (Norway 1.4 GB: 4.6 GB).
+    Overpass: HTTP 401/403 now DOWN (FR's 403 caused per-query
+    fallbacks), see the server check above.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1548,9 +1620,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 21. ~~#97, #98~~ — the leftover custom_dem worktree finished and the
     test lint cleaned, 2026-11-11.
 22. ~~#99~~ — on `dev` since 2026-11-13.
-23. #100 — local OSM extracts; on `test`, to `dev` with the user's OK.
-    Not done: classify Overpass HTTP 403 as refused (now SIZE, so a
-    per-query fallback follows), `out` instead of `out meta`.
+23. ~~#100~~ — local OSM extracts; on `dev` since 2026-11-13.
+24. #101 — Geofabrik first; on `test`, to `dev` with the user's OK.
+    Not done: `out` instead of `out meta` for Overpass.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
