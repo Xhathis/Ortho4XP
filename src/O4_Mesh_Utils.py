@@ -700,23 +700,8 @@ def build_mesh(tile):
     tile.dem = None
     UI.vprint(1, "-> Start of the mesh algorithm Triangle4XP.")
     UI.vprint(2, "   Mesh command:", " ".join(mesh_cmd))
-    fingers_crossed = subprocess.Popen(
-        mesh_cmd, stdout=subprocess.PIPE, bufsize=0, env=UI.subprocess_env()
-    )
-    while True:
-        line = fingers_crossed.stdout.readline()
-        if not line:
-            break
-        else:
-            try:
-                print(line.decode("utf-8")[:-1])
-            except (UnicodeDecodeError, OSError):
-                pass
-    # wait(), not poll(): an exit code of None (process not finished yet)
-    # would count as success and the mesh would be read half-written.
-    fingers_crossed.stdout.close()  # read to its end; close the pipe
-    fingers_crossed.wait()
-    if fingers_crossed.returncode:
+    (returncode, steiner_left) = _run_triangle4xp(mesh_cmd)
+    if returncode:
         min_angles = [8, 6, 4, 2, 0]
         for min_angle in min_angles:
             if tile.min_angle <= min_angle:
@@ -728,7 +713,7 @@ def build_mesh(tile):
                 0,
                 "WARNING: Triangle4XP failed for tile",
                 FNAMES.short_latlon(tile.lat, tile.lon), "(",
-                _tool_failure(fingers_crossed.returncode), ").",
+                _tool_failure(returncode), ").",
                 f"Reattempting with a lower angle constraint (min_angle={min_angle}).",
             )
             Tri_option = (
@@ -741,21 +726,8 @@ def build_mesh(tile):
                 + limit_tris
             )
             mesh_cmd[1] = Tri_option
-            fingers_crossed = subprocess.Popen(
-                mesh_cmd, stdout=subprocess.PIPE, bufsize=0, env=UI.subprocess_env()
-            )
-            while True:
-                line = fingers_crossed.stdout.readline()
-                if not line:
-                    break
-                else:
-                    try:
-                        print(line.decode("utf-8")[:-1])
-                    except (UnicodeDecodeError, OSError):
-                        pass
-            fingers_crossed.stdout.close()  # read to its end; close the pipe
-            fingers_crossed.wait()
-            if fingers_crossed.returncode == 0:
+            (returncode, steiner_left) = _run_triangle4xp(mesh_cmd)
+            if returncode == 0:
                 break
         else:
             UI.exit_message_and_bottom_line(
@@ -779,16 +751,18 @@ def build_mesh(tile):
         UI.exit_message_and_bottom_line()
         return 0
 
-    if steiner_cap_reached(len(vertices) // 6, input_nodes, max_steiner):
-        # Triangle4XP stops inserting points at the -S cap without a word:
-        # the refinement is then cut short wherever it had not got to yet,
-        # so parts of the tile are coarser than curvature_tol asks.
+    if steiner_cap_reached(steiner_left, len(vertices) // 6, input_nodes,
+                           max_steiner):
+        # The refinement takes the worst triangles first, so at the cap
+        # the budget went where the terrain needs it most; the rest of the
+        # tile is coarser than curvature_tol asks. Meant as a budget with a
+        # low curvature_tol, hence a NOTE, not a WARNING (logged: in a
+        # parallel batch the console is the worker's tmp log).
         UI.lvprint(
-            0, "WARNING: Triangle4XP stopped refining tile",
+            1, "NOTE: Triangle4XP used the whole limit_tris budget of tile",
             FNAMES.short_latlon(tile.lat, tile.lon),
-            f"at the limit_tris cap ({tile.limit_tris} M triangles):",
-            "parts of the mesh are coarser than curvature_tol asks.",
-            "Raise limit_tris or curvature_tol for this tile.",
+            f"({tile.limit_tris} M triangles): parts of the mesh are",
+            f"coarser than curvature_tol {tile.curvature_tol} asks.",
         )
 
     write_mesh_file(tile, vertices)
@@ -920,13 +894,62 @@ def triangulate(name, path_to_Ortho4XP_dir):
 
 
 ##############################################################################
-def steiner_cap_reached(final_vertices, input_vertices, max_steiner):
+STEINER_LEFT = "Steiner points left:"
+
+
+def _run_triangle4xp(mesh_cmd):
+    """Run Triangle4XP, echo its output; (exit code, Steiner points left or
+    None when the exe does not report them)."""
+    steiner_left = None
+    proc = subprocess.Popen(
+        mesh_cmd, stdout=subprocess.PIPE, bufsize=0, env=UI.subprocess_env()
+    )
+    while True:
+        line = proc.stdout.readline()
+        if not line:
+            break
+        try:
+            text = line.decode("utf-8")[:-1]
+        except UnicodeDecodeError:
+            continue
+        left = parse_steiner_left(text)
+        if left is not None:
+            steiner_left = left
+        try:
+            print(text)
+        except OSError:
+            pass
+    # wait(), not poll(): an exit code of None (process not finished yet)
+    # would count as success and the mesh would be read half-written.
+    proc.stdout.close()  # read to its end; close the pipe
+    proc.wait()
+    return (proc.returncode, steiner_left)
+
+
+def parse_steiner_left(line):
+    """N of Triangle4XP's "Steiner points left: N" line, else None."""
+    if not line.strip().startswith(STEINER_LEFT):
+        return None
+    try:
+        return int(line.strip()[len(STEINER_LEFT):])
+    except ValueError:
+        return None
+
+
+def steiner_cap_reached(steiner_left, final_vertices, input_vertices,
+                        max_steiner):
     """True when Triangle4XP used up its -S budget of Steiner points.
 
-    Triangle adds exactly int(S) points when the cap stops it (checked with
-    the bundled triangle.exe); duplicate input vertices it drops make the
-    count a little lower, hence the 0.1 % slack.
+    The Triangle4XP.exe bundled for Windows reports what is left (0 = the
+    cap stopped the refinement). The vertex count cannot tell: Chew's
+    refinement deletes free vertices near a segment it splits, and their
+    budget stays spent (+55+012 at -S 200000: 182,444 points added, 17,556
+    deleted, 0 left). Without the report (the Linux and macOS builds,
+    not rebuilt) the old count test stays: it holds for the plain triangle
+    and only misses capped meshes, never warns wrongly.
     """
+    if steiner_left is not None:
+        return steiner_left == 0
     return final_vertices - input_vertices >= 0.999 * int(max_steiner)
 
 
