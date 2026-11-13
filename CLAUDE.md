@@ -52,7 +52,9 @@ Guidance for Claude Code working in this repository.
 - Once a fix branch is on `dev` and pushed, delete it (local and
   origin) and remove its worktree; the `--no-ff` merge commit keeps
   its name and history. The 46 merged fix branches up to #37 were
-  deleted on 2026-11-05 (the commit SHAs in this file still resolve).
+  deleted on 2026-11-05 (the commit SHAs in this file still resolve),
+  fix/overpass-dangling-refs, fix/local-osm-extracts and
+  fix/geofabrik-auto (#99-#101, never on origin) on 2026-11-13.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -62,7 +64,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 465
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 535
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -85,14 +87,16 @@ checked against a **baseline**:
 
 Reference tile: `+55+012` (lat 55, lon 12 — Zealand / Copenhagen, Denmark).
 Provider `Arc` (Esri World Imagery, `Providers/Global/Arc.lay`), ZL 17.
-Baseline (since the airport smoothing fix #73, 2026-11-08):
-`G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-4fa5e9f_frozen\` — `inputs\`
+Baseline (since the water smoothing fix #103, 2026-11-13):
+`G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-d74d672_frozen\` — `inputs\`
 (4 OSM layers of the old baseline, DEM N54-N56 E011-E013 = the user's
 library .hgt files, X-Plane 12 Global Scenery +55+012.dsf, the old
 baseline's Ortho4XP.cfg), `expected\` (DSF, dsf2text, 17 masks, logs),
 `SHA256SUMS`, `BASELINE.txt`. Mesh 1,094,356 triangles at min_angle 10,
 no WARNING. Same inputs (copied from the previous baseline, hash-checked),
-older baselines: `+55+012_Arc_ZL17_test-702e768_frozen` (#32 to #72:
+older baselines: `+55+012_Arc_ZL17_test-4fa5e9f_frozen` (#73 to #102:
+same mesh and masks, water altitudes of the old smoothing),
+`+55+012_Arc_ZL17_test-702e768_frozen` (#32 to #72:
 1,094,388 triangles; same 17 masks) and
 `+55+012_Arc_ZL17_dev-c85e958_frozen` (before #32: Triangle4XP crashed
 and fell back to min_angle 2, 869,192 triangles; master 3cff870 gives
@@ -138,7 +142,10 @@ saves the mesh command to tmp\mesh_cmd.json; `pe_stack.py <exe>
 [<MB> <out.exe>]` shows or sets an exe's stack reserve.
 The older `master-3cff870*` baselines (not reproducible, or invalid
 by #7/#9) and the old result folders were deleted on 2026-11-05;
-`G:\Ortho4XP_baseline` holds only the three `_frozen` baselines.
+`G:\Ortho4XP_baseline` holds only the four `_frozen` baselines
+(`regression.py freeze` copies from the deleted master-3cff870_cached
+one: for a new baseline copy inputs\ of the current one and check it
+against its SHA256SUMS, then `regression.py baseline`).
 Test builds go to `G:\Ortho4XP_tests\<tile>_<provider>_<ZL>_<branch>-<sha>\`.
 Test helpers (venv Python; the sims below through sims_in_ws.py) are in
 `G:\Ortho4XP_tests\tools\`: `run_masks.py` (step 2.5 only, optional
@@ -739,6 +746,25 @@ Test results:
   G:\Ortho4XP_tests\osm_api\<tile>), then prepare_osm_extracts.py with
   those files and --no-coverage: all 4 OK (coastline 26/10/32/16 ways;
   -08+072's airports and big_roads were already cached, 8 runway ways).
+- Fourth review 2026-11-13 (the code new since the review of 11-11:
+  O4_Geofabrik, O4_OSM_Extract, prepare_osm_extracts.py; and the open
+  items): #102 `fix/geofabrik-robustness` @ 0adf368 + c39d20a (11 new
+  unit tests, 10 fail on dev), sim_geofabrik_step1 +28-018 with
+  --overlay of the branch: all 5 layers from the extract, 0 Overpass
+  calls. #103 `fix/water-smoothing-order` @ 5765e46 (3 new tests;
+  measured with a scratch probe on +55+012's raw Triangle4XP output):
+  regression FAIL as expected: masks 17/17 and app log identical, DSF
+  differs only in altitudes (5,324,697 patch vertices, the same lon/lat
+  and order; all 1,379,440 changed vertices outside terrain_Water lie
+  at a terrain_Water vertex, i.e. the overlay patches over the water;
+  max change 2.17 m). `test` @ d74d672: 535 unit tests, pyflakes 0; new
+  baseline test-d74d672_frozen (15 inputs copied from test-4fa5e9f_frozen
+  and hash-checked; DSF same hash as the 5765e46 run), repeat run PASS
+  (DSF, 17/17 masks, app log identical), sims_in_ws all 15/15.
+  regression.py and
+  sim_batch_cleaning.py now point at it. A C compiler for #75 (zig from
+  PyPI into a separate venv) was blocked by the permission check: not
+  installed, waits for the user.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1253,8 +1279,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     **REOPENED 2026-11-11: the WARNING never fires on a real tile.**
     Triangle4XP.exe (not the plain triangle.exe of the test) stops
     with only ~83 % of -S as new vertices: +65-019 at curvature_tol 0.5,
-    limit_tris 5: -S 2,515,274, 2,074,524 added, 4.19 M bad triangles
-    left (-V statistics), no WARNING; uncapped the same tile needs 10.08
+    limit_tris 5: -S 2,515,274, 2,074,524 added, no WARNING ("Maximum
+    number of bad triangles: 4,190,967" in the -V statistics is the
+    largest the queue ever was, not what was left); uncapped the same tile needs 10.08
     M triangles. An uncapped 1.0 mesh used 78 % of its -S, so the
     vertex count cannot tell capped from not; where the budget goes is
     not found (only 2.42 M circumcenters computed). A fix needs
@@ -1525,6 +1552,46 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Memory: ~3.5 x the largest file read (Norway 1.4 GB: 4.6 GB).
     Overpass: HTTP 401/403 now DOWN (FR's 403 caused per-query
     fallbacks), see the server check above.
+102. **FIXED** (`0adf368`, `c39d20a`; the first Windows only in part):
+    review of #100/#101.
+    - load_index kept any HTTP 200 answer as the index (an HTML error
+      page) for 30 days; every step 1 then crashed with JSONDecodeError
+      (not a GeofabrikError, so not caught; a batch before its first
+      tile). Now a download is parsed (read_index) before it replaces
+      the old file, a broken file on disk is fetched again, and parse
+      errors are GeofabrikError (layers go to Overpass).
+    - An .md5 answer without a checksum raised IndexError (same path);
+      now GeofabrikError; the .md5 response is closed.
+    - Windows: Stop during pyosmium-up-to-date kills it with exit code
+      1 = "more changes to come", so _update kept its temp file (up to
+      the extract's size). Removed unless the run completed;
+      ensure_file removes leftover temp files of its file under its
+      lock.
+    - An extract answer update_dicosm cannot read is logged and the
+      layer emptied before Overpass fills it.
+    - group_tiles also merges groups that share a file (norway read
+      twice for the Swedish and the Finnish border) while the merged
+      group stays within MAX_MERGED_TILES (16): the extraction holds
+      all tiles of a group at once (~2-3 x their uncompressed answers;
+      user's caches: median tile 14 MB, p90 80 MB, +52+004 400 MB) and
+      borders chain whole continents. 412 Scandinavian tiles: 44 -> 38
+      file reads, largest group 115 tiles as before.
+    - prepare_tiles writes each group's answers at once (a batch kept
+      all of them in memory to the end) and returns their sizes.
+103. **FIXED** (`5765e46`, CHANGES OUTPUT, new baseline): build_mesh's
+    inland water smoothing (post_process_nodes_altitudes) overwrote one
+    triangle's three vertices after another in Python set order, so the
+    result depended on the vertex numbering: any small change in a tile
+    moved water altitudes all over it (#73's 7,899 far vertices). On
+    +55+012 another order moves 161,313 of 267,833 water vertices by
+    > 0.5 mm, up to 2.7 m. smooth_water_altitudes (numpy): each sweep
+    sets every water vertex to the mean of its water triangles' means
+    from the previous sweep; 3 sweeps per water_smoothing pass
+    (WATER_SWEEPS_PER_PASS) flatten as one old pass did (mean spread
+    within a triangle 1.40 vs 1.44 cm, p99 13.2 vs 15.3 cm, max 2.78 vs
+    4.23 m; mean change 0.170 vs 0.174 m), 0.50 s instead of 0.91 s.
+    Tiles built before keep the old water altitudes until rebuilt (not
+    worth a rebuild: differences of cm, at most ~2 m on rivers).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1637,6 +1704,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 23. ~~#100~~ — local OSM extracts; on `dev` since 2026-11-13.
 24. #101 — Geofabrik first; on `test`, to `dev` with the user's OK.
     Not done: `out` instead of `out meta` for Overpass.
+25. #102, #103 — fourth review, 2026-11-13; on `test`. Open: #75 needs
+    a C compiler to rebuild Triangle4XP.exe with a steinerleft report
+    (user's OK to install one); every place in Triangle4XP.c that
+    spends -S budget also keeps a vertex, so the missing 17 % needs an
+    instrumented build.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). Noted, not changed: build_mesh's inline water
