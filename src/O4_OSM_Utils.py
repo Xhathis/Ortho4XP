@@ -712,6 +712,10 @@ def _layer_from_extract(queries, osm_layer, lat, lon, input_tags, target_tags,
     UI.vprint(1, "    * Reading OSM data for", cached_suffix,
               "from the local extract", f"({source})")
     if not osm_layer.update_dicosm(content, input_tags, target_tags):
+        UI.lvprint(1, "   WARNING: local OSM extract answer", path,
+                   "could not be read; asking Overpass.")
+        # Drop what was read of it: the download goes into the same layer.
+        osm_layer.__init__()
         return False
     _note_old_data(cached_suffix, lat, lon,
                    [("local extract", osm_base_of(content))])
