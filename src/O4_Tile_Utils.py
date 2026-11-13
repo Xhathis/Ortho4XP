@@ -13,6 +13,7 @@ import O4_File_Names as FNAMES
 import O4_Imagery_Utils as IMG
 import O4_Vector_Map as VMAP
 import O4_OSM_Utils as OSM
+import O4_OSM_Extract as EXTRACT
 import O4_Mesh_Utils as MESH
 import O4_Mask_Utils as MASK
 import O4_DSF_Utils as DSF
@@ -801,8 +802,10 @@ class _OverpassGate:
     def needs_overpass(self, lat, lon):
         key = (lat, lon)
         if key not in self._needs:
+            # A local extract answer (#100) needs no Overpass either.
             self._needs[key] = not all(
                 os.path.isfile(FNAMES.osm_cached(lat, lon, layer))
+                or os.path.isfile(EXTRACT.answer_path(lat, lon, layer))
                 for layer in OSM_LAYERS
             )
         return self._needs[key]

@@ -13,6 +13,7 @@ from shapely import geometry, ops
 from shapely.errors import ShapelyError
 import O4_UI_Utils as UI
 import O4_File_Names as FNAMES
+import O4_OSM_Extract as EXTRACT
 from O4_Version import version as O4XP_VERSION
 
 if sys.platform == "win32":
@@ -619,6 +620,10 @@ def OSM_queries_to_OSM_layer(
     if cached_suffix and os.path.isfile(cached_data_filename):
         UI.vprint(1, "    * Recycling OSM data from", cached_data_filename)
         return osm_layer.update_dicosm(cached_data_filename, input_tags, target_tags)
+    if cached_suffix and _layer_from_extract(
+            queries, osm_layer, lat, lon, input_tags, target_tags,
+            cached_suffix, cached_data_filename):
+        return 1
     old_scheme = any(
         isinstance(query, str)
         and os.path.isfile(FNAMES.osm_old_cached(lat, lon, query))
@@ -681,6 +686,30 @@ def OSM_queries_to_OSM_layer(
     if cached_suffix:
         osm_layer.write_to_file(cached_data_filename)
     return 1
+
+
+def _layer_from_extract(queries, osm_layer, lat, lon, input_tags, target_tags,
+                        cached_suffix, cached_data_filename):
+    """Read the layer from a local extract answer (prepare_osm_extracts.py,
+    #100) instead of Overpass: the same reader and cache writer as a
+    download. False when there is none, or it does not fit these queries
+    (then Overpass, as before)."""
+    path = EXTRACT.answer_path(lat, lon, cached_suffix)
+    (content, source) = EXTRACT.read_answer(
+        path, EXTRACT.flat_statements(queries))
+    if content is None:
+        if source:
+            UI.lvprint(1, "   WARNING: local OSM extract answer", path,
+                       "not used:", source + "; asking Overpass.")
+        return False
+    UI.vprint(1, "    * Reading OSM data for", cached_suffix,
+              "from the local extract", f"({source})")
+    if not osm_layer.update_dicosm(content, input_tags, target_tags):
+        return False
+    _note_old_data(cached_suffix, lat, lon,
+                   [("local extract", osm_base_of(content))])
+    osm_layer.write_to_file(cached_data_filename)
+    return True
 
 
 def _last_source():
