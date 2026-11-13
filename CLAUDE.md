@@ -1738,9 +1738,15 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Not done: `out` instead of `out meta` for Overpass.
 25. ~~#102, #103, #75~~ — fourth review; `dev` fast-forwarded to
     8708c90 and pushed on 2026-11-13, the three fix branches and
-    worktrees removed. Not run on it: gui_smoke, test_parallel_batch
-    (last on #101 / #82), the Linux/macOS Triangle4XP (not rebuilt:
-    no "Steiner points left" line, the count test stays there).
+    worktrees removed. On dev 75ae9dc the same day: gui_smoke 7/7
+    (396 tiles on the map, the user's .last_gui_params.txt, log, cfg
+    and leftover file unchanged, hash-checked); test_parallel_batch from
+    the _test worktree (junctions to the F: caches, a copy of the cfg,
+    removed with rmdir afterwards; no OSM or imagery download): compare
+    166/166 masks and 3 DSFs identical seq/par (seq 847 s, par 641 s),
+    context, fail, stop all ok. Not run: the Linux/macOS Triangle4XP
+    (not rebuilt: no "Steiner points left" line, the count test stays
+    there).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
