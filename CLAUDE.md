@@ -799,7 +799,7 @@ Test results:
   for the tile": return 1, overlay untouched; "missing source" with a
   folder that does not exist stays 0). Against the real Global Scenery
   (read only): +37-025 and +46-122 return 1 with the WARNING. `test`
-  @ (#104 + #105): 551 unit tests.
+  @ 8f33c4a (#104 + #105): 551 unit tests.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
