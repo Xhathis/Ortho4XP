@@ -64,7 +64,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~15 s, 539
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~18 s, 548
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -773,6 +773,25 @@ Test results:
   limit_tris=1 in the worktree: "Steiner points left: 0" and the NOTE
   in the log; sims_in_ws all 15/15 (sim_mesh_failure through
   _run_triangle4xp).
+- 58-tile batch on `dev` 75ae9dc (the 455-tile batch's leftovers,
+  2026-11-13 18:04-23:16, 3 parallel): 46 built, 12 failed only in the
+  overlay step (ortho DSFs complete and activated): the user's X-Plane
+  Global Scenery lacks +44..+46 / -122..-125 (Oregon, land: an
+  incomplete install, the user repairs it; the tiles were built without
+  XP12 rasters, rebuild step 3 + overlay afterwards) and +37-025 (Azores,
+  open ocean: X-Plane has no DSF there). No Overpass request: all
+  layers cached or from Geofabrik (southern-zone 560 MB in 164 s for
+  +07+072/+07+073). Median per tile: step 1 0.3 min, 2 0.9, 2.5 2.4,
+  3 3.1 (max 62.5, imagery). The #75 NOTE fired on 25 tiles: +69/+70
+  018-026 (14), the 8 Oregon tiles with land, +51+004, +51+006,
+  +52+004. No cleanup: the user's cfg was saved from the GUI at 17:59
+  with cleaning_level 0 (only change, .bak has 3), so all 58 meshes and
+  the Triangle4XP intermediates stayed (Tiles: 72 GB of them).
+- #104 `fix/osm-cache-refresh` @ 656ef6d (from dev dea8931): 9 new unit
+  tests (548 pass; 8 fail on dev, the 9th checks an answer older than
+  the cache is ignored, as on dev), pyflakes 0, regression PASS (DSF,
+  17/17 masks, app log identical), sims_in_ws all 15/15. `test` @
+  88fdc66: 548 unit tests.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1624,6 +1643,25 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     4.23 m; mean change 0.170 vs 0.174 m), 0.50 s instead of 0.91 s.
     Tiles built before keep the old water altitudes until rebuilt (not
     worth a rebuild: differences of cm, at most ~2 m on rivers).
+104. **DONE** (`656ef6d`, new app setting): osm_cache_max_age (days,
+    default 0 = off: cached layers are kept for good, as before). When
+    step 1 runs (single build, or a batch's preparation before phase 1),
+    a cached layer older than that (the cache file's mtime: written when
+    the data was fetched) is prepared again from Geofabrik like a missing
+    one (GEOFABRIK.needed_layers, cache_is_stale). Step 1 prefers an
+    extract answer newer than the cache (OSM._refresh_from_extract) and
+    logs "OSM <layer> layer of <tile> was N days old, refreshed from the
+    local extract." The old cache stays in use when no answer comes: no
+    Overpass request for a refresh ("Geofabrik: OSM data of <tile> not
+    refreshed (...); its cached layers are used"), an unusable answer
+    ("keeping the cached layer"), an answer older than the cache
+    (ignored), and a tile outside every region (no empty sea answer
+    replaces a cache). Not done: the #77 road_level gap (a small_roads
+    cache made at a lower level): finding it means decompressing the
+    cache, ~10 s per tile. OSM_layer.write_to_file now writes under
+    FNAMES.temp_path_for and os.replace()s (an interrupted write left a
+    cut cache that later builds read). The user asked for 30 days, to
+    be set when this is on dev.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1747,6 +1785,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     context, fail, stop all ok. Not run: the Linux/macOS Triangle4XP
     (not rebuilt: no "Steiner points left" line, the count test stays
     there).
+26. #104 — refresh of old OSM caches; on `test`, to `dev` with the
+    user's OK, then osm_cache_max_age=30 in the user's cfg.
+    Possible follow-up: an overlay whose Global Scenery DSF is absent
+    fails the tile (+37-025 has none in X-Plane at all); step 3 only
+    warns in that case (#50).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
