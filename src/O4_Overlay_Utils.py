@@ -45,6 +45,22 @@ def build_overlay(lat, lon):
     )
     try:
         error = _extract_overlay(lat, lon)
+    except NoSourceDSF as e:
+        # X-Plane has no DSF for this tile (open ocean), or its scenery
+        # is not installed there: nothing to extract, and failing the
+        # tile would only keep it in every later batch. Step 3 warns the
+        # same way about the missing rasters (#50).
+        _remove_tmp_files(lat, lon)
+        UI.lvprint(
+            0, "   WARNING: no overlay for tile "
+            + FNAMES.short_latlon(lat, lon) + ": the Global Scenery has no "
+            "DSF for it (" + " or ".join(e.args[0]) + " absent). Fine for "
+            "open ocean; for land, check the X-Plane installation."
+        )
+        UI.logprint("Step 4 for tile lat=", lat, ", lon=", lon,
+                    ": normal exit.")
+        UI.timings_and_bottom_line(timer)
+        return 1
     except OSError as e:
         # Disk full, a locked or vanished tmp file: report it instead of
         # ending the thread with an exception and UI.is_working still set.
@@ -115,6 +131,10 @@ def _run_dsftool(option, src, dst):
     return None
 
 
+class NoSourceDSF(Exception):
+    """The overlay source has no DSF for the tile (args[0]: the paths)."""
+
+
 def _extract_overlay(lat, lon):
     """Steps of build_overlay; return an error message or None."""
     # An empty setting is skipped: joined with "" the path would be
@@ -130,7 +150,13 @@ def _extract_overlay(lat, lon):
         )
     existing = [name for name in candidates if os.path.isfile(name)]
     if not existing:
-        return "file " + " or ".join(candidates) + " absent."
+        # A source without an Earth nav data folder is a wrong setting:
+        # that stays an error. Inside a real one a missing tile is not.
+        if not any(os.path.isdir(os.path.join(src, "Earth nav data"))
+                   for src in (custom_overlay_src,
+                               custom_overlay_src_alternate) if src):
+            return "file " + " or ".join(candidates) + " absent."
+        raise NoSourceDSF(candidates)
     file_to_sniff = existing[0]
     # Leftovers of an interrupted run must not pass for this run's output.
     _remove_tmp_files(lat, lon)
