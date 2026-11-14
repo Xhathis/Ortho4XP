@@ -787,6 +787,10 @@ Test results:
   +52+004. No cleanup: the user's cfg was saved from the GUI at 17:59
   with cleaning_level 0 (only change, .bak has 3), so all 58 meshes and
   the Triangle4XP intermediates stayed (Tiles: 72 GB of them).
+  On 2026-11-14 cleaning_level set back to 3 and osm_cache_max_age=30.0
+  added in the user's cfg (user's OK; the state before both in
+  Ortho4XP.cfg.before-cache-refresh.bak). The 72 GB stay until the
+  user deletes them or a batch at level 3 rebuilds those tiles.
 - #104 `fix/osm-cache-refresh` @ 656ef6d (from dev dea8931): 9 new unit
   tests (548 pass; 8 fail on dev, the 9th checks an answer older than
   the cache is ignored, as on dev), pyflakes 0, regression PASS (DSF,
