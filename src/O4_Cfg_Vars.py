@@ -52,6 +52,12 @@ cfg_app_vars = {
         "default": 1.0,
         "hint": "Days: an extract whose data is older gets Geofabrik's daily changes before it is read (a few MB a day; Geofabrik publishes them once a day).",
     },
+    "osm_cache_max_age": {
+        "module": "GEOFABRIK",
+        "type": float,
+        "default": 0.0,
+        "hint": "Days: when step 1 runs, a cached OSM layer of the tile older than this is refreshed from Geofabrik (osm_source geofabrik only). The old cache stays in use when Geofabrik cannot give the layer. 0: cached layers are kept for good.",
+    },
     "skip_downloads": {
         "module": "TILE",
         "type": bool,
@@ -394,6 +400,7 @@ list_app_vars = [
     "overpass_server_choice",
     "osm_source",
     "geofabrik_max_age",
+    "osm_cache_max_age",
     "skip_downloads",
     "skip_converts",
     "max_download_slots",
