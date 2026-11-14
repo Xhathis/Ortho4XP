@@ -64,7 +64,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~18 s, 548
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~18 s, 551
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -792,6 +792,14 @@ Test results:
   the cache is ignored, as on dev), pyflakes 0, regression PASS (DSF,
   17/17 masks, app log identical), sims_in_ws all 15/15. `test` @
   88fdc66: 548 unit tests.
+- #105 `fix/overlay-no-source-dsf` @ 8ec2a50 (from dev dea8931): 3 new
+  unit tests (1 fails on dev; unset source and a source without Earth
+  nav data stay errors, as on dev), pyflakes 0, regression PASS (DSF,
+  17/17 masks, app log identical), sim_overlay 8/8 (new case "no DSF
+  for the tile": return 1, overlay untouched; "missing source" with a
+  folder that does not exist stays 0). Against the real Global Scenery
+  (read only): +37-025 and +46-122 return 1 with the WARNING. `test`
+  @ (#104 + #105): 551 unit tests.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1662,6 +1670,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     FNAMES.temp_path_for and os.replace()s (an interrupted write left a
     cut cache that later builds read). The user asked for 30 days, to
     be set when this is on dev.
+105. **FIXED** (`8ec2a50`): build_overlay failed a tile whose overlay
+    source has no DSF for it, so a batch counted it failed and kept it
+    in .last_batch_tiles.txt for good (58-tile batch: +37-025, open
+    ocean, X-Plane has no DSF; the 11 Oregon tiles, missing from the
+    user's install). Now, when the source's Earth nav data folder exists
+    but lacks the tile: one logged WARNING ("no overlay for tile ...:
+    the Global Scenery has no DSF for it (... absent). Fine for open
+    ocean; for land, check the X-Plane installation."), step 4 ends
+    normally. A source without Earth nav data (wrong setting) and an
+    unset custom_overlay_src stay errors. Step 3 warns about the
+    missing rasters as before (#50).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1787,9 +1806,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     there).
 26. #104 — refresh of old OSM caches; on `test`, to `dev` with the
     user's OK, then osm_cache_max_age=30 in the user's cfg.
-    Possible follow-up: an overlay whose Global Scenery DSF is absent
-    fails the tile (+37-025 has none in X-Plane at all); step 3 only
-    warns in that case (#50).
+27. #105 — overlay without a Global Scenery DSF warns; on `test`, to
+    `dev` with the user's OK.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
