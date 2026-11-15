@@ -864,7 +864,7 @@ Test results:
   tile): 347 fit (made at level 5 before), 113 lack tracks; of the
   batch's 229 tiles 33 lack them. `test` @ dc04261: 558 unit tests.
   Not run yet (the batch was running): regression. Rebuild list
-  G:\Ortho4XP_testsatchesebuild_road_level5.txt: those 33 plus the
+  G:\Ortho4XP_tests\batches\rebuild_road_level5.txt: those 33 plus the
   3 tiles above (prepare_osm_extracts.py --force --road-level 5 first:
   their caches fit level 5 but predate #106).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
