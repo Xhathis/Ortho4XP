@@ -61,6 +61,10 @@ MAX_MERGED_TILES = 16
 # batch context).
 batch_prepared = False
 MIN_GAP = EXTRACT.MIN_GAP
+# mark_containers: share of a region's outline the regions inside it must
+# cover for it to count as made of them (index of 2026-11: composites
+# 0.40-1.0, regions with enclaves 0.0003-0.14).
+CONTAINER_MIN_SHARE = 0.25
 
 _index_cache = {}  # path -> (mtime, regions)
 
@@ -108,21 +112,34 @@ class Region:
 
 
 def mark_containers(regions):
-    """Flag the regions that hold another region (netherlands holds its
-    provinces, us-northeast the states, alps parts of 5 countries; the
+    """Flag the regions made of other regions (netherlands of its
+    provinces, us-northeast of the states, norway of its 5 parts; the
     index's parent field misses the composites). Outside the regions it
     holds, a container's outline only adds sea (the Dutch North Sea, the
     Atlantic off New York): choose_regions does not make a file be read
-    for that, as for the sea a continent adds."""
-    from shapely import strtree
+    for that, as for the sea a continent adds.
+
+    Holding a region is not enough: Geofabrik's outlines have enclaves
+    (ceuta and melilla in morocco, bremen in niedersachsen, kaliningrad in
+    northwestern-fed-district, berlin in brandenburg). Taken for containers,
+    their land was treated as sea and never read (2026-11-14 batch: 4
+    tiles failed on an open coastline, 9 built without roads and water
+    there). So the smaller regions at least half inside it must cover
+    CONTAINER_MIN_SHARE of the outline: composites cover 0.40 (australia,
+    much ocean) to 1.0, regions with enclaves at most 0.14 (portugal with
+    the azores; morocco 0.0003). Half, not all: alps holds no country
+    whole, yet they cover 0.72 of it.
+    """
+    from shapely import strtree, ops
     tree = strtree.STRtree([r.area for r in regions])
     for r in regions:
-        for i in tree.query(r.area):
-            s = regions[i]
-            if s is not r and s.size < r.size and \
-                    r.area.intersection(s.area).area >= 0.9 * s.size:
-                r.container = True
-                break
+        held = [regions[i].area for i in tree.query(r.area)
+                if regions[i] is not r and regions[i].size < r.size
+                and r.area.intersection(regions[i].area).area
+                >= 0.5 * regions[i].size]
+        r.container = bool(held) and (
+            ops.unary_union(held).intersection(r.area).area
+            >= CONTAINER_MIN_SHARE * r.size)
     return regions
 
 

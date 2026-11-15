@@ -46,7 +46,7 @@ def gf(tmp_path, monkeypatch):
 # --- regions -----------------------------------------------------------------
 REGIONS = GEOFABRIK.mark_containers([
     region("europe", -20, -20, 20, 20),          # continent: never chosen
-    region("alps", -5, -5, 5, 5),                # big composite
+    region("alps", -1, -2, 4, 3),                # composite: 0.36 held
     region("country-a", 0, -1, 0.5, 2),
     region("state-a1", 0, 0, 0.5, 1.5, "europe/country-a/state-a1"),
     region("country-b", 0.5, -1, 3, 2),
@@ -62,20 +62,46 @@ def test_smallest_files_cover_the_tile():
 
 
 def test_containers():
-    assert {r.id for r in REGIONS if r.container} == {
-        "europe", "alps", "country-a"}
+    # europe: its regions cover 2 % of it here (a continent is never read,
+    # flag or not).
+    assert {r.id for r in REGIONS if r.container} == {"alps", "country-a"}
 
 
 def test_sea_only_in_a_container_needs_no_file():
     # +52+004: the provinces cover the land; netherlands adds North Sea.
     regions = GEOFABRIK.mark_containers([
         region("europe", -20, -20, 20, 20),
-        region("netherlands", -1, -1, 2, 2),
+        region("netherlands", 0, -1, 1.5, 2),
         region("noord-holland", 0.3, 0.5, 1, 1.5, "europe/netherlands/nh"),
         region("zuid-holland", 0.3, -0.5, 1, 0.5, "europe/netherlands/zh")])
     (chosen, kind) = GEOFABRIK.choose_regions(0, 0, regions)
     assert (kind, [r.id for r in chosen]) == (
         "land", ["noord-holland", "zuid-holland"])
+
+
+def test_enclave_does_not_make_a_container():
+    # +35-006: ceuta lies inside morocco's outline; morocco is no composite
+    # of it, its land must be read (it was taken for sea before).
+    regions = GEOFABRIK.mark_containers([
+        region("europe", -20, 0.6, 20, 20),
+        region("africa", -20, -20, 20, 0.6),
+        region("morocco", -1, -1, 2, 0.6, "africa/morocco"),
+        region("ceuta", 0.4, 0.5, 0.45, 0.6, "europe/spain/ceuta"),
+        region("andalucia", -1, 0.6, 2, 2, "europe/spain/andalucia")])
+    assert not any(r.container for r in regions if r.id not in
+                   ("europe", "africa"))
+    (chosen, kind) = GEOFABRIK.choose_regions(0, 0, regions)
+    assert (kind, [r.id for r in chosen]) == ("land", ["andalucia", "morocco"])
+
+
+def test_container_by_regions_half_inside():
+    # alps holds no country whole, yet they cover it: a composite.
+    regions = GEOFABRIK.mark_containers([
+        region("alps", 0, 0, 4, 4),
+        region("country-a", -0.5, 0, 2, 4),
+        region("country-b", 2, 0, 4.5, 4)])
+    assert [r.id for r in regions if r.container] == ["alps"]
+    assert GEOFABRIK.CONTAINER_MIN_SHARE == 0.25
 
 
 def test_redundant_choice_dropped():
@@ -90,7 +116,8 @@ def test_redundant_choice_dropped():
 def test_only_containers_reach_the_tile():
     regions = GEOFABRIK.mark_containers([
         region("netherlands", -1, -1, 2, 2),
-        region("province", 1.5, 1.5, 2, 2, "europe/netherlands/p")])
+        region("province", 1.2, -1, 2, 2, "europe/netherlands/p")])
+    assert regions[0].container
     (chosen, kind) = GEOFABRIK.choose_regions(0, 0, regions)
     assert (kind, [r.id for r in chosen]) == ("land", ["netherlands"])
 
