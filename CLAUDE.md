@@ -788,7 +788,8 @@ Test results:
   with cleaning_level 0 (only change, .bak has 3), so all 58 meshes and
   the Triangle4XP intermediates stayed (Tiles: 72 GB of them).
   On 2026-11-14 cleaning_level set back to 3 and osm_cache_max_age=30.0
-  added in the user's cfg (user's OK; the state before both in
+  added in the user's cfg (the user set 2.0 and limit_tris 40 from the
+  GUI at 09:16 the same day) (user's OK; the state before both in
   Ortho4XP.cfg.before-cache-refresh.bak). The 72 GB stay until the
   user deletes them or a batch at level 3 rebuilds those tiles.
 - #104 `fix/osm-cache-refresh` @ 656ef6d (from dev dea8931): 9 new unit
@@ -804,6 +805,43 @@ Test results:
   folder that does not exist stays 0). Against the real Global Scenery
   (read only): +37-025 and +46-122 return 1 with the WARNING. `test`
   @ 8f33c4a (#104 + #105): 551 unit tests.
+- 440-tile batch on `dev` 8171256 (2026-11-14 10:27 to 11-15 13:03,
+  26h36m, 3 parallel, limit_tris 40 in the global cfg and 435 tile
+  configs; the user's cfg saved from the GUI 11-14 09:16 with
+  osm_cache_max_age=2.0, not 30, so nearly every cache was refreshed
+  from Geofabrik): 435 built, 5 failed. +35-006, +53+008, +53+009,
+  +69+030: coastline not closed, from #106 (9 more tiles built without
+  the dropped land, see #106). +67+017: worker exit 0xC0000005 while
+  cleaning the water layer (Akkajaure); the same cleaning on the same
+  cache ran twice without error in a probe, so a one-off. No Overpass
+  request. 25 NOTE tiles (budget used: southern Norway +58..+61 /
+  +005..+009, BC/Washington coast); of the 25 NOTE tiles of 11-13 only
+  +45-124 still. New DSFs: 84 GB, median 125 MB, p90 507 MB, max 660
+  MB (+59+006, ~44 M triangles). The 12 overlay WARNINGs (#105) are
+  the Oregon tiles and +37-025: X-Plane keeps +44..+46 / -122..-125 in
+  Global Scenery\X-Plane 12 Demo Areas (Portland demo area), not in
+  X-Plane 12 Global Scenery; custom_overlay_src_alternate (empty in the
+  user's cfg) is read by step 3 and step 4 when the main source lacks
+  a tile, so setting it to that folder fixes them.
+- #106 `fix/geofabrik-enclaves` @ 8bff0d3 (from dev 8171256): 2 new
+  unit tests and test_containers changed (all 3 fail on dev; fixtures
+  of alps and netherlands made realistic: composites cover >= 0.25 of
+  their outline), 553 pass, pyflakes 0, regression --overlay PASS (DSF,
+  17/17 masks, app log identical), sim_geofabrik_step1 +28-018 0
+  failures. World scan (51,001 tiles any country region touches, old
+  vs new rule on the real index): 521 change, nearly all adding land
+  (NW Russia 170, Ukraine 64, NSW 53, Portugal 40, Nusa Tenggara 39,
+  Hebei 37, Morocco 35, Guangdong 29, Niedersachsen 16, PACA 11,
+  Brandenburg 11, ...); some only add sea and a bigger read (Azores
+  tiles read portugal 428 MB instead of azores 18 MB; Crimea tiles
+  ukraine; Svalbard tiles northwestern-fed-district). `test` @ 810fc3a:
+  553 unit tests.
+  The 13 tiles re-prepared with the fix (dev's prepare_osm_extracts.py,
+  the fix's src first on sys.path, --force; 2026-11-15, 850 s;
+  downloaded morocco 245 MB, northwestern-fed-district 658 MB): all OK,
+  0 left to Overpass; the answers are much larger than the broken caches
+  (+35-006 small_roads 0.25 -> 10.5 MB bz2, +53+008 2.0 -> 9.3 MB) and
+  newer, so step 1 replaces the caches (#104). Rebuild them from step 1.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1685,6 +1723,27 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     normally. A source without Earth nav data (wrong setting) and an
     unset custom_overlay_src stay errors. Step 3 warns about the
     missing rasters as before (#50).
+106. **FIXED** (`8bff0d3`): mark_containers flagged a region as a
+    container (its outline beyond the regions it holds = sea, never
+    read) as soon as one region lay 90 % inside it. Geofabrik's outlines
+    have enclaves (ceuta/melilla in morocco, bremen in niedersachsen,
+    kaliningrad in northwestern-fed-district, berlin in brandenburg, act
+    in new-south-wales, crimea in ukraine, monaco in PACA, hong-kong and
+    macau in guangdong, beijing/tianjin in hebei, east-timor in
+    nusa-tenggara, praha in stredocesky, the azores in portugal), so
+    their land was taken for sea: no roads, water, airports there, and a
+    coastline that runs into it cannot be closed (the 440-tile batch:
+    +35-006, +53+008, +53+009, +69+030 failed; +35-005, +35-007,
+    +52+006, +52+007, +53+006, +53+007, +69+028, +69+029, +70+031 built
+    without that land; re-prepared with the fix through
+    prepare_osm_extracts.py --force, rebuild them from step 1). Now the
+    smaller regions at least half inside a region must cover
+    CONTAINER_MIN_SHARE 0.25 of its outline (index of 2026-11:
+    composites 0.40 australia .. 1.0; enclave holders 0.0003 morocco ..
+    0.14 portugal; alps 0.72 by countries half inside, none 90 %).
+    Before the fix every tile built from Geofabrik in those regions may
+    lack that land: the user's affected tiles are exactly the 13 above
+    (scan of all 478 tiles with OSM data).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1812,6 +1871,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     user's OK, then osm_cache_max_age=30 in the user's cfg.
 27. #105 — overlay without a Global Scenery DSF warns; on `test`, to
     `dev` with the user's OK.
+28. #106 — Geofabrik enclaves; on `test`, to `dev` with the user's OK.
+    Then rebuild the 13 tiles from step 1 (and +67+017).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
