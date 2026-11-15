@@ -494,8 +494,9 @@ def cache_is_stale(path, now=None):
 
 def needed_layers(lat, lon, road_level, force=False):
     """{layer: statements} of the layers step 1 would otherwise ask
-    Overpass for or take from a stale cache: no extract answer, not cached
-    or cached longer than osm_cache_max_age, no custom coastline/water
+    Overpass for or take from a stale cache: no extract answer for these
+    statements, not cached, cached longer than osm_cache_max_age or for
+    other statements (road_level changed, #107), no custom coastline/water
     file."""
     layers = EXTRACT.layer_statements(road_level)
     if os.path.isfile(FNAMES.custom_coastline(lat, lon)) or \
@@ -508,10 +509,12 @@ def needed_layers(lat, lon, road_level, force=False):
         return layers
     wanted = {}
     for (layer, st) in layers.items():
-        if os.path.isfile(EXTRACT.answer_path(lat, lon, layer)):
+        answer = EXTRACT.answer_path(lat, lon, layer)
+        if os.path.isfile(answer) and EXTRACT.answer_fits(answer, st):
             continue
         cache = FNAMES.osm_cached(lat, lon, layer)
-        if not os.path.isfile(cache) or cache_is_stale(cache):
+        if not os.path.isfile(cache) or cache_is_stale(cache) or \
+                EXTRACT.cache_fits(cache, st) is False:
             wanted[layer] = st
     return wanted
 
@@ -680,7 +683,7 @@ def cache_bytes(layer, statements, answer):
         raise GeofabrikError(f"{layer}: answer not readable")
     tmp = FNAMES.temp_path_for(os.path.join(FNAMES.Tmp_dir, layer + ".osm.bz2"))
     try:
-        osm_layer.write_to_file(tmp)
+        osm_layer.write_to_file(tmp, statements)
         with bz2.open(tmp, "rb") as f:
             return f.read()
     finally:
