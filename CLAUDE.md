@@ -842,6 +842,18 @@ Test results:
   0 left to Overpass; the answers are much larger than the broken caches
   (+35-006 small_roads 0.25 -> 10.5 MB bz2, +53+008 2.0 -> 9.3 MB) and
   newer, so step 1 replaces the caches (#104). Rebuild them from step 1.
+  limit_tris 40 was too much: the user killed X-Plane's loading at ENVE
+  (Valle, +59+007, 656 MB DSF, next to +59+006 660 MB, +59+008,
+  +58+006/7 > 600 MB) after 10 min. On 2026-11-15 limit_tris=10.0 set
+  in the global cfg and all 449 tile configs (user's choice; only that
+  line changed, checked against the backup with SHA256SUMS in
+  G:\Ortho4XP_tests\cfg_backups6-11-15_limit_tris, which also
+  holds the old .last_batch_tiles.txt). The user's cfg also has
+  custom_overlay_src_alternate = ...\X-Plane 12 Demo Areas and
+  osm_cache_max_age 30 again (user, 13:57). .last_batch_tiles.txt now
+  lists 212 tiles to rebuild from step 1 (cleaning_level 3 removed step
+  1's files): the 204 with a DSF over 150 MB (about where limit_tris 10
+  caps) plus the 13 #106 tiles, +67+017 and the old leftovers.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
