@@ -854,6 +854,19 @@ Test results:
   lists 212 tiles to rebuild from step 1 (cleaning_level 3 removed step
   1's files): the 204 with a DSF over 150 MB (about where limit_tris 10
   caps) plus the 13 #106 tiles, +67+017 and the old leftovers.
+- That rebuild (started 2026-11-15 14:29, override with the global cfg:
+  the user set road_level=5 there and in 435 tile configs at 14:25)
+  showed #107: +53+008, +53+009, +69+030 kept their pre-#106
+  small_roads cache (the answers prepared that morning were for level
+  4). #107 `fix/road-level-cache` @ 8ee37b5 (from dev 1358d0c): 5 new
+  unit tests (all fail on dev), 558 pass, pyflakes 0. Read-only scan of
+  the user's 460 small_roads caches at level 5 (71 s, max 2.4 s per
+  tile): 347 fit (made at level 5 before), 113 lack tracks; of the
+  batch's 229 tiles 33 lack them. `test` @ dc04261: 558 unit tests.
+  Not run yet (the batch was running): regression. Rebuild list
+  G:\Ortho4XP_testsatchesebuild_road_level5.txt: those 33 plus the
+  3 tiles above (prepare_osm_extracts.py --force --road-level 5 first:
+  their caches fit level 5 but predate #106).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1756,6 +1769,21 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Before the fix every tile built from Geofabrik in those regions may
     lack that land: the user's affected tiles are exactly the 13 above
     (scan of all 478 tiles with OSM data).
+107. **FIXED** (`8ee37b5`, closes #77's road_level gap): the
+    small_roads cache has one name at every road_level and step 1
+    recycled any cache, so raising road_level kept the old roads
+    silently; an extract answer made at the old level also stopped
+    needed_layers from preparing a new one (step 1 then rejected it and
+    kept the cache). Caches now carry an <o4xp_cache statements="..."/>
+    line (OSM_layer.write_to_file(filename, statements); the reader
+    skips it). EXTRACT.cache_fits: a stamped cache must name the asked
+    statements; an unstamped small_roads cache must hold exactly the
+    asked highway values (a tile without one track counts as not
+    fitting at level 5: refreshed once, then stamped); other unstamped
+    layers pass. needed_layers prepares a layer whose answer
+    (answer_fits) or cache does not fit; step 1 prefers the newer
+    answer (#104), else uses the cache with a logged WARNING. No
+    Overpass request for it (as #104).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1885,6 +1913,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     `dev` with the user's OK.
 28. #106 — Geofabrik enclaves; on `test`, to `dev` with the user's OK.
     Then rebuild the 13 tiles from step 1 (and +67+017).
+29. #107 — caches made for another road_level; on `test`, regression
+    after the running batch, then to `dev` with the user's OK and the
+    36-tile rebuild (rebuild_road_level5.txt).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
