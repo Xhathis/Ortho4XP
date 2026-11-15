@@ -847,7 +847,7 @@ Test results:
   +58+006/7 > 600 MB) after 10 min. On 2026-11-15 limit_tris=10.0 set
   in the global cfg and all 449 tile configs (user's choice; only that
   line changed, checked against the backup with SHA256SUMS in
-  G:\Ortho4XP_tests\cfg_backups6-11-15_limit_tris, which also
+  G:\Ortho4XP_tests\cfg_backups\2026-11-15_limit_tris, which also
   holds the old .last_batch_tiles.txt). The user's cfg also has
   custom_overlay_src_alternate = ...\X-Plane 12 Demo Areas and
   osm_cache_max_age 30 again (user, 13:57). .last_batch_tiles.txt now
