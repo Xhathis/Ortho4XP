@@ -459,10 +459,11 @@ class OSM_layer:
         )
         return 1
 
-    def write_to_file(self, filename):
+    def write_to_file(self, filename, statements=()):
         """Write the layer as an OSM file (the cache): under a temporary
         name first, so an interrupted write never leaves a cut file that
-        later builds would read. 0 when it could not be written."""
+        later builds would read. statements: the queries it was made for,
+        recorded in the file (#107). 0 when it could not be written."""
         tmp = FNAMES.temp_path_for(filename)
         try:
             if filename[-4:] == ".bz2":
@@ -470,7 +471,7 @@ class OSM_layer:
             else:
                 fout = open(tmp, "w", encoding="utf-8")
             with fout:
-                self._write(fout)
+                self._write(fout, statements)
             os.replace(tmp, filename)
         except OSError as e:
             UI.lvprint(1, "    WARNING: could not write", filename, f"({e}).")
@@ -481,11 +482,13 @@ class OSM_layer:
             raise
         return 1
 
-    def _write(self, fout):
+    def _write(self, fout, statements=()):
         fout.write(
             '<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" '
             + 'generator="Ortho4XP">\n'
         )
+        if statements:
+            fout.write(EXTRACT.cache_stamp(statements) + "\n")
         if not len(self.dicosmfirst["n"]):
             for nodeid, (lonp, latp) in self.dicosmn.items():
                 fout.write(
@@ -648,6 +651,16 @@ def OSM_queries_to_OSM_layer(
             cached_suffix, cached_data_filename):
         return 1
     if cached_suffix and os.path.isfile(cached_data_filename):
+        if EXTRACT.cache_fits(cached_data_filename,
+                              EXTRACT.flat_statements(queries)) is False:
+            # Not refreshed (no Geofabrik answer, or osm_source overpass):
+            # the cache lacks or has more than the asked roads. Using it
+            # is what happened silently before (#107); say so.
+            UI.lvprint(1, "   WARNING: the cached OSM", cached_suffix,
+                       "layer of", FNAMES.short_latlon(lat, lon),
+                       "was made for other queries (road_level changed?)",
+                       "and could not be refreshed; it is used as is.",
+                       "Delete", cached_data_filename, "to fetch it again.")
         UI.vprint(1, "    * Recycling OSM data from", cached_data_filename)
         return osm_layer.update_dicosm(cached_data_filename, input_tags, target_tags)
     if cached_suffix and _layer_from_extract(
@@ -681,7 +694,7 @@ def OSM_queries_to_OSM_layer(
             _note_old_data(cached_suffix, lat, lon, [_last_source()])
             osm_layer.update_dicosm(response, input_tags, target_tags)
             if cached_suffix:
-                osm_layer.write_to_file(cached_data_filename)
+                osm_layer.write_to_file(cached_data_filename, statements)
             return 1
         if not getattr(get_overpass_data, "size_failure", False):
             # No server could be reached at all: one request per query
@@ -714,7 +727,8 @@ def OSM_queries_to_OSM_layer(
         osm_layer.update_dicosm(response, input_tags, target_tags)
     _note_old_data(cached_suffix, lat, lon, sources)
     if cached_suffix:
-        osm_layer.write_to_file(cached_data_filename)
+        osm_layer.write_to_file(cached_data_filename,
+                                EXTRACT.flat_statements(queries))
     return 1
 
 
@@ -768,7 +782,8 @@ def _layer_from_extract(queries, osm_layer, lat, lon, input_tags, target_tags,
         return False
     _note_old_data(cached_suffix, lat, lon,
                    [("local extract", osm_base_of(content))])
-    if osm_layer.write_to_file(cached_data_filename):
+    if osm_layer.write_to_file(cached_data_filename,
+                               EXTRACT.flat_statements(queries)):
         # The cache now wins over the answer (#101): it would only take
         # the same space again.
         try:

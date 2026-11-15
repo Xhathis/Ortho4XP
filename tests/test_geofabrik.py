@@ -742,14 +742,14 @@ def test_cache_write_is_atomic(gf, monkeypatch):
     before = open(cache, "rb").read()
     folder = os.path.dirname(cache)
 
-    def cut(self, fout):
+    def cut(self, fout, statements=()):
         fout.write("<?xml")
         raise RuntimeError("killed")
     monkeypatch.setattr(OSM.OSM_layer, "_write", cut)
     with pytest.raises(RuntimeError):
         OSM.OSM_layer().write_to_file(cache)
 
-    def full(self, fout):
+    def full(self, fout, statements=()):
         fout.write("<?xml")
         raise OSError(28, "No space left on device")
     monkeypatch.setattr(OSM.OSM_layer, "_write", full)
@@ -764,3 +764,118 @@ def test_osm_cache_max_age_setting():
     assert VARS.cfg_vars["osm_cache_max_age"]["default"] == 0.0
     assert "osm_cache_max_age" in VARS.gui_app_vars_short
     assert GEOFABRIK.osm_cache_max_age == 0.0
+
+
+# --- caches made for another road_level (#107) --------------------------------------
+def _road_cache(values, days=1, statements=None):
+    """An old-style (unstamped) small_roads cache with one way per value,
+    or a stamped one when statements are given."""
+    path = FNAMES.osm_cached(55, 12, "small_roads")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<osm version="0.6" generator="Ortho4XP">']
+    if statements:
+        lines.append(EXTRACT.cache_stamp(statements))
+    for (i, v) in enumerate(values, 1):
+        lines += [f'  <node id="-{2 * i}" lat="55.5" lon="12.{i}" version="1"/>',
+                  f'  <node id="-{2 * i + 1}" lat="55.6" lon="12.{i}" '
+                  'version="1"/>',
+                  f'  <way id="-{i}" version="1">',
+                  f'    <nd ref="-{2 * i}"/>', f'    <nd ref="-{2 * i + 1}"/>',
+                  f'    <tag k="highway" v="{v}"/>', '  </way>']
+    lines.append("</osm>")
+    with bz2.open(path, "wt", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    t = time.time() - days * DAY
+    os.utime(path, (t, t))
+    return path
+
+
+def _roads(level):
+    return EXTRACT.flat_statements(VMAP.small_road_queries(level))
+
+
+LEVEL4 = ["tertiary", "unclassified", "residential", "service"]
+
+
+def test_cache_stamp_written_and_read(gf):
+    layer = OSM.OSM_layer()
+    assert layer.update_dicosm(_road_cache(LEVEL4), {}, {})
+    path = FNAMES.osm_cached(55, 12, "small_roads")
+    assert layer.write_to_file(path, _roads(4))
+    with bz2.open(path, "rt", encoding="utf-8") as f:
+        assert "<o4xp_cache statements=" in f.read(400)
+    assert EXTRACT.cache_fits(path, _roads(4)) is True
+    assert EXTRACT.cache_fits(path, list(reversed(_roads(4)))) is True
+    assert EXTRACT.cache_fits(path, _roads(5)) is False
+    # The reader skips the stamp: the same layer as from an unstamped file.
+    reread = OSM.OSM_layer()
+    assert reread.update_dicosm(path, {}, {})
+    assert (reread.dicosmn, reread.dicosmw, reread.dicosmtags) == (
+        layer.dicosmn, layer.dicosmw, layer.dicosmtags)
+
+
+def test_unstamped_cache_judged_by_its_road_values(gf):
+    path = _road_cache(LEVEL4)
+    assert EXTRACT.cache_fits(path, _roads(4)) is True
+    assert EXTRACT.cache_fits(path, _roads(5)) is False   # no tracks
+    assert EXTRACT.cache_fits(path, _roads(3)) is False   # has service
+    assert EXTRACT.cache_fits(_road_cache(LEVEL4 + ["track", "path"]),
+                              _roads(5)) is True          # path: not ours
+    # Other layers' old caches pass as before; no file: unknown.
+    assert EXTRACT.cache_fits(_old_cache(55, 12, "water", 1),
+                              EXTRACT.flat_statements(VMAP.WATER_QUERIES)) \
+        is None
+    assert EXTRACT.cache_fits(path + ".missing", _roads(4)) is None
+
+
+def test_needed_layers_takes_cache_of_other_road_level(gf):
+    for layer in ("coastline", "airports", "water", "big_roads"):
+        _old_cache(55, 12, layer, 1)
+    _road_cache(LEVEL4)
+    assert GEOFABRIK.needed_layers(55, 12, 4) == {}
+    assert GEOFABRIK.needed_layers(55, 12, 5) == {"small_roads": _roads(5)}
+    # An answer prepared at level 4 (+53+008 on 2026-11-15) does not
+    # stand for level 5: prepared again.
+    EXTRACT.write_answer(EXTRACT.answer_path(55, 12, "small_roads"),
+                         EXTRACT.answer_xml(_roads(4), "x", "2026",
+                                            {}, {}, {}))
+    assert GEOFABRIK.needed_layers(55, 12, 5) == {"small_roads": _roads(5)}
+    EXTRACT.write_answer(EXTRACT.answer_path(55, 12, "small_roads"),
+                         EXTRACT.answer_xml(_roads(5), "x", "2026",
+                                            {}, {}, {}))
+    assert GEOFABRIK.needed_layers(55, 12, 5) == {}
+
+
+def test_step1_warns_about_an_unrefreshed_mismatch(gf):
+    cache = _road_cache(LEVEL4)
+    before = open(cache, "rb").read()
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.small_road_queries(4), layer, 55, 12, [],
+        cached_suffix="small_roads")
+    assert not any("made for other queries" in line for line in gf)
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.small_road_queries(5), layer, 55, 12, [],
+        cached_suffix="small_roads")
+    assert len(layer.dicosmw) == 4
+    assert any("cached OSM small_roads layer of +55+012 was made for other "
+               "queries" in line for line in gf)
+    assert open(cache, "rb").read() == before
+
+
+def test_road_level_raise_refreshes_the_cache(fake_files, gf):
+    for layer in ("coastline", "airports", "water", "big_roads"):
+        _old_cache(55, 12, layer, 1)
+    cache = _road_cache(LEVEL4)
+    assert GEOFABRIK.prepare_tile(FakeTile(55, 12, road_level=5))
+    assert os.path.isfile(EXTRACT.answer_path(55, 12, "small_roads"))
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.small_road_queries(5), layer, 55, 12, [],
+        cached_suffix="small_roads")
+    assert EXTRACT.cache_fits(cache, _roads(5)) is True
+    assert any("small_roads layer of +55+012 was 1 days old, refreshed"
+               in line for line in gf)
+    assert GEOFABRIK.needed_layers(55, 12, 5) == {}

@@ -38,6 +38,9 @@ GENERATOR = "Ortho4XP extract"
 SCALE = 10_000_000  # osmium's fixed-point coordinates: 1e-7 degree
 _STMT = re.compile(r'^(node|way|rel)\["([^"]+)"(?:="([^"]*)")?\]$')
 _HEADER = re.compile(rb'<o4xp_extract statements="([^"]*)" source="([^"]*)"/>')
+_CACHE_STAMP = re.compile(rb'<o4xp_cache statements="([^"]*)"/>')
+_HIGHWAY_VALUE = re.compile(rb'<tag k="highway" v="([^"]*)"/>')
+_HEAD_BYTES = 4000  # the header lines of an answer or a cache
 
 
 # --- statements ---------------------------------------------------------------
@@ -300,6 +303,84 @@ def read_answer(path, statements):
     if sorted(stored) != sorted(statements):
         return (None, "made for other queries (road_level changed?)")
     return (content, html.unescape(m.group(2).decode("utf-8")))
+
+
+# --- which statements made a file (#107) ------------------------------------------
+def cache_stamp(statements):
+    """The line OSM_layer.write_to_file puts after <osm> in a cache: the
+    statements it was made for. The cache reader skips unknown lines."""
+    return ('<o4xp_cache statements="' + xml_escape("\n".join(statements))
+            + '"/>')
+
+
+def _head(path):
+    try:
+        with bz2.open(path, "rb") as f:
+            return f.read(_HEAD_BYTES)
+    except (OSError, EOFError, ValueError):
+        return None
+
+
+def _stamped(pattern, head):
+    m = pattern.search(head or b"")
+    if not m:
+        return None
+    return sorted(html.unescape(m.group(1).decode("utf-8")).split("\n"))
+
+
+def answer_fits(path, statements):
+    """False when the extract answer at path was made for other statements
+    (road_level changed since it was prepared); True otherwise, also for
+    a missing or unreadable one (read_answer reports those)."""
+    stored = _stamped(_HEADER, _head(path))
+    return stored is None or stored == sorted(statements)
+
+
+def small_road_values(road_level):
+    """The highway values of the small_roads layer at this road_level."""
+    import O4_Vector_Map as VMAP
+    return {parse_statement(st)[2]
+            for st in flat_statements(VMAP.small_road_queries(road_level))}
+
+
+def cache_fits(path, statements):
+    """Whether the cached layer at path holds what these statements ask
+    for: True, False, or None when that cannot be told (no file,
+    unreadable).
+
+    A cache written since #107 names its statements. An older one does
+    not: small_roads is the layer whose statements change (road_level), so
+    for it the small road values found in the file must be exactly the
+    asked ones. A tile without a single track then does not fit at
+    road_level 5: one refresh, after which the cache is stamped. Other
+    old caches pass, as before.
+    """
+    head = _head(path)
+    if head is None:
+        return None
+    stored = _stamped(_CACHE_STAMP, head)
+    if stored is not None:
+        return stored == sorted(statements)
+    try:
+        asked = [parse_statement(st) for st in statements]
+    except ValueError:
+        return None
+    if not asked or any(t != "w" or k != "highway" or v is None
+                        for (t, k, v) in asked):
+        return None
+    found = set()
+    try:
+        with bz2.open(path, "rb") as f:
+            tail = b""
+            while chunk := f.read(1 << 22):
+                block = tail + chunk
+                found.update(_HIGHWAY_VALUE.findall(block))
+                # A tag cut at the chunk end is whole in the next block.
+                tail = block[-200:]
+    except (OSError, EOFError, ValueError):
+        return None
+    found = {v.decode("utf-8", "replace") for v in found}
+    return found & small_road_values(5) == {v for (_, _, v) in asked}
 
 
 # --- extraction -------------------------------------------------------------------
