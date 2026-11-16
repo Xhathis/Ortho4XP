@@ -900,6 +900,25 @@ Test results:
   `test` @ 01fccc9: 589 unit tests, pyflakes 0, regression PASS (DSF,
   17/17 masks, app log identical), sims_in_ws all 15/15. Not run:
   gui_smoke, test_parallel_batch, a real imagery outage.
+- Batches reordered 2026-11-16 into pilots before the big runs
+  (G:\Ortho4XP_tests\batches: pilot_zl16.txt = the 36 road_level 5
+  tiles + 16 samples of A and C, pilot_zl15.txt = 6 of B, and
+  batch_a_zl16_rest (322), batch_b_zl15_rest (103), batch_c_zl16_rest
+  (18) without them). ZL16 pilot on `dev` 7b84bf4 (16:33-19:29, 2h56m):
+  51 built, +47+011 failed in step 1 (#113); 36 small_roads refreshes
+  (the 33 + the 3 #106 tiles, which also refreshed their other layers),
+  no "made for other queries" WARNING, overlay WARNINGs only -45+166 and
+  +28-179 (no X-Plane DSF), 31 limit_tris NOTEs, DSFs <= 177 MB. +48+011
+  was built with a zero south and east margin (#113): rebuild it with
+  +47+011 (its mesh is kept for that).
+  #113 `fix/hgt-fine-grid` @ 7852e1c (from dev 7b84bf4): 10 new unit
+  tests (9 fail on dev), 599 pass, pyflakes 0, regression PASS (DSF,
+  17/17 masks, app log identical), sim_dem_failure 10/10 (case E now
+  expects a 1/3" grid to build; new E2: a 5000 grid still raises).
+  Real combined raster (read only): +47+011 builds, its centre equals
+  N47E011.hgt[::2, ::2]; +48+011's south seam 0.8 m (dev: 604.6 m).
+  Batch A, B and the ZL15 pilot touch none of the 33 files; batch C
+  has 5 tiles on them and 8 next to them.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1856,6 +1875,16 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     most imagery_wait_max 6 h; a tile through step 3 reopens it. The
     probe asks the batch's provider (GUI, or tile config at batch
     start). _next_startable takes any number of gates.
+113. **FIXED** (`7852e1c`): the user's Elevation_data holds 33 0.5"
+    .hgt files (7201 x 7201, 2024; Alps N45-N49 / E005-E017). The
+    combined View/SRTM raster takes 1" or 3" grids only, so such a file
+    stopped its own tile in step 1 (DEMError, +47+011) and zeroed a
+    neighbour's 36-sample margin with a WARNING (+48+011: 600 m cliff at
+    its south and east edges, counted as built); master crashed on the
+    shape. thin_to_grid: a square grid with (n - 1) % 3600 == 0 is read
+    as [::k, ::k], its exact 1" posts (console line names the file).
+    custom_dem pointing at the file still uses its full resolution;
+    other grids stop / zero as before.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1990,7 +2019,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     36-tile rebuild (rebuild_road_level5.txt). Done: on `dev` ac92157.
 30. #108-#112 — pre-batch review 2026-11-16; on `test` @ 01fccc9, to
     `dev` with the user's OK, then the 36-tile rebuild and batches A
-    (ZL16), B (ZL15: set ZL15 in the GUI first) and C.
+    (ZL16), B (ZL15: set ZL15 in the GUI first) and C. Done (on
+    `dev` 7b84bf4); pilots first (see the test results).
+31. #113 — 0.5" .hgt files; on `test`, to `dev` with the user's OK
+    before batch C, then rebuild +47+011 and +48+011.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
