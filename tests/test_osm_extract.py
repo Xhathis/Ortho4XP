@@ -379,8 +379,12 @@ def test_prepare_tool(tmp_path, osm_dir, monkeypatch, capsys):
         EXTRACT.answer_path(*T, "small_roads"),
         EXTRACT.flat_statements(VMAP.small_road_queries(3)))[0]
     assert ids(small, "way") == []  # service roads only from level 4
-    assert tool.main([pbf, "--tiles", "+55+012"]) == 0  # nothing to do
+    # nothing to do at the same level; level 4 wants other small roads
+    assert tool.main([pbf, "--tiles", "+55+012", "--road-level", "3"]) == 0
     assert "0 with layers to prepare" in capsys.readouterr().out
+    assert tool.main([pbf, "--tiles", "+55+012", "--road-level", "4",
+                      "--dry-run"]) == 0
+    assert "+55+012: small_roads" in capsys.readouterr().out
 
 
 def test_offshore_only():
@@ -413,3 +417,61 @@ def test_prepare_tool_offshore(tmp_path, osm_dir, monkeypatch, capsys):
     assert "FAIL +58+012: no data in the given files" in out
     assert rc == 1
     assert not os.path.exists(EXTRACT.answer_path(58, 12, "coastline"))
+
+
+def _tool():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "prepare_osm_extracts",
+        os.path.join(os.path.dirname(__file__), "..", "prepare_osm_extracts.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool
+
+
+def test_prepare_tool_tile_file_comments(tmp_path):
+    # The batch lists have a note after every tile (#108).
+    tool = _tool()
+    f = tmp_path / "tiles.txt"
+    f.write_text("# list\n+63-152  # Denali\n\n-45+167\t# Fiordland\n"
+                 "# +10+010\n", encoding="utf-8")
+    assert tool.read_tile_file(str(f)) == [(63, -152), (-45, 167)]
+    f.write_text("+63-152 x\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        tool.read_tile_file(str(f))
+
+
+def _cache(layer, values, days=1, statements=()):
+    path = FNAMES.osm_cached(*T, layer)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    stamp = (EXTRACT.cache_stamp(statements) + "\n") if statements else ""
+    ways = "".join(f'  <way id="{i}">\n    <tag k="highway" v="{v}"/>\n'
+                   "  </way>\n" for (i, v) in enumerate(values, 1))
+    with bz2.open(path, "wt", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" '
+                f'generator="Ortho4XP">\n{stamp}{ways}</osm>')
+    t = __import__("time").time() - days * 86400
+    os.utime(path, (t, t))
+
+
+def test_prepare_tool_layers_as_the_build(osm_dir, monkeypatch):
+    # The tool picks layers by the build's rule (#110): a small_roads cache
+    # of road_level 4 is prepared again at level 5, a cache older than
+    # osm_cache_max_age too; a fresh stamped one is not.
+    tool = _tool()
+    monkeypatch.setattr(tool, "_cfg_value",
+                        lambda path, name: {"osm_cache_max_age": "30"}.get(name))
+    opts = {"road_level": 5}
+    level5 = EXTRACT.flat_statements(VMAP.small_road_queries(5))
+    for layer in ("coastline", "airports", "water", "big_roads"):
+        _cache(layer, [])
+    _cache("small_roads", ["tertiary", "unclassified", "residential",
+                           "service"])
+    assert tool.tile_layers([T], opts) == {T: {"small_roads": level5}}
+    _cache("small_roads", [], statements=level5)
+    assert tool.tile_layers([T], opts) == {}
+    _cache("water", [], days=40)
+    assert list(tool.tile_layers([T], opts)[T]) == ["water"]
+    assert len(tool.tile_layers([T], dict(opts, force=True))[T]) == 5
+    # --check lists the cached layers, whatever their age
+    assert len(tool.tile_layers([T], opts, cached=True)[T]) == 5
