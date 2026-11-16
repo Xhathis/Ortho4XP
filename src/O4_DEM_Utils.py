@@ -387,6 +387,27 @@ class DEM:
 COMBINED_MARGIN = 36
 
 
+def thin_to_grid(alt_dem, base):
+    """Every k-th sample of a grid k times finer than base, else None.
+
+    For grids whose corner samples lie on the tile's edges (base 3601, 1"):
+    a 0.5" file (7201 x 7201) or a 1/3" one (10801) holds every 1" post, so
+    alt_dem[::k, ::k] is exactly the 1" grid of the same survey: nothing
+    interpolated or shifted, only the finer detail dropped. The combined
+    raster needs base x base; a custom_dem pointing at the file keeps its
+    full resolution.
+    """
+    n = alt_dem.shape[0]
+    if (
+        alt_dem.shape != (n, n)
+        or n <= base
+        or (n - 1) % (base - 1)
+    ):
+        return None
+    k = (n - 1) // (base - 1)
+    return alt_dem[::k, ::k]
+
+
 def build_combined_raster(source, lat, lon, info_only):
     world_tiles = numpy.array(
         Image.open(os.path.join(FNAMES.Utils_dir, "world_tiles.png"))
@@ -454,8 +475,22 @@ def build_combined_raster(source, lat, lon, info_only):
                 "(neighbour tile) -> its margin is set to zero altitude.",
             )
             tmparray = numpy.zeros((base, base), dtype=numpy.float32)
+        thinned = (
+            thin_to_grid(tmparray, base)
+            if overlap and tmparray.shape != (base, base)
+            else None
+        )
+        if thinned is not None:
+            UI.vprint(
+                1,
+                f"    {os.path.basename(file_name)} has a "
+                f"{tmparray.shape[1]} x {tmparray.shape[0]} grid: 1 sample in "
+                f"{(tmparray.shape[0] - 1) // (base - 1)} used per row and "
+                "column (the 1\" grid; custom_dem would use all of it).",
+            )
+            tmparray = thinned
         if tmparray.shape != (base, base):
-            # E.g. a 1/3" file (10801 x 10801) in Elevation_data: the
+            # A grid that is no multiple of 1" (thin_to_grid): the
             # combined raster only takes 1" or 3" grids.
             msg = (
                 f"{file_name} has a {tmparray.shape[1]} x {tmparray.shape[0]} "
