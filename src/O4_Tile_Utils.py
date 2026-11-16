@@ -221,6 +221,7 @@ def build_tile(tile, white_retry_follows=False):
         )
         UI.exit_message_and_bottom_line("")
         return 0
+    MASK.fit_mask_zl(tile)  # as step 2.5 made the masks (#109)
 
     # Without a known provider every texture "could not be obtained", and
     # the cause drowned in hundreds of such lines (a batch on 2026-11-04 had
