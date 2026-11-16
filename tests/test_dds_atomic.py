@@ -102,3 +102,23 @@ def test_stale_temp_files_are_removed_fresh_ones_kept(tmp_path):
     os.utime(old, (past, past))
     TILE._remove_stale_temp_files(str(tmp_path))
     assert sorted(os.listdir(tmp_path)) == [".tmp123_789_b.dds", "c.dds"]
+
+
+def test_stale_config_temps_in_the_program_folder(tmp_path):
+    # An empty temp file of .last_gui_params.txt stayed after the GUI was
+    # closed (2026-11-16, #111); only temp files of the named configs go.
+    past = time.time() - 7200
+    files = {".tmp1_2_.last_gui_params.txt": past,
+             ".tmp1_3_Ortho4XP.cfg": past,
+             ".tmp1_4_.last_batch_tiles.txt": time.time(),  # being written
+             ".tmp1_5_other.txt": past,
+             ".last_gui_params.txt": past}
+    for (name, t) in files.items():
+        (tmp_path / name).write_text("")
+        os.utime(tmp_path / name, (t, t))
+    FNAMES.remove_stale_temp_files(str(tmp_path),
+                                   names=FNAMES.ROOT_TEXT_FILES)
+    assert sorted(os.listdir(tmp_path)) == [
+        ".last_gui_params.txt", ".tmp1_4_.last_batch_tiles.txt",
+        ".tmp1_5_other.txt"]
+    FNAMES.remove_stale_temp_files(str(tmp_path / "missing"))  # no error

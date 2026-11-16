@@ -48,6 +48,9 @@ if __name__ == '__main__':
             except OSError as e:
                 print("Could not create required directory", directory, f"({e}). Exit.")
                 sys.exit(1)
+    # Config writes cut off by closing or killing Ortho4XP (#111).
+    FNAMES.remove_stale_temp_files(FNAMES.resource_path("."),
+                                   names=FNAMES.ROOT_TEXT_FILES)
     IMG.initialize_extents_dict()
     IMG.initialize_color_filters_dict()
     IMG.initialize_providers_dict()

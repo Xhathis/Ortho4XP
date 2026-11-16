@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from math import floor
 
 
@@ -32,6 +33,40 @@ def finish_temp_file(tmp_path, path):
         if not os.path.isfile(path):
             raise
         os.remove(tmp_path)
+
+
+def remove_stale_temp_files(folder, min_age=3600, names=None):
+    """Remove temp_path_for files a killed run left in folder.
+
+    A DDS is converted under such a name (#49); Stop in a parallel batch
+    kills the converter and leaves it. A config written by
+    write_text_atomic leaves one when the GUI is closed or killed in the
+    middle (2026-11-16: an empty .tmp..._.last_gui_params.txt, #111).
+    Only old ones go: another process may be writing one right now.
+    names: only temp files of these file names.
+    """
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return
+    now = time.time()
+    for entry in entries:
+        if not entry.startswith(".tmp"):
+            continue
+        if names is not None and not any(
+                entry.endswith("_" + name) for name in names):
+            continue
+        path = os.path.join(folder, entry)
+        try:
+            if now - os.path.getmtime(path) >= min_age:
+                os.remove(path)
+        except OSError:
+            pass
+
+
+# The files Ortho4XP writes in its own folder with write_text_atomic.
+ROOT_TEXT_FILES = ("Ortho4XP.cfg", ".last_gui_params.txt",
+                   ".last_batch_tiles.txt")
 
 
 def write_text_atomic(path, text, backup=None):
