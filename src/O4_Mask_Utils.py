@@ -23,6 +23,30 @@ mask_altitude_above = 0.5
 masks_build_slots = 4
 
 ################################################################################
+def fit_mask_zl(tile):
+    """Lower tile.mask_zl to the tile's lowest imagery zoom level.
+
+    needs_mask and mask_name_for_texture give no mask to a texture below
+    mask_zl, and build_dsf then leaves its water triangles without
+    imagery: a ZL15 tile with mask_zl 16 lost every coast blend, silently
+    (#109). Masks work at any mask_zl up to the texture's (factor
+    2 ** (zl - mask_zl)), so they are made at that zoom level instead.
+    Called by step 2.5 and step 3, which must agree; airport cover only
+    raises the zoom level.
+    """
+    lowest = min([int(tile.default_zl)]
+                 + [int(zone[1]) for zone in tile.zone_list])
+    if int(tile.mask_zl) <= lowest:
+        return
+    UI.lvprint(
+        1, "   NOTE: mask_zl", tile.mask_zl, "is above the lowest imagery "
+        "zoom level", lowest, "of tile", FNAMES.short_latlon(tile.lat, tile.lon)
+        + "; masks are made at ZL" + str(lowest) + " (textures below mask_zl "
+        "get no mask, so their water would get no imagery)."
+    )
+    tile.mask_zl = lowest
+
+
 def mask_name_for_texture(tile, til_x_left, til_y_top, zl, *args):
     if int(zl) < tile.mask_zl:
         return ""
@@ -118,7 +142,8 @@ def build_masks(tile, for_imagery=False):
     )
 
     timer = time.time()
-    
+    fit_mask_zl(tile)
+
     # Check we have a mesh for this tile
     if not os.path.exists(FNAMES.mesh_file(tile.build_dir, tile.lat, tile.lon)):
         UI.lvprint(
