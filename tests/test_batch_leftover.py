@@ -47,6 +47,15 @@ def test_read_skips_what_is_not_a_tile():
     os.remove(path())
 
 
+def test_read_tiles_with_comments():
+    # A batch list written by hand: every tile line has a note (#108).
+    with open(path(), "w", encoding="utf-8") as f:
+        f.write("# ZL16 batch\n+63-152  # Denali\n-45+167\t# Fiordland\n"
+                "+82-063 #CYLT\n# +10+010  commented out\n")
+    assert TILE.read_leftover_tiles() == [(63, -152), (-45, 167), (82, -63)]
+    os.remove(path())
+
+
 def fake_build(calls, fail=(), sea=()):
     def one(tile, lat, lon, *flags):
         calls.append((lat, lon))

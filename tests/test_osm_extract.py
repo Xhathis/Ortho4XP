@@ -413,3 +413,25 @@ def test_prepare_tool_offshore(tmp_path, osm_dir, monkeypatch, capsys):
     assert "FAIL +58+012: no data in the given files" in out
     assert rc == 1
     assert not os.path.exists(EXTRACT.answer_path(58, 12, "coastline"))
+
+
+def _tool():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "prepare_osm_extracts",
+        os.path.join(os.path.dirname(__file__), "..", "prepare_osm_extracts.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool
+
+
+def test_prepare_tool_tile_file_comments(tmp_path):
+    # The batch lists have a note after every tile (#108).
+    tool = _tool()
+    f = tmp_path / "tiles.txt"
+    f.write_text("# list\n+63-152  # Denali\n\n-45+167\t# Fiordland\n"
+                 "# +10+010\n", encoding="utf-8")
+    assert tool.read_tile_file(str(f)) == [(63, -152), (-45, 167)]
+    f.write_text("+63-152 x\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        tool.read_tile_file(str(f))

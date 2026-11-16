@@ -1068,14 +1068,16 @@ def read_leftover_tiles():
     """[(lat, lon)] from the leftover file, [] if there is none.
 
     The file is plain text and may have been edited by hand: lines that
-    are not a tile are skipped, duplicates dropped.
+    are not a tile are skipped, duplicates dropped. A tile may carry a
+    comment after it ("+63-152  # Denali"): such lines used to be skipped
+    silently, so a commented tile list selected nothing (#108).
     """
     tiles = []
     try:
         with open(leftover_tiles_path(), encoding="utf-8",
                   errors="replace") as f:
             for line in f:
-                tile = _parse_short_latlon(line.strip())
+                tile = _parse_short_latlon(line.split("#", 1)[0].strip())
                 if tile and tile not in tiles:
                     tiles.append(tile)
     except FileNotFoundError:

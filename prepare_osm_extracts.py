@@ -6,7 +6,8 @@ Usage (from the Ortho4XP folder, with Ortho4XP's Python):
     python prepare_osm_extracts.py FILE.osm.pbf [FILE ...] TILES [options]
 TILES:
     --tiles +55+012 +56+010     these tiles
-    --tile-file FILE            one +LL+LLL per line (# comments), e.g.
+    --tile-file FILE            one +LL+LLL per line (# comments, also
+                                after a tile), e.g.
                                 .last_batch_tiles.txt
 Options:
     --road-level N   instead of each tile's config (else the global one)
@@ -62,9 +63,15 @@ def parse_tile(text):
 
 
 def read_tile_file(path):
+    """Tiles of a list file: one per line, # starts a comment (also after
+    the tile, as in "+63-152  # Denali", #108)."""
+    tiles = []
     with open(path, encoding="utf-8") as f:
-        return [parse_tile(line) for line in f
-                if line.strip() and not line.lstrip().startswith("#")]
+        for line in f:
+            text = line.split("#", 1)[0].strip()
+            if text:
+                tiles.append(parse_tile(text))
+    return tiles
 
 
 def _cfg_value(path, name):
