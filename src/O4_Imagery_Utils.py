@@ -1452,6 +1452,42 @@ def texture_session(max_threads):
 ################################################################################
 
 ################################################################################
+def provider_answers(lat, lon, zoomlevel, provider_code):
+    """True when the provider gives an image for the middle of tile
+    (lat, lon) at zoomlevel (or, as a texture download does, a lower one).
+
+    The probe of a batch held back by imagery failures (#112): one image of
+    256 x 256 pixels (a combined provider: its first layer), nothing
+    written to disk. False for an unknown provider or any failure.
+    """
+    code = provider_code
+    if code in combined_providers_dict:
+        code = combined_providers_dict[code][0]["layer_code"]
+    provider = providers_dict.get(code)
+    if provider is None:
+        return False
+    zoomlevel = int(zoomlevel)
+    if "max_zl" in provider:
+        zoomlevel = min(zoomlevel, int(provider["max_zl"]))
+    (til_x, til_y) = GEO.wgs84_to_gtile(lat + 0.5, lon + 0.5, zoomlevel)
+    if provider.get("grid_type") == "webmercator":
+        session = texture_session(1)
+        try:
+            (success, _) = get_wmts_image(zoomlevel, til_x, til_y, provider,
+                                          session)
+        finally:
+            session.close()
+        return bool(success)
+    (latmax, lonmin) = GEO.gtile_to_wgs84(til_x, til_y, zoomlevel)
+    (latmin, lonmax) = GEO.gtile_to_wgs84(til_x + 1, til_y + 1, zoomlevel)
+    (xmin, ymax) = GEO.geo_to_webm(lonmin, latmax)
+    (xmax, ymin) = GEO.geo_to_webm(lonmax, latmin)
+    (success, _) = build_texture_from_bbox_and_size(
+        [xmin, ymax, xmax, ymin], "3857", (256, 256), provider)
+    return bool(success)
+
+
+################################################################################
 def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
     # less general than the next build_texture_from_bbox_and_size but
     # probably slightly quicker

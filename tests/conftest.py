@@ -77,6 +77,12 @@ def lines(monkeypatch):
     monkeypatch.setattr(OSM, "overpass_gave_up", False)
     # Never ask the real Overpass from a test (#46).
     monkeypatch.setattr(OSM, "overpass_answers", lambda bbox=None: True)
+    # Nor a real imagery provider (#112); no waits on the real clock.
+    import O4_Imagery_Utils as IMG
+    monkeypatch.setattr(IMG, "provider_answers", lambda *a: True)
+    monkeypatch.setattr(TILE, "imagery_retry_wait", 0)
+    monkeypatch.setattr(TILE, "imagery_probe_interval", 0)
+    monkeypatch.setattr(TILE, "imagery_gave_up", False)
     # The probe runs at once, not in a thread (#81).
     monkeypatch.setattr(TILE, "_run_in_background", lambda fn: [bool(fn())])
     UI.is_working = False
