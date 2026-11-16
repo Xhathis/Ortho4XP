@@ -377,6 +377,65 @@ def test_ensure_file_downloads_once_then_updates(gf, monkeypatch):
     assert calls == ["download", "update"]
 
 
+@pytest.fixture
+def fresh_failures(monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "_failed_downloads", {}, raising=False)
+    monkeypatch.setattr(GEOFABRIK, "_failed_updates", set(), raising=False)
+
+
+def test_failed_download_not_asked_again(gf, monkeypatch, fresh_failures):
+    # Several tile groups can share a file: a download cut at 90 % used to
+    # start again in full for each of them.
+    url = B + "europe/cut-latest.osm.pbf"
+    calls = []
+
+    def download(u, path, md5=True):
+        calls.append(u)
+        raise GEOFABRIK.GeofabrikError(f"{u}: ChunkedEncodingError: cut")
+
+    monkeypatch.setattr(GEOFABRIK, "_download", download)
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="cut"):
+        GEOFABRIK.ensure_file(url)
+    with pytest.raises(GEOFABRIK.GeofabrikError,
+                       match="cut.*not asked again"):
+        GEOFABRIK.ensure_file(url)
+    assert calls == [url]
+
+
+def test_failed_update_not_asked_again(gf, monkeypatch, fresh_failures):
+    url = B + "europe/old-latest.osm.pbf"
+    path = GEOFABRIK.local_path(url)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(b"pbf")
+    calls = []
+    monkeypatch.setattr(GEOFABRIK, "_update",
+                        lambda p: calls.append(p) and False)
+    monkeypatch.setattr(GEOFABRIK, "_age_days", lambda p: 3)
+    monkeypatch.setattr(GEOFABRIK, "data_time", lambda p: __import__(
+        "datetime").datetime(2026, 11, 12))
+    # The file is used as it is (older data), the update tried once.
+    assert GEOFABRIK.ensure_file(url) == path
+    assert GEOFABRIK.ensure_file(url) == path
+    assert calls == [path]
+
+
+def test_next_preparation_tries_again(gf, monkeypatch, fresh_failures):
+    monkeypatch.setattr(GEOFABRIK, "load_index", lambda download=True: [
+        region("europe", -20, 30, 40, 80), region("denmark", 11, 54, 13, 56)])
+    calls = []
+
+    def download(u, path, md5=True):
+        calls.append(u)
+        raise GEOFABRIK.GeofabrikError(f"{u}: HTTPError: 503")
+
+    monkeypatch.setattr(GEOFABRIK, "_download", download)
+    wanted = {(55, 12): {"water": EXTRACT.layer_statements(1)["water"]}}
+    for n in (1, 2):
+        (done, left) = GEOFABRIK.prepare_tiles(wanted)
+        assert "503" in left[(55, 12)] and len(calls) == n
+
+
 def test_update_tool_is_there():
     from osmium.tools.pyosmium_up_to_date import main
     assert callable(main)
