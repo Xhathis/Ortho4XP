@@ -919,6 +919,18 @@ Test results:
   N47E011.hgt[::2, ::2]; +48+011's south seam 0.8 m (dev: 604.6 m).
   Batch A, B and the ZL15 pilot touch none of the 33 files; batch C
   has 5 tiles on them and 8 next to them.
+- ZL15 pilot on `dev` 0d57def (2026-11-16 20:04-20:51): 6 built, 0
+  failed; #109 NOTE on every tile, masks at ZL15 (file names in ZL15
+  tile numbers), tile configs mask_zl 15, masked terrains on all
+  (+64-052 204 of 338); overlay WARNINGs only +76-069, +82-063 (no
+  X-Plane DSF). +82-063's DSF is 2.6 MB: half sea, Viewfinder's land
+  there is very smooth (median neighbour step 0 m), not a bug. `dev`
+  0d57def (#113) pushed, fix/hgt-fine-grid removed. batch_c_zl16_rest
+  now starts with +47+011, +48+011 (20 tiles).
+  #114 `fix/geofabrik-failed-once` @ f52f33e (from dev 0d57def): 3 new
+  unit tests (2 fail on dev; the third checks the next preparation tries
+  again, as on dev), 602 pass, pyflakes 0, regression PASS (DSF, 17/17
+  masks, app log identical), sim_geofabrik_step1 +28-018 0 failures.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1885,6 +1897,17 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     as [::k, ::k], its exact 1" posts (console line names the file).
     custom_dem pointing at the file still uses its full resolution;
     other grids stop / zero as before.
+114. **FIXED** (`f52f33e`): tile groups sharing an extract each called
+    ensure_file, so a cut or refused download started again in full for
+    every group (repeated downloads of one large file, what Geofabrik
+    objects to), and a failed update was retried the same way. Both are
+    remembered for the rest of the preparation (prepare_tiles clears
+    them): the tiles of a failed download go to the fallback at once, a
+    file whose update failed is used as it is. Load on Geofabrik
+    otherwise: one request at a time, in the batch's parent before phase
+    1 (workers never call it), each new extract once (MD5), existing ones
+    updated by daily diffs at most once per preparation, the index every
+    30 days; User-Agent "Ortho4XP".
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2022,7 +2045,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (ZL16), B (ZL15: set ZL15 in the GUI first) and C. Done (on
     `dev` 7b84bf4); pilots first (see the test results).
 31. #113 — 0.5" .hgt files; on `test`, to `dev` with the user's OK
-    before batch C, then rebuild +47+011 and +48+011.
+    before batch C, then rebuild +47+011 and +48+011. Done: on `dev`
+    0d57def, pushed.
+32. #114 — Geofabrik failed files not retried; on `test`, to `dev` with
+    the user's OK, then batch A (322), B (103, ZL15), C (20).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
