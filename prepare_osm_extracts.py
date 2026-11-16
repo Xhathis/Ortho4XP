@@ -131,11 +131,12 @@ def _geofabrik():
     import O4_UI_Utils as UI
     cfg = os.path.join(Ortho4XP_dir, "Ortho4XP.cfg")
     GEOFABRIK.geofabrik_dir = _cfg_value(cfg, "geofabrik_dir") or ""
-    try:
-        GEOFABRIK.geofabrik_max_age = float(
-            _cfg_value(cfg, "geofabrik_max_age") or GEOFABRIK.geofabrik_max_age)
-    except ValueError:
-        pass
+    for name in ("geofabrik_max_age", "osm_cache_max_age"):
+        try:
+            setattr(GEOFABRIK, name, float(
+                _cfg_value(cfg, name) or getattr(GEOFABRIK, name)))
+        except ValueError:
+            pass
     UI.verbosity = max(UI.verbosity, 1)
     return GEOFABRIK
 
@@ -171,17 +172,18 @@ def tile_layers(tiles, opts, cached=False):
         rl = opts["road_level"]
         if rl is None:
             rl = road_level_of(lat, lon, 4)
-        layers = {}
-        for (layer, statements) in EXTRACT.layer_statements(rl).items():
-            is_cached = os.path.isfile(FNAMES.osm_cached(lat, lon, layer))
-            if cached:
-                if is_cached:
-                    layers[layer] = statements
-                continue
-            done = (is_cached
-                    or os.path.isfile(EXTRACT.answer_path(lat, lon, layer)))
-            if opts.get("force") or not done:
-                layers[layer] = statements
+        if cached:
+            layers = {layer: statements for (layer, statements)
+                      in EXTRACT.layer_statements(rl).items()
+                      if os.path.isfile(FNAMES.osm_cached(lat, lon, layer))}
+        else:
+            # The build's own rule (#110): also a cache older than
+            # osm_cache_max_age or made for another road_level, and an
+            # answer made for other statements. The tool used to count any
+            # cache or answer as done, so --dry-run said "0 layers" where
+            # the build would prepare them.
+            layers = _geofabrik().needed_layers(lat, lon, rl,
+                                                force=bool(opts.get("force")))
         if layers:
             wanted[(lat, lon)] = layers
     return wanted
