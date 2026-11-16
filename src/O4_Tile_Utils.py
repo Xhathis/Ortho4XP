@@ -182,6 +182,8 @@ _remove_stale_temp_files = FNAMES.remove_stale_temp_files
 def build_tile(tile, white_retry_follows=False):
     """Step 3. white_retry_follows: the caller retries once if imagery
     came back partly white, so that alone is not reported as an ERROR."""
+    global imagery_gave_up
+    imagery_gave_up = False
     if UI.is_working:
         return 0
     UI.is_working = 1
@@ -396,6 +398,13 @@ def build_tile(tile, white_retry_follows=False):
         UI.exit_message_and_bottom_line("")
         return 0
     if problems:
+        # Only imagery was missing (the DSF and every conversion of what
+        # came are fine): an imagery outage looks like this, and a batch
+        # tries the tile again later (#112).
+        imagery_gave_up = only_imagery_missing(
+            dsf_result["ok"], IMG.failed_conversions, failed_downloads,
+            white_imgs,
+        )
         UI.lvprint(
             0, "ERROR: Tile", FNAMES.short_latlon(tile.lat, tile.lon),
             "is incomplete (" + ", ".join(problems) + "); the DSF was not",
@@ -435,6 +444,9 @@ def build_tile(tile, white_retry_follows=False):
 # again. Batches set this (workers too) and delete the files at the end
 # instead, see _remove_meshes_after_batch (#42).
 keep_mesh_after_step3 = False
+# Set by build_tile when step 3 failed only for want of imagery (downloads
+# failed or came back partly white): a batch tries such tiles again (#112).
+imagery_gave_up = False
 
 
 def _remove_mesh_files(build_dir, lat, lon):
@@ -643,24 +655,32 @@ def _build_tile_list_sequential(tile, list_lat_lon, flags):
     built = []  # (lat, lon) of tiles through the last phase
     phases = _batch_phases(flags)
     todo = list(list_lat_lon)
+    # The batch's provider for the imagery probe, before a tile config is
+    # read into tile.
+    probe_tile = copy.copy(tile)
     # Same two phases as the parallel batch: a tile's masks also use its
     # neighbours' meshes, so all meshes must exist before any masks.
     for (p, (name, steps)) in enumerate(phases):
         if len(phases) > 1:
             UI.vprint(0, f"Batch phase {p + 1}/{len(phases)}: {name}")
         last_phase = p == len(phases) - 1
-        # Step 1 waits out Overpass outages (#81).
+        # Step 1 waits out Overpass outages (#81), step 3 imagery ones
+        # (#112).
         gate = _OverpassGate() if steps[0] else None
+        igate = _imagery_gate(probe_tile, steps)
         pending = list(todo)
         while pending:
-            if gate:
-                gate.poll(pending)
-            i = _next_startable(pending, gate)
+            for g in (gate, igate):
+                if g:
+                    g.poll(pending)
+            i = _next_startable(pending, gate, igate)
             if i is None:
-                # Nothing may start now: Overpass gives no answer, or the
-                # tiles left wait for their next try.
+                # Nothing may start now: Overpass or the imagery provider
+                # gives no answer, or the tiles left wait for their next try.
                 if not _sleep_unless_stop(1):
-                    UI.lvprint(0, "Batch stopped while waiting for Overpass.")
+                    what = ("the imagery provider" if igate and
+                            igate.paused is not None else "Overpass")
+                    UI.lvprint(0, f"Batch stopped while waiting for {what}.")
                     UI.exit_message_and_bottom_line()
                     return 0
                 continue
@@ -672,6 +692,8 @@ def _build_tile_list_sequential(tile, list_lat_lon, flags):
             failed_step = _build_one_tile(tile, lat, lon, *steps)
             if needed and _step1_passed(failed_step):
                 gate.answered()
+            if igate and _step3_passed(failed_step):
+                igate.answered()
             if failed_step == SEA_SKIPPED:
                 # Open sea, nothing to build (#41): not a failure, but
                 # no later phase either.
@@ -688,6 +710,10 @@ def _build_tile_list_sequential(tile, list_lat_lon, flags):
                 UI.is_working = False
                 if (gate and _failed_on_overpass(failed_step)
                         and gate.failed(lat, lon)):
+                    pending.append((lat, lon))
+                    continue
+                if (igate and _failed_on_imagery(failed_step)
+                        and igate.failed(lat, lon)):
                     pending.append((lat, lon))
                     continue
                 # An error in this tile: the step has already reported
@@ -749,6 +775,25 @@ overpass_tile_tries = 3
 overpass_retry_wait = 600
 overpass_probe_interval = 300
 overpass_wait_max = 6 * 3600
+# A batch worker's exit code when step 3 failed only for want of imagery
+# (imagery_gave_up): the batch tries such tiles again (#112).
+IMAGERY_EXIT_CODE = 5
+# Imagery outages (#112). Overpass outages cost whole batches (#81), but
+# nothing held step 3 back when the imagery provider failed: every tile
+# would download into the outage and fail, one after the other, for as
+# long as it lasted (a provider that blocks the IP, as overpass-api.de did
+# on 2026-11-13, for good). Now a tile that failed step 3 only on imagery
+# goes back into the queue, not before imagery_retry_wait seconds, and
+# fails after imagery_tile_tries such failures; once imagery_pause_after
+# tiles in a row failed so, no tile starts step 3 until the provider
+# answers a probe again (one image at the first held tile, every
+# imagery_probe_interval seconds, at most imagery_wait_max). A rerun of
+# step 3 only fetches the missing textures.
+imagery_pause_after = 2
+imagery_tile_tries = 3
+imagery_retry_wait = 600
+imagery_probe_interval = 300
+imagery_wait_max = 6 * 3600
 # The cached OSM layers of a tile (FNAMES.osm_cached): a tile with all of
 # them needs no Overpass in step 1. small_roads is missing below road_level
 # 2, which only holds such a tile back during a pause too.
@@ -773,6 +818,29 @@ def _step1_passed(failed_step):
     return failed_step in (None, SEA_SKIPPED) or failed_step in BATCH_STEPS[1:]
 
 
+def only_imagery_missing(dsf_ok, failed_conversions, failed_downloads,
+                         white_imgs):
+    """True when step 3 lacks only imagery: textures not downloaded or
+    partly white, while the DSF was built and every texture that came was
+    converted. Another problem is no outage and is not retried."""
+    return bool(dsf_ok and not failed_conversions
+                and (failed_downloads or white_imgs))
+
+
+def _failed_on_imagery(failed_step):
+    """True if a tile's step 3 failed only for want of imagery."""
+    return (
+        failed_step == BATCH_STEPS[3]
+        and imagery_gave_up
+        and not UI.stop_requested
+    )
+
+
+def _step3_passed(failed_step):
+    """True if the tile got through step 3 (so its imagery came)."""
+    return failed_step is None or failed_step == BATCH_STEPS[4]
+
+
 def _run_in_background(fn):
     """Run fn in a daemon thread; the list returned gets bool(result).
 
@@ -791,10 +859,11 @@ def _run_in_background(fn):
     return out
 
 
-def _next_startable(pending, gate):
-    """Index of the first tile in pending that may start now, or None."""
+def _next_startable(pending, *gates):
+    """Index of the first tile in pending that every gate lets start now,
+    or None."""
     for (i, (lat, lon)) in enumerate(pending):
-        if gate is None or gate.can_start(lat, lon):
+        if all(g is None or g.can_start(lat, lon) for g in gates):
             return i
     return None
 
@@ -922,6 +991,124 @@ class _OverpassGate:
         self.probe = None
 
 
+class _ImageryGate:
+    """Step 3 of a batch phase during imagery outages (#112), as
+    _OverpassGate does for step 1.
+
+    provider_code, zoomlevel: what the probe asks for (the batch's
+    provider; tiles with their own provider in their config are rare).
+    """
+
+    def __init__(self, provider_code, zoomlevel):
+        self.provider_code = provider_code
+        self.zoomlevel = zoomlevel
+        self.in_row = 0  # tiles in a row that failed step 3 on imagery
+        self.paused = None  # time.time() of the pause, None when open
+        self.next_probe = 0.0
+        self.probe = None  # result list of the running probe
+        self.tries = {}  # (lat, lon) -> step 3 tries lost to imagery
+        self.not_before = {}  # (lat, lon) -> earliest time of its next try
+
+    def can_start(self, lat, lon):
+        if time.time() < self.not_before.get((lat, lon), 0.0):
+            return False
+        return self.paused is None
+
+    def answered(self):
+        """A tile got through step 3."""
+        self.in_row = 0
+        if self.paused is not None:
+            self._resume(
+                "A tile got its imagery again after "
+                + UI.nicer_timer(time.time() - self.paused)
+                + ": starting the held tiles."
+            )
+
+    def failed(self, lat, lon):
+        """A tile failed step 3 on imagery; True if it gets another try."""
+        now = time.time()
+        key = (lat, lon)
+        self.in_row += 1
+        n = self.tries[key] = self.tries.get(key, 0) + 1
+        coords = FNAMES.short_latlon(lat, lon)
+        again = n < imagery_tile_tries
+        if again:
+            self.not_before[key] = now + imagery_retry_wait
+            UI.lvprint(
+                0, "Tile", coords, "failed in step", BATCH_STEPS[3],
+                f"(imagery missing, try {n} of {imagery_tile_tries})"
+                " - it will be tried again"
+                + (f", not before {UI.nicer_timer(imagery_retry_wait)}"
+                   if imagery_retry_wait >= 1 else "") + ".",
+            )
+        else:
+            UI.lvprint(
+                0, "Tile", coords, f"did not get all its imagery in {n} tries.",
+            )
+        if self.paused is None and self.in_row >= imagery_pause_after:
+            self.paused = now
+            self.probe = None
+            self.next_probe = now + imagery_probe_interval
+            UI.lvprint(
+                0, f"Imagery failed for {self.in_row} tiles in a row: no "
+                "tile starts step 3 until the provider",
+                self.provider_code, "answers again (checked every "
+                f"{UI.nicer_timer(imagery_probe_interval)}, at most "
+                f"{UI.nicer_timer(imagery_wait_max)}).",
+            )
+        return again
+
+    def poll(self, pending):
+        """While paused, probe the provider now and then; reopen when it
+        gives an image."""
+        if self.paused is None:
+            return
+        now = time.time()
+        if self.probe is not None:
+            if not self.probe:
+                return  # still asking
+            ok = self.probe[0]
+            self.probe = None
+            if ok:
+                self._resume(
+                    "The imagery provider answers again after "
+                    + UI.nicer_timer(now - self.paused)
+                    + ": starting the held tiles."
+                )
+                return
+            self.next_probe = now + imagery_probe_interval
+        if now - self.paused >= imagery_wait_max:
+            self._resume(
+                "The imagery provider still gives no image after "
+                + UI.nicer_timer(now - self.paused)
+                + ": starting the held tiles anyway."
+            )
+            return
+        if now < self.next_probe or not pending:
+            return
+        (lat, lon) = pending[0]
+        (code, zl) = (self.provider_code, self.zoomlevel)
+        self.probe = _run_in_background(
+            lambda: IMG.provider_answers(lat, lon, zl, code)
+        )
+
+    def _resume(self, message):
+        UI.lvprint(0, message)
+        self.paused = None
+        self.in_row = 0
+        self.probe = None
+
+
+def _imagery_gate(tile, steps):
+    """The _ImageryGate of a batch phase whose steps include step 3."""
+    if not steps[3]:
+        return None
+    # A tile without them (test fakes) gets a gate whose probe fails, so
+    # a pause lasts imagery_wait_max.
+    return _ImageryGate(getattr(tile, "default_website", ""),
+                        getattr(tile, "default_zl", 16))
+
+
 def _sleep_unless_stop(seconds):
     """Sleep, checking the Stop button every second; False if pressed."""
     end = time.time() + seconds
@@ -1003,6 +1190,8 @@ def _build_one_tile_steps(
             return BATCH_STEPS[2]
     if do_dsf:
         current[0] = BATCH_STEPS[3]
+        global imagery_gave_up
+        imagery_gave_up = False
         ok = build_tile_retrying_white(tile)
         if not ok or UI.red_flag:
             return BATCH_STEPS[3]
@@ -1120,7 +1309,7 @@ def batch_worker(tile, flags):
     flags is the "0"/"1" string of (osm, mesh, mask, dsf, ovl, override).
     Returns the exit code: 0 when built, SEA_EXIT_CODE for open sea,
     OVERPASS_EXIT_CODE when step 1 failed for want of an Overpass answer,
-    10 + index in BATCH_STEPS when a step failed otherwise.
+    IMAGERY_EXIT_CODE when step 3 failed for want of imagery, 10 + index in BATCH_STEPS when a step failed otherwise.
     """
     UI.red_flag = 0
     UI.stop_requested = False
@@ -1143,6 +1332,8 @@ def batch_worker(tile, flags):
         return SEA_EXIT_CODE
     if _failed_on_overpass(failed_step):
         return OVERPASS_EXIT_CODE
+    if _failed_on_imagery(failed_step):
+        return IMAGERY_EXIT_CODE
     if failed_step in BATCH_STEPS:
         return 10 + BATCH_STEPS.index(failed_step)
     return 1  # "tile setup": the parent reports the exit code
@@ -1217,6 +1408,8 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
              for (k, (name, steps)) in enumerate(phases)],
             nbr_slots, context_file, built=built,
             gate=_OverpassGate() if phases and phases[0][1][0] else None,
+            igate=next((g for g in (_imagery_gate(tile, steps)
+                                    for (_, steps) in phases) if g), None),
         )
         if failed_tiles is None:  # Stop button
             return 0
@@ -1247,12 +1440,12 @@ def _worker_env():
 
 def _run_batch_phase(
     tile, list_lat_lon, flags, nbr_slots, last_phase, context_file,
-    built=None, gate=None,
+    built=None, gate=None, igate=None,
 ):
     """One phase of a parallel batch for list_lat_lon (see _run_batch_phases)."""
     return _run_batch_phases(
         tile, list_lat_lon, [("", flags, last_phase)], nbr_slots,
-        context_file, built=built, gate=gate,
+        context_file, built=built, gate=gate, igate=igate,
     )
 
 
@@ -1266,7 +1459,7 @@ def _phase2_ready(lat, lon, in_batch, ended1):
 
 def _run_batch_phases(
     tile, list_lat_lon, phases, nbr_slots, context_file, built=None,
-    gate=None,
+    gate=None, igate=None,
 ):
     """Run one worker per tile and phase, up to nbr_slots per phase.
 
@@ -1278,7 +1471,8 @@ def _run_batch_phases(
     built (when given). With a gate (_OverpassGate, first phase with step
     1), a tile whose step 1 found no Overpass answer goes back into the
     queue while it has tries left, and tiles that need Overpass are held
-    back during an outage; without one it is a step 1 failure.
+    back during an outage; without one it is a step 1 failure. igate
+    (_ImageryGate) does the same for step 3, in the phase that has it.
     """
     script = FNAMES.resource_path("Ortho4XP.py")
     # A frozen (PyInstaller) build is its own interpreter and script.
@@ -1298,12 +1492,17 @@ def _run_batch_phases(
     failed_tiles = []
     started = [0] * len(phases)
     needed = {}  # (lat, lon) -> needed Overpass when started
+    # The phase with step 3, which igate holds back (#112).
+    img_phase = next((k for (k, (_, flags, _)) in enumerate(phases)
+                      if flags[3]), None) if igate else None
 
     def next_tile(p):
+        g = igate if p == img_phase else None
         if p == 0:
-            return _next_startable(queues[0], gate)
+            return _next_startable(queues[0], gate, g)
         for (i, (lat, lon)) in enumerate(queues[p]):
-            if _phase2_ready(lat, lon, in_batch, ended1):
+            if _phase2_ready(lat, lon, in_batch, ended1) and (
+                    g is None or g.can_start(lat, lon)):
                 return i
         return None
 
@@ -1315,6 +1514,8 @@ def _run_batch_phases(
     while any(queues) or running:
         if gate:
             gate.poll(queues[0])
+        if img_phase is not None:
+            igate.poll(queues[img_phase])
         for p in range(len(phases)):
             while queues[p] and not UI.stop_requested and sum(
                     1 for info in running.values() if info[0] == p
@@ -1374,6 +1575,8 @@ def _run_batch_phases(
                     code in (0, SEA_EXIT_CODE)
                     or 11 <= code < 10 + len(BATCH_STEPS)):
                 gate.answered()  # it got through step 1
+            if p == img_phase and code in (0, 10 + 4):
+                igate.answered()  # it got through step 3
             if code == 0:
                 UI.vprint(
                     0, f"Tile {coords}", "built" if last_phase else "done",
@@ -1405,8 +1608,14 @@ def _run_batch_phases(
                     and gate.failed(lat, lon)):
                 queues[0].append((lat, lon))
                 continue
+            if (p == img_phase and code == IMAGERY_EXIT_CODE
+                    and igate.failed(lat, lon)):
+                queues[p].append((lat, lon))
+                continue
             if code == OVERPASS_EXIT_CODE:
                 step = BATCH_STEPS[0]
+            elif code == IMAGERY_EXIT_CODE:
+                step = BATCH_STEPS[3]
             elif 10 <= code < 10 + len(BATCH_STEPS):
                 step = BATCH_STEPS[code - 10]
             else:
