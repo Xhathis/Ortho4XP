@@ -867,6 +867,39 @@ Test results:
   G:\Ortho4XP_tests\batches\rebuild_road_level5.txt: those 33 plus the
   3 tiles above (prepare_osm_extracts.py --force --road-level 5 first:
   their caches fit level 5 but predate #106).
+- The 229-tile rebuild ended 2026-11-16 02:43 (12h11m): 229 built, 0
+  failed, no ERROR; the 3 "extract answer ... made for other queries"
+  WARNINGs were +53+008/+53+009/+69+030 (#107 on test, not yet on dev);
+  202 limit_tris NOTE tiles; no overlay WARNING (Demo Areas as
+  alternate source); no mesh left, 5 meshes of earlier batches removed.
+  `test` @ ac92157 (#107): regression PASS (DSF, 17/17 masks, app log
+  identical), sim_geofabrik_step1 +28-018 0 failures. The 3 tiles
+  re-prepared (--tiles ... --road-level 5 --force, 240 s, 0 left to
+  Overpass). -> `dev` fast-forwarded to ac92157 and pushed (user's OK);
+  .last_batch_tiles.txt set to the 36 tiles of rebuild_road_level5.txt.
+- Pre-batch review 2026-11-16 (before batches A/B/C, read-only checks of
+  the lists G:\Ortho4XP_tests\batches\batch_a_zl16_all.txt (335),
+  batch_b_zl15_greenland_arctic.txt (109), batch_c_zl16_south_germany.txt
+  (21)): all covered by Geofabrik (0 tiles to Overpass; A needs 66
+  extracts not on disk, B 2, C 25), no tile folder or tile config yet,
+  B and C have all .hgt, 86 land tiles of A get Viewfinder in step 1,
+  15 tiles have no X-Plane DSF (13 in B north of 76 N, +28-179,
+  -45+166: overlay WARNING only). Found #108-#111; #112 asked for by the
+  user. Each `fix/<name>` from dev ac92157: #108 + #110
+  `fix/tile-lists` @ fa43db9, 312dd8d; #109 `fix/mask-zl` @ 71831b9;
+  #111 `fix/temp-leftovers` @ 09adf2c; #112 `fix/imagery-gate` @
+  7127c49. 31 new unit tests (the #108, #110 ones fail on dev; the old
+  prepare tool test now passes --road-level 3 for "nothing to do").
+  #109 real check (scratchpad zl15_masks.py, cwd regression worktree,
+  its mesh copied, downloads skipped): +55+012 steps 2.5-3 at ZL15,
+  mask_zl 16: dev 100 masks at ZL16, 104 terrains, 50 masked (airports
+  only); fixed 40 masks at ZL15, 142 terrains, 88 masked. #110: the
+  fixed script's dry run of the rebuild list finds the 33 small_roads
+  layers (dev: 0). #112 probe against real servers: GO2 +72-040 ZL15,
+  GO2 and Arc +55+012 answer in 0.3-0.6 s; a closed port False in 2 s.
+  `test` @ 01fccc9: 589 unit tests, pyflakes 0, regression PASS (DSF,
+  17/17 masks, app log identical), sims_in_ws all 15/15. Not run:
+  gui_smoke, test_parallel_batch, a real imagery outage.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1784,6 +1817,45 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (answer_fits) or cache does not fit; step 1 prefers the newer
     answer (#104), else uses the cache with a logged WARNING. No
     Overpass request for it (as #104).
+108. **FIXED** (`fa43db9`): .last_batch_tiles.txt
+    (read_leftover_tiles) and prepare_osm_extracts.py --tile-file
+    matched a whole line against +LL+LLL; the batch lists of 2026-11-15
+    note every tile ("+63-152  # Denali"), so the tile window would have
+    selected none of their 465 tiles (silently) and the script stopped.
+    Both cut a line at "#" first.
+109. **FIXED** (`71831b9`): needs_mask / mask_name_for_texture give no
+    mask to a texture below mask_zl, and build_dsf then gives its water
+    triangles no imagery; with the user's mask_zl 16 the ZL15 batch B
+    would have lost every coast blend, silently, after building all
+    masks at ZL16. MASK.fit_mask_zl (step 2.5 and step 3) lowers
+    tile.mask_zl to min(default_zl, zone zoom levels) with a NOTE. The
+    user's 450 tile configs are all ZL16 / mask_zl 16: none affected.
+110. **FIXED** (`312dd8d`): prepare_osm_extracts.py counted any cache or
+    answer as done, so it skipped stale caches (#104), caches of another
+    road_level and answers of other statements (#107); it now uses
+    GEOFABRIK.needed_layers and reads osm_cache_max_age. --check
+    unchanged. The build was never affected.
+111. **FIXED** (`09adf2c`): a config write cut off by closing or
+    killing Ortho4XP left its write_text_atomic temp file for good
+    (2026-11-16 05:16: empty .tmp..._.last_gui_params.txt).
+    FNAMES.remove_stale_temp_files (was TILE._remove_stale_temp_files,
+    #49; name filter added) runs at startup for the program folder's
+    configs (ROOT_TEXT_FILES) and in step 3 for the tile folder; files
+    younger than 1 h stay.
+112. **DONE** (`7127c49`): nothing held step 3 back when the imagery
+    provider failed: every tile downloaded into the outage and failed.
+    build_tile sets TILE.imagery_gave_up when only imagery is missing
+    (only_imagery_missing: textures not downloaded or partly white, DSF
+    built, all conversions fine); workers exit IMAGERY_EXIT_CODE 5.
+    _ImageryGate in the phase with step 3 (sequential and parallel): the
+    tile is requeued, not before imagery_retry_wait 600 s, fails after
+    imagery_tile_tries 3; after imagery_pause_after 2 such tiles in a
+    row no tile starts step 3 until IMG.provider_answers (one 256 px
+    image at the first held tile, nothing written; combined provider:
+    first layer) gets an image, every imagery_probe_interval 300 s, at
+    most imagery_wait_max 6 h; a tile through step 3 reopens it. The
+    probe asks the batch's provider (GUI, or tile config at batch
+    start). _next_startable takes any number of gates.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -1915,7 +1987,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Then rebuild the 13 tiles from step 1 (and +67+017).
 29. #107 — caches made for another road_level; on `test`, regression
     after the running batch, then to `dev` with the user's OK and the
-    36-tile rebuild (rebuild_road_level5.txt).
+    36-tile rebuild (rebuild_road_level5.txt). Done: on `dev` ac92157.
+30. #108-#112 — pre-batch review 2026-11-16; on `test` @ 01fccc9, to
+    `dev` with the user's OK, then the 36-tile rebuild and batches A
+    (ZL16), B (ZL15: set ZL15 in the GUI first) and C.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
