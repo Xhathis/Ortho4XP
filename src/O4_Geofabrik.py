@@ -67,6 +67,12 @@ MIN_GAP = EXTRACT.MIN_GAP
 CONTAINER_MIN_SHARE = 0.25
 
 _index_cache = {}  # path -> (mtime, regions)
+# Within one preparation (prepare_tiles: a batch's, or one tile's), a file
+# that failed to download or update is not asked for again: several tile
+# groups can share a file, and each would start the whole download anew
+# (Geofabrik objects to repeated downloads of the same file).
+_failed_downloads = {}  # url -> error message
+_failed_updates = set()  # local paths
 
 
 class GeofabrikError(Exception):
@@ -431,9 +437,16 @@ def ensure_file(url):
     with _FileLock(path + ".lock"):
         _remove_leftover_temps(path)
         if not os.path.isfile(path):
+            if url in _failed_downloads:
+                raise GeofabrikError(f"{_failed_downloads[url]} (failed "
+                                     "earlier in this run, not asked again)")
             UI.vprint(1, f"    Downloading {url}")
             start = time.time()
-            _download(url, path)
+            try:
+                _download(url, path)
+            except (GeofabrikError, OSError) as e:
+                _failed_downloads[url] = str(e)
+                raise
             UI.lvprint(1, f"    Geofabrik: downloaded {os.path.basename(path)}"
                        f" ({os.path.getsize(path) / 1e6:.0f} MB, "
                        f"{time.time() - start:.0f} s).")
@@ -442,12 +455,16 @@ def ensure_file(url):
         checked = _checked_path(path)
         recently = (os.path.isfile(checked)
                     and time.time() - os.path.getmtime(checked) < UPDATE_RECHECK)
-        if age > geofabrik_max_age and not recently:
+        if (age > geofabrik_max_age and not recently
+                and path not in _failed_updates):
             UI.vprint(1, f"    Updating {os.path.basename(path)} (data of "
                       f"{data_time(path):%Y-%m-%d %H:%M} UTC)")
             if _update(path):
                 with open(checked, "w"):
                     pass
+            else:
+                # The file stays usable as it is (older data).
+                _failed_updates.add(path)
             UI.vprint(1, f"    {os.path.basename(path)}: data of "
                       f"{data_time(path):%Y-%m-%d %H:%M} UTC")
     return path
@@ -560,6 +577,9 @@ def prepare_tiles(wanted, write=True):
     """
     if not wanted:
         return ({}, {})
+    # A new preparation (the next batch or build) may try failed files again.
+    _failed_downloads.clear()
+    _failed_updates.clear()
     regions = load_index()
     (plan, left, sea) = plan_tiles(wanted, regions)
     done = {}
