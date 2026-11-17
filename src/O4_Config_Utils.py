@@ -19,6 +19,7 @@ import O4_OSM_Utils as OSM
 import O4_Overlay_Utils as OVL
 import O4_Tile_Utils as TILE
 import O4_UI_Utils as UI
+import O4_XP_Airports as XPAPT
 import sys
 from O4_Cfg_Vars import (
     cfg_app_vars,
@@ -47,7 +48,7 @@ from O4_Cfg_Vars import (
 # The modules named in cfg_vars[...]["module"]: such a setting lives
 # there (e.g. IMG.http_timeout), the others in this module.
 _CFG_MODULES = {"GEOFABRIK": GEOFABRIK, "IMG": IMG, "OSM": OSM, "OVL": OVL,
-                "TILE": TILE, "UI": UI}
+                "TILE": TILE, "UI": UI, "XPAPT": XPAPT}
 
 
 def _cfg_owner(var):

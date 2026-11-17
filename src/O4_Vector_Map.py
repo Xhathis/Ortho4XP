@@ -13,6 +13,8 @@ import O4_File_Names as FNAMES
 import O4_Geofabrik as GEOFABRIK
 import O4_Geo_Utils as GEO
 import O4_Airport_Utils as APT
+import O4_Overlay_Utils as OVL
+import O4_XP_Airports as XPAPT
 
 good_imagery_list = ()
 
@@ -333,6 +335,9 @@ def include_airports(vector_map, tile):
         return (0, 0)
     APT.smooth_raster_over_airports(tile, dico_airports)
     (patches_area, patches_list) = include_patches(vector_map, tile)
+    patches_area = include_xp_flatten_areas(
+        vector_map, tile, dico_airports, patches_area, patches_list
+    )
     runway_taxiway_apron_area = APT.encode_runways_taxiways_and_aprons(
         tile, airport_layer, dico_airports, vector_map, patches_list
     )
@@ -747,6 +752,58 @@ def include_water(vector_map, tile):
 #         check=True,
 #     )
 #     return 1
+
+
+################################################################################
+def include_xp_flatten_areas(
+    vector_map, tile, dico_airports, patches_area, patches_list
+):
+    """Build the areas X-Plane flattens (apt.dat "flatten 1" airports) flat
+    at the airport elevation, like a patch with cst_alt_abs, so X-Plane's
+    flat ground meets the mesh with slopes instead of vertical walls. A user
+    patch named after the airport (Patches/<tile>/<ICAO>.patch.osm) wins.
+    The OSM runways, taxiways and aprons inside such an area are not
+    levelled again (they would get altitudes from the elevation data).
+    Returns patches_area with the areas added; patches_list gets the keys
+    of the OSM airports to leave out of encode_runways_taxiways_and_aprons.
+    """
+    areas = XPAPT.flatten_areas_for_tile(
+        tile, (OVL.custom_overlay_src, OVL.custom_overlay_src_alternate)
+    )
+    for icao, elev, area in areas:
+        if icao in patches_list:
+            UI.vprint(1, f"   {icao}: user patch used, not X-Plane's flatten "
+                      "area.")
+            continue
+        for pol in area.geoms:
+            for ring in [pol.exterior] + list(pol.interiors):
+                way = numpy.array(ring.coords, dtype=float)
+                alti = numpy.full((len(way), 1), float(elev))
+                vector_map.insert_way(
+                    numpy.hstack([way, alti]), "INTERP_ALT", check=True
+                )
+            seed = numpy.array(pol.representative_point().coords[0])
+            vector_map.seeds.setdefault("INTERP_ALT", []).append(seed)
+        patches_area = patches_area.union(area)
+        inside = []
+        for key, apt in dico_airports.items():
+            if key in patches_list:
+                continue
+            surfaces = ops.unary_union(
+                [apt["runway"][0], apt["taxiway"][0], apt["apron"][0]]
+            )
+            if not surfaces.is_empty and surfaces.intersection(area).area > 0:
+                patches_list.append(key)
+                inside.append(str(key))
+        UI.lvprint(
+            1,
+            f"   Airport {icao}: built flat at {elev} m inside X-Plane's "
+            f"airport boundary ({XPAPT.degrees_area_to_km2(area.area, tile.lat):.2f}"
+            " km2 in this tile; apt.dat has flatten 1)"
+            + (f", OSM surfaces of {', '.join(inside)} not levelled"
+               if inside else "") + ".",
+        )
+    return patches_area
 
 
 ################################################################################
