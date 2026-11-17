@@ -937,7 +937,7 @@ Test results:
   ENVE (+59+007) rebuilt at limit_tris 10 loads in X-Plane at ~55 fps (it
   hung at 40). Greenland: batch_d_zl15_greenland_extra.txt (18 tiles with
   OSM airstrips/helipads not in apt.dat) and batch_bd_zl15_greenland.txt
-  (B + D + +64-052, 122 tiles) in G:\Ortho4XP_testsatches.
+  (B + D + +64-052, 122 tiles) in G:\Ortho4XP_tests\batches.
   Nuuk walls (user's screenshots, ZL15 pilot): X-Plane's apt.dat has
   "1302 flatten 1" for BGGH (282 ft), the DEM (N64W052.hgt, 2020) predates
   the new runway, 18-107 m inside the boundary. Hand patch
