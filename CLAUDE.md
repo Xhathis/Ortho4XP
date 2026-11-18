@@ -931,6 +931,40 @@ Test results:
   unit tests (2 fail on dev; the third checks the next preparation tries
   again, as on dev), 602 pass, pyflakes 0, regression PASS (DSF, 17/17
   masks, app log identical), sim_geofabrik_step1 +28-018 0 failures.
+- Batch A on `dev` 9a9a0b0 (322 tiles, started 2026-11-16 21:30): Geofabrik
+  preparation 21:30-23:41, one request at a time, all 322 prepared, no
+  failure (#114 never acted); phase 1 done for all by 2026-11-17 07:00.
+  ENVE (+59+007) rebuilt at limit_tris 10 loads in X-Plane at ~55 fps (it
+  hung at 40). Greenland: batch_d_zl15_greenland_extra.txt (18 tiles with
+  OSM airstrips/helipads not in apt.dat) and batch_bd_zl15_greenland.txt
+  (B + D + +64-052, 122 tiles) in G:\Ortho4XP_tests\batches.
+  Nuuk walls (user's screenshots, ZL15 pilot): X-Plane's apt.dat has
+  "1302 flatten 1" for BGGH (282 ft), the DEM (N64W052.hgt, 2020) predates
+  the new runway, 18-107 m inside the boundary. Hand patch
+  Patches/+64-052/BGGH.patch.osm (apt.dat boundary, cst_alt_abs 85.95;
+  in the user's checkout, not committed), then #115. Read-only scan of the
+  933 built/queued tiles: 46 flatten airports, ~20 with steps >= 15 m
+  (AYPY 100 up, HECA 87 down, BGGH, Western Sydney, EKVG, GCFV,
+  Qaqortoq, KEGE, LCEN, GCTS, EBBX, ...).
+  #115 `fix/xp-flatten-airports` @ f6c4468 (from dev 9a9a0b0): 10 new unit
+  tests (all fail on dev: new module), 612 pass, pyflakes 0. Real apt.dat
+  index (scratch Tmp_dir): 647 airports, 2.6 s, 419 KB, all 46 of the
+  scan; BGGH 0.891 km2 at 85.95 m. Step 1 of +64-052 in a scratch cwd
+  (cached OSM and DEM copied, no network): on: 43 nodes at 85.95 m, OSM
+  runway of BGGH not levelled, the log line; off: 0 such nodes, as dev.
+  After batch A (2026-11-18): regression PASS (DSF, 17/17 masks, app log
+  identical; console "apt.dat not found": the frozen GlobalScenery copy
+  has no Global Airports next to it), sims_in_ws all 15/15, gui_smoke
+  7/7 against the branch's src (136 tiles on the map; .last_gui_params,
+  log, cfg hash-checked), steps 1-2 of +64-052 in the scratch cwd
+  (scratchpad step2_flatten.py): on: 79 mesh vertices inside BGGH's
+  boundary, all 85.95 m; off: 1,462, 26.9-101.6 m.
+- Batch A on `dev` 9a9a0b0 (322 tiles, 2026-11-16 23:41 to 11-18 13:03,
+  37h22m): 322 built, 0 failed, no ERROR; 156 limit_tris NOTEs; 3 tiles
+  recorded as sea (S11E159, S11E160, N07E133); one WARNING: +23-167's
+  neighbour N24W168 (Gardner Pinnacles, flagged land in world_tiles.png)
+  has no Viewfinder archive (G03: dem1 404, no dem3), a zone without any
+  archive is not recorded as sea (#40), margin 0 m = sea level: fine.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1908,6 +1942,25 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     1 (workers never call it), each new extract once (MD5), existing ones
     updated by daily diffs at most once per preparation, the index every
     30 days; User-Agent "Ortho4XP".
+115. **DONE** (`f6c4468`, new app setting xp_flatten_airports, default
+    True; CHANGES OUTPUT where X-Plane flattens an airport): X-Plane draws
+    an airport with "1302 flatten 1" on ground forced flat at the airport
+    elevation inside its apt.dat boundary (row 130); where the DEM differs
+    (data older than the airport, uneven ground in a large boundary) the
+    edge showed as vertical walls (Nuuk BGGH, see the test results). New
+    O4_XP_Airports: Global Airports/Earth nav data/apt.dat next to
+    custom_overlay_src (or _alternate) is read once into
+    tmp/xp_flatten_airports.json (rebuilt when its size or mtime changes;
+    file lock for parallel workers); step 1 (include_xp_flatten_areas,
+    after include_patches) inserts each boundary reaching into the tile,
+    clipped 1e-6 deg inside it, holes kept, as INTERP_ALT rings at the
+    airport elevation (as a cst_alt_abs patch), and leaves the OSM
+    runways/taxiways/aprons inside it out of the runway levelling. A user
+    patch named <ICAO>.patch.osm wins. Log line "Airport X: built flat at
+    N m inside X-Plane's airport boundary ...". Bezier boundaries: nodes
+    only. Not read: Custom Scenery airports (a custom pack's apt.dat
+    replaces the gateway one in X-Plane, maybe without flatten). No
+    apt.dat found: console note, build unchanged (regression, sims).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2048,7 +2101,13 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     before batch C, then rebuild +47+011 and +48+011. Done: on `dev`
     0d57def, pushed.
 32. #114 — Geofabrik failed files not retried; on `test`, to `dev` with
-    the user's OK, then batch A (322), B (103, ZL15), C (20).
+    the user's OK, then batch A (322), B (103, ZL15), C (20). Done: on
+    `dev` 9a9a0b0, pushed; batch A running.
+33. #115 — airports X-Plane flattens; after batch A: regression,
+    sims_in_ws, step 2 check of +64-052, gui_smoke, then `test`, to `dev`
+    with the user's OK before batch B+D (122 tiles, +64-052 first). The
+    built tiles with flatten airports (scan list) need steps 1-3 again.
+    Batch A done 2026-11-18; all checks passed, `test` @ (this merge).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
