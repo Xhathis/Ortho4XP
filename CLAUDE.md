@@ -952,10 +952,19 @@ Test results:
   scan; BGGH 0.891 km2 at 85.95 m. Step 1 of +64-052 in a scratch cwd
   (cached OSM and DEM copied, no network): on: 43 nodes at 85.95 m, OSM
   runway of BGGH not levelled, the log line; off: 0 such nodes, as dev.
-  Not run yet (batch A running): regression (its GlobalScenery copy has no
-  Global Airports next to it, so the feature stays off: expect PASS),
-  sims_in_ws, step 2 of +64-052 (interior at 85.95 m), gui_smoke (new app
-  setting).
+  After batch A (2026-11-18): regression PASS (DSF, 17/17 masks, app log
+  identical; console "apt.dat not found": the frozen GlobalScenery copy
+  has no Global Airports next to it), sims_in_ws all 15/15, gui_smoke
+  7/7 against the branch's src (136 tiles on the map; .last_gui_params,
+  log, cfg hash-checked), steps 1-2 of +64-052 in the scratch cwd
+  (scratchpad step2_flatten.py): on: 79 mesh vertices inside BGGH's
+  boundary, all 85.95 m; off: 1,462, 26.9-101.6 m.
+- Batch A on `dev` 9a9a0b0 (322 tiles, 2026-11-16 23:41 to 11-18 13:03,
+  37h22m): 322 built, 0 failed, no ERROR; 156 limit_tris NOTEs; 3 tiles
+  recorded as sea (S11E159, S11E160, N07E133); one WARNING: +23-167's
+  neighbour N24W168 (Gardner Pinnacles, flagged land in world_tiles.png)
+  has no Viewfinder archive (G03: dem1 404, no dem3), a zone without any
+  archive is not recorded as sea (#40), margin 0 m = sea level: fine.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2098,6 +2107,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     sims_in_ws, step 2 check of +64-052, gui_smoke, then `test`, to `dev`
     with the user's OK before batch B+D (122 tiles, +64-052 first). The
     built tiles with flatten airports (scan list) need steps 1-3 again.
+    Batch A done 2026-11-18; all checks passed, `test` @ (this merge).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
