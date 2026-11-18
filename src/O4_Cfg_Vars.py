@@ -112,6 +112,12 @@ cfg_app_vars = {
         "default": 5,
         "hint": "How much times do we try again after an internal server error for an imagery request. Only used if check_tms_response is set to True.",
     },
+    "xp_flatten_airports": {
+        "module": "XPAPT",
+        "type": bool,
+        "default": True,
+        "hint": "Step 1 builds the area of each airport X-Plane flattens (apt.dat '1302 flatten 1', inside its boundary) flat at the airport elevation, as X-Plane draws it; otherwise the edge of that area shows as vertical walls where the elevation data differs. Reads Global Airports/Earth nav data/apt.dat next to custom_overlay_src. A patch named <ICAO>.patch.osm in the tile's Patches folder wins.",
+    },
     "ovl_exclude_pol": {
         "module": "OVL",
         "type": list,
@@ -410,6 +416,7 @@ list_app_vars = [
     "http_timeout",
     "max_connect_retries",
     "max_baddata_retries",
+    "xp_flatten_airports",
     "ovl_exclude_pol",
     "ovl_exclude_net",
     "geofabrik_dir",
