@@ -5,6 +5,7 @@ import queue
 import random
 import subprocess
 import sys
+import threading
 import time
 from math import ceil, log, pi, tan
 from pathlib import Path
@@ -50,7 +51,51 @@ check_tms_response = False
 max_connect_retries = 10
 max_baddata_retries = 10
 incomplete_imgs = {}
+# Of incomplete_imgs: textures whose white parts are all places where the
+# provider answered "no data" (404) at every zoom level asked; a retry
+# cannot fill them (#116).
+no_data_imgs = {}
+# Textures with parts taken COARSE_NOTE_FROM or more zoom levels below the
+# one asked: {tile coords: {file name: coarsest zoom level used}} (#116).
+coarse_imgs = {}
 failed_conversions = []  # DDS that could not be converted (see build_tile)
+# A webmercator piece the provider has no image for (404) is cut from the
+# next lower zoom level, down to MAX_DOWN_SAMPLE levels below the one asked.
+# It was 5: GO2 has nothing finer than ZL9 in parts of Kane Basin (+79-070)
+# and ZL12 at 82 N (+82-039's ZL18 airport cover), 6 below the zoom asked,
+# so those textures stayed white and their tiles failed (2026-11-19, #116).
+# A piece 8 levels down is one pixel of the coarse image: flat colour, but
+# no white hole. Only textures that were white before change.
+MAX_DOWN_SAMPLE = 8
+COARSE_NOTE_FROM = 6  # the first level the old limit never reached
+
+
+class ImageryReport:
+    """What the pieces of one texture (or probe) got, filled in by its
+    download threads; read once they are done."""
+
+    def __init__(self):
+        self.no_data = 0  # pieces white: 404 at every zoom level asked
+        self.failed = 0  # pieces white for any other reason
+        self.coarsest_zl = None  # lowest zoom level a piece came from
+        self.down_sample = 0  # how far below the asked zoom level that is
+        self._lock = threading.Lock()
+
+    def got(self, zoomlevel, down_sample):
+        with self._lock:
+            if down_sample > self.down_sample:
+                (self.down_sample, self.coarsest_zl) = (down_sample, zoomlevel)
+
+    def missed(self, no_data):
+        with self._lock:
+            if no_data:
+                self.no_data += 1
+            else:
+                self.failed += 1
+
+    def only_no_data(self):
+        """True when every white piece is a place without imagery."""
+        return self.no_data > 0 and self.failed == 0
 
 
 user_agent_generic = (
@@ -1192,7 +1237,7 @@ def _http_request_to_image(
 ################################################################################
 
 ################################################################################
-def get_wms_image(bbox, width, height, provider, http_session):
+def get_wms_image(bbox, width, height, provider, http_session, report=None):
     request_headers = None
     if has_URL and provider["code"] in URL.custom_url_list:
         (url, request_headers) = URL.custom_wms_request(
@@ -1239,14 +1284,22 @@ def get_wms_image(bbox, width, height, provider, http_session):
     )
     if success:
         return (1, data)
-    else:
-        return (0, Image.new("RGB", (width, height), "white"))
+    if report is not None:
+        report.missed(no_data=False)
+    return (0, Image.new("RGB", (width, height), "white"))
 
 
 ################################################################################
 
 ################################################################################
-def get_wmts_image(tilematrix, til_x, til_y, provider, http_session):
+def get_wmts_image(tilematrix, til_x, til_y, provider, http_session,
+                   report=None):
+    """(success, image) of one piece; white when it could not be had.
+
+    report (an ImageryReport) learns how coarse a downsampled piece is,
+    and whether a white one is "no data" (404 down to MAX_DOWN_SAMPLE
+    levels lower, #116) or any other failure.
+    """
     til_x_orig, til_y_orig = til_x, til_y
     down_sample = 0
     while True:
@@ -1332,14 +1385,9 @@ def get_wmts_image(tilematrix, til_x, til_y, provider, http_session):
                     url_local,
                     "absent, using white texture instead !",
                 )
-                return (
-                    0,
-                    Image.new(
-                        "RGB",
-                        (provider["tile_size"], provider["tile_size"]),
-                        "white",
-                    ),
-                )
+                return _white_piece(provider["tile_size"],
+                                    provider["tile_size"], report,
+                                    no_data=False)
         if not request_headers:
             if "fake_headers" in provider:
                 request_headers = provider["fake_headers"]
@@ -1352,6 +1400,8 @@ def get_wmts_image(tilematrix, til_x, til_y, provider, http_session):
         if success and not down_sample:
             return (success, data)
         elif success and down_sample:
+            if report is not None:
+                report.got(tilematrix, down_sample)
             x0 = (
                 (til_x_orig - 2 ** down_sample * til_x)
                 * width
@@ -1371,28 +1421,37 @@ def get_wmts_image(tilematrix, til_x, til_y, provider, http_session):
                 ),
             )
         elif "[404]" in data:
+            # The provider answered: it has no image here at this level.
             if ("grid_type" not in provider) or (
                 provider["grid_type"] != "webmercator"
             ):
-                return (0, Image.new("RGB", (width, height), "white"))
+                return _white_piece(width, height, report, no_data=True)
             til_x = til_x // 2
             til_y = til_y // 2
             tilematrix -= 1
             down_sample += 1
-            if down_sample >= 6:
-                return (0, Image.new("RGB", (width, height), "white"))
+            if (down_sample > MAX_DOWN_SAMPLE or tilematrix < 0
+                    or width >> down_sample == 0):
+                return _white_piece(width, height, report, no_data=True)
         else:
-            return (0, Image.new("RGB", (width, height), "white"))
+            return _white_piece(width, height, report, no_data=False)
+
+
+def _white_piece(width, height, report, no_data):
+    if report is not None:
+        report.missed(no_data)
+    return (0, Image.new("RGB", (width, height), "white"))
 
 
 ################################################################################
 
 ################################################################################
 def get_and_paste_wms_part(
-    bbox, width, height, provider, big_image, x0, y0, http_session
+    bbox, width, height, provider, big_image, x0, y0, http_session,
+    report=None,
 ):
     (success, small_image) = get_wms_image(
-        bbox, width, height, provider, http_session
+        bbox, width, height, provider, http_session, report
     )
     big_image.paste(small_image, (x0, y0))
     return success
@@ -1411,9 +1470,10 @@ def get_and_paste_wmts_part(
     y0,
     http_session,
     subt_size=None,
+    report=None,
 ):
     (success, small_image) = get_wmts_image(
-        tilematrix, til_x, til_y, provider, http_session
+        tilematrix, til_x, til_y, provider, http_session, report
     )
     if not subt_size:
         big_image.paste(small_image, (x0, y0))
@@ -1453,12 +1513,16 @@ def texture_session(max_threads):
 
 ################################################################################
 def provider_answers(lat, lon, zoomlevel, provider_code):
-    """True when the provider gives an image for the middle of tile
+    """True when the provider answers a request for the middle of tile
     (lat, lon) at zoomlevel (or, as a texture download does, a lower one).
 
     The probe of a batch held back by imagery failures (#112): one image of
     256 x 256 pixels (a combined provider: its first layer), nothing
-    written to disk. False for an unknown provider or any failure.
+    written to disk. "No image here" (404 at every level asked) is an
+    answer too: the provider is up, it just has nothing there; that told an
+    outage apart from a hole in the coverage only after the 6 h limit
+    (+79-070, Kane Basin, 2026-11-19, #116). False for an unknown provider
+    or any other failure.
     """
     code = provider_code
     if code in combined_providers_dict:
@@ -1470,25 +1534,28 @@ def provider_answers(lat, lon, zoomlevel, provider_code):
     if "max_zl" in provider:
         zoomlevel = min(zoomlevel, int(provider["max_zl"]))
     (til_x, til_y) = GEO.wgs84_to_gtile(lat + 0.5, lon + 0.5, zoomlevel)
+    report = ImageryReport()
     if provider.get("grid_type") == "webmercator":
         session = texture_session(1)
         try:
             (success, _) = get_wmts_image(zoomlevel, til_x, til_y, provider,
-                                          session)
+                                          session, report=report)
         finally:
             session.close()
-        return bool(success)
+        return bool(success) or report.only_no_data()
     (latmax, lonmin) = GEO.gtile_to_wgs84(til_x, til_y, zoomlevel)
     (latmin, lonmax) = GEO.gtile_to_wgs84(til_x + 1, til_y + 1, zoomlevel)
     (xmin, ymax) = GEO.geo_to_webm(lonmin, latmax)
     (xmax, ymin) = GEO.geo_to_webm(lonmax, latmin)
     (success, _) = build_texture_from_bbox_and_size(
-        [xmin, ymax, xmax, ymin], "3857", (256, 256), provider)
-    return bool(success)
+        [xmin, ymax, xmax, ymin], "3857", (256, 256), provider,
+        report=report)
+    return bool(success) or report.only_no_data()
 
 
 ################################################################################
-def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
+def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None,
+                              report=None):
     # less general than the next build_texture_from_bbox_and_size but
     # probably slightly quicker
     (til_x_min, til_y_min, til_x_max, til_y_max) = tilbox
@@ -1513,6 +1580,8 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
                 x0,
                 y0,
                 http_session,
+                None,
+                report,
             )
             download_queue.put(fargs)
     # and finally activate the workers
@@ -1529,7 +1598,8 @@ def build_texture_from_tilbox(tilbox, zoomlevel, provider, progress=None):
 ################################################################################
 
 ################################################################################
-def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
+def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider,
+                                     report=None):
     # warp will be needed for projections not parallel to 3857 or too large
     # image_size if warp is not needed, crop could still be needed if the grids
     # do not match.
@@ -1634,6 +1704,7 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
                     x0,
                     y0,
                     http_session,
+                    report,
                 ]
             elif provider["request_type"] in ["wmts", "tms", "local_tms"]:
                 fargs = [
@@ -1646,6 +1717,7 @@ def build_texture_from_bbox_and_size(t_bbox, t_epsg, t_size, provider):
                     y0,
                     http_session,
                     subt_size,
+                    report,
                 ]
             download_queue.put(fargs)
     # We execute the downloads and subimage pastes
@@ -1706,13 +1778,14 @@ def download_jpeg_ortho(
         if zoomlevel > max_zl:
             super_resol_factor = 2 ** (max_zl - zoomlevel)
     width = height = int(4096 * super_resol_factor)
+    report = ImageryReport()
     # we treat first the case of webmercator grid type servers
     if "grid_type" in provider and provider["grid_type"] == "webmercator":
         tilbox = [til_x_left, til_y_top, til_x_left + 16, til_y_top + 16]
         tilbox_mod = [int(round(p * super_resol_factor)) for p in tilbox]
         zoom_shift = round(log(super_resol_factor) / log(2))
         (success, big_image) = build_texture_from_tilbox(
-            tilbox_mod, zoomlevel + zoom_shift, provider
+            tilbox_mod, zoomlevel + zoom_shift, provider, report=report
         )
     # if not we are in the world of epsg:3857 bboxes
     else:
@@ -1723,11 +1796,13 @@ def download_jpeg_ortho(
         [xmin, ymax] = GEO.geo_to_webm(lonmin, latmax)
         [xmax, ymin] = GEO.geo_to_webm(lonmax, latmin)
         (success, big_image) = build_texture_from_bbox_and_size(
-            [xmin, ymax, xmax, ymin], "3857", (width, height), provider
+            [xmin, ymax, xmax, ymin], "3857", (width, height), provider,
+            report=report,
         )
     # if stop flag we do not wish to imprint a white texture
     if UI.red_flag:
         return 0
+    tile_coords = Path(file_dir).parent.name
     if not success:
         UI.lvprint(
             1,
@@ -1736,8 +1811,12 @@ def download_jpeg_ortho(
             "could not be obtained ",
             "(even at lower ZL), it was filled with white there.",
         )
-        tile_coords = Path(file_dir).parent.name
         incomplete_imgs.setdefault(tile_coords, []).append(file_name)
+        if report.only_no_data():
+            no_data_imgs.setdefault(tile_coords, []).append(file_name)
+    if report.down_sample >= COARSE_NOTE_FROM:
+        coarse_imgs.setdefault(tile_coords, {})[file_name] = (
+            report.coarsest_zl)
     out_file = os.path.join(file_dir, file_name)
     tmp_file = FNAMES.temp_path_for(out_file)
     try:

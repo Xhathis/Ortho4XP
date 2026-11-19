@@ -289,11 +289,11 @@ def test_provider_answers(monkeypatch):
     monkeypatch.setattr(IMG, "combined_providers_dict", {
         "MIX": [{"layer_code": "GO2"}, {"layer_code": "WMS"}]})
 
-    def wmts(zl, til_x, til_y, provider, session):
+    def wmts(zl, til_x, til_y, provider, session, report=None):
         asked.append(("wmts", provider["code"], zl, til_x, til_y))
         return (1, None)
 
-    def wms(bbox, epsg, size, provider):
+    def wms(bbox, epsg, size, provider, report=None):
         asked.append(("wms", provider["code"], epsg, size))
         return (0, None)
 
