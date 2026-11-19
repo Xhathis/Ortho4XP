@@ -22,7 +22,7 @@ def provider(monkeypatch):
     monkeypatch.setattr(UI, "vprint", lambda *a: None)
 
     def paste(tilematrix, til_x, til_y, provider, big_image, x0, y0,
-              http_session, subt_size=None):
+              http_session, subt_size=None, report=None):
         size = subt_size or (provider["tile_size"],) * 2
         big_image.paste(Image.new("RGB", size, _color(til_x, til_y)),
                         (int(x0), int(y0)))

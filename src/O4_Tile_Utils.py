@@ -304,6 +304,8 @@ def build_tile(tile, white_retry_follows=False):
     # run (whose files were deleted then) must not fail this one.
     tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
     IMG.incomplete_imgs.pop(tile_coords, None)
+    IMG.no_data_imgs.pop(tile_coords, None)
+    IMG.coarse_imgs.pop(tile_coords, None)
     dsf_result = {"ok": 0}
 
     def _build_dsf():
@@ -366,6 +368,7 @@ def build_tile(tile, white_retry_follows=False):
     if UI.red_flag:
         UI.exit_message_and_bottom_line()
         return 0
+    _note_coarse_imagery(tile, IMG.coarse_imgs.get(tile_coords, {}))
     # Only activate a complete tile: a DSF that references missing textures
     # looks like a successful build but shows holes in X-Plane. Leaving it
     # inactive makes the tile count as failed (CLI exit 1, batch summary);
@@ -383,6 +386,15 @@ def build_tile(tile, white_retry_follows=False):
     white_problem = (
         f"{len(white_imgs)} texture(s) partly white (imagery not obtained)"
     )
+    no_data = white_only_no_data(
+        white_imgs, IMG.no_data_imgs.get(tile_coords, []))
+    if no_data:
+        white_problem = (
+            f"{len(white_imgs)} texture(s) partly white: provider "
+            f"{tile.default_website} has no imagery there at any zoom level "
+            f"down to {IMG.MAX_DOWN_SAMPLE} below the one asked; a retry "
+            "cannot fill them, use another provider for this tile"
+        )
     if white_imgs:
         problems.append(white_problem)
         # The white JPEG and DDS would be reused by every later run (an
@@ -390,7 +402,7 @@ def build_tile(tile, white_retry_follows=False):
         # Removing them makes a rerun fetch them again. The list itself
         # stays: the callers retry once when they see it.
         _delete_white_files(tile, white_imgs)
-    if problems == [white_problem] and white_retry_follows:
+    if problems == [white_problem] and white_retry_follows and not no_data:
         UI.lvprint(
             1, "Tile", tile_coords, "has", len(white_imgs),
             "partly white texture(s); the DSF was not activated, retrying.",
@@ -401,7 +413,9 @@ def build_tile(tile, white_retry_follows=False):
         # Only imagery was missing (the DSF and every conversion of what
         # came are fine): an imagery outage looks like this, and a batch
         # tries the tile again later (#112).
-        imagery_gave_up = only_imagery_missing(
+        # Not for a hole in the provider's coverage (#116): retrying is
+        # useless, and counted as an outage it paused the whole batch.
+        imagery_gave_up = not no_data and only_imagery_missing(
             dsf_result["ok"], IMG.failed_conversions, failed_downloads,
             white_imgs,
         )
@@ -583,7 +597,10 @@ def build_tile_retrying_white(tile):
     """
     ok = build_tile(tile, white_retry_follows=True)
     tile_coords = FNAMES.short_latlon(tile.lat, tile.lon)
-    if not ok and not UI.red_flag and tile_coords in IMG.incomplete_imgs:
+    no_data = white_only_no_data(IMG.incomplete_imgs.get(tile_coords, []),
+                                 IMG.no_data_imgs.get(tile_coords, []))
+    if (not ok and not UI.red_flag and tile_coords in IMG.incomplete_imgs
+            and not no_data):
         UI.lvprint(
             1,
             f"Attempting to rebuild textures with white squares: "
@@ -693,7 +710,7 @@ def _build_tile_list_sequential(tile, list_lat_lon, flags):
             if needed and _step1_passed(failed_step):
                 gate.answered()
             if igate and _step3_passed(failed_step):
-                igate.answered()
+                igate.answered(lat, lon)
             if failed_step == SEA_SKIPPED:
                 # Open sea, nothing to build (#41): not a failure, but
                 # no later phase either.
@@ -816,6 +833,26 @@ def _failed_on_overpass(failed_step):
 def _step1_passed(failed_step):
     """True if the tile got through step 1 (so Overpass answered it)."""
     return failed_step in (None, SEA_SKIPPED) or failed_step in BATCH_STEPS[1:]
+
+
+def white_only_no_data(white_imgs, no_data_imgs):
+    """True when every partly white texture is white only where the
+    provider has no imagery at all (IMG.no_data_imgs, #116)."""
+    return bool(white_imgs) and set(white_imgs) <= set(no_data_imgs)
+
+
+def _note_coarse_imagery(tile, coarse):
+    """One logged NOTE for the textures that had to be cut from a much
+    lower zoom level ({file name: zoom level}, IMG.coarse_imgs, #116)."""
+    if not coarse:
+        return
+    UI.lvprint(
+        0, "   NOTE:", len(coarse), "texture(s) of tile",
+        FNAMES.short_latlon(tile.lat, tile.lon), "are partly cut from ZL"
+        + str(min(coarse.values())), "(provider", tile.default_website,
+        "has nothing finer there): blurry there, e.g.",
+        sorted(coarse)[0] + ".",
+    )
 
 
 def only_imagery_missing(dsf_ok, failed_conversions, failed_downloads,
@@ -1008,15 +1045,20 @@ class _ImageryGate:
         self.probe = None  # result list of the running probe
         self.tries = {}  # (lat, lon) -> step 3 tries lost to imagery
         self.not_before = {}  # (lat, lon) -> earliest time of its next try
+        # The last tile that got all its imagery: the probe asks there, a
+        # place where the provider surely has imagery (#116).
+        self.good = None
 
     def can_start(self, lat, lon):
         if time.time() < self.not_before.get((lat, lon), 0.0):
             return False
         return self.paused is None
 
-    def answered(self):
+    def answered(self, lat=None, lon=None):
         """A tile got through step 3."""
         self.in_row = 0
+        if lat is not None:
+            self.good = (lat, lon)
         if self.paused is not None:
             self._resume(
                 "A tile got its imagery again after "
@@ -1086,7 +1128,7 @@ class _ImageryGate:
             return
         if now < self.next_probe or not pending:
             return
-        (lat, lon) = pending[0]
+        (lat, lon) = self.good or pending[0]
         (code, zl) = (self.provider_code, self.zoomlevel)
         self.probe = _run_in_background(
             lambda: IMG.provider_answers(lat, lon, zl, code)
@@ -1576,7 +1618,7 @@ def _run_batch_phases(
                     or 11 <= code < 10 + len(BATCH_STEPS)):
                 gate.answered()  # it got through step 1
             if p == img_phase and code in (0, 10 + 4):
-                igate.answered()  # it got through step 3
+                igate.answered(lat, lon)  # it got through step 3
             if code == 0:
                 UI.vprint(
                     0, f"Tile {coords}", "built" if last_phase else "done",
