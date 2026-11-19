@@ -965,6 +965,28 @@ Test results:
   neighbour N24W168 (Gardner Pinnacles, flagged land in world_tiles.png)
   has no Viewfinder archive (G03: dem1 404, no dem3), a zone without any
   archive is not recorded as sea (#40), margin 0 m = sea level: fine.
+- After batch A: tag `batch-ready-2026-11` on dev b718fc7 (pushed); 44
+  tiles with flatten airports rebuilt (2026-11-18 14:49-16:01, 44 built).
+- Batch B+D on `dev` b718fc7 (369 tiles: B+D's 122 plus the user's
+  additions, GO2 ZL15, started 2026-11-18 16:20): by 2026-11-19 17:30
+  363 built, 2 open sea (+72-073, +72-074), +79-069 and +79-071 failed
+  after 3 imagery tries, +79-070 and +82-039 held by the #112 pause
+  since 15:52 (#116). No other ERROR; 272 limit_tris NOTEs.
+  #116 `fix/imagery-no-data` @ edfff84 (from dev b718fc7): 16 new unit
+  tests (15 fail on dev, 1 by behaviour), 628 pass, pyflakes 0;
+  regression --overlay PASS (DSF, 17/17 masks, app log identical);
+  sims_in_ws all 15/15; real downloads of the white textures
+  3920_10032 (+79-070), 3920_10000 (+79-071) and 19296_103392_GO218
+  (+82-039): complete, cut from ZL9 / ZL9 / ZL12.
+  #117 `fix/imagery-fallback` @ d61e178 (from #116): 12 new unit tests,
+  640 pass, pyflakes 0; regression --overlay PASS, sims_in_ws all
+  15/15; real: +82-039's texture from BI, two +70-076 textures from Arc
+  (sharp lakes and river braids where the built GO2 DDS is coarse
+  blocks with a faint Google watermark). Sample of 150 built textures
+  per ZL (GO2 drop levels at the middle piece): ZL15 (Arctic) 41 drop
+  1-5 levels, Arc has the full level for 33; ZL16 4 of 150; ZL18 5 of
+  150. `test` @ 5f96c6d (#116 + #117): 640 unit tests, pyflakes 0.
+  Not run: gui_smoke (the user's batch GUI was open in G:\Ortho4XP).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -1961,6 +1983,31 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     only. Not read: Custom Scenery airports (a custom pack's apt.dat
     replaces the gateway one in X-Plane, maybe without flatten). No
     apt.dat found: console note, build unchanged (regression, sims).
+116. **FIXED** (`edfff84`): batch B+D lost +79-069/070/071 and +82-039 in
+    step 3 and waited twice for the full 6 h imagery pause (#112). GO2
+    answers 404 down to ZL10 in parts of Kane Basin and to ZL13 at +82-039's
+    ZL18 airport cover; get_wmts_image went at most 5 levels down (the
+    images are at 6), so those textures stayed white. Each tile was
+    requeued 3 times as if GO2 were down, and the pause's probe asked the
+    middle of +79-070 (404 every 5 min, 6 h). Now: down to MAX_DOWN_SAMPLE
+    8 levels (one pixel of the coarse image; only formerly white textures
+    change); an ImageryReport through the texture builders tells "no data"
+    (404 at every level) from other failures; a tile white only on no data
+    is not retried and not an outage (ERROR naming the provider, fails at
+    once); provider_answers counts no data as an answer and the probe asks
+    at the last tile that got all its imagery; one NOTE per tile for
+    textures cut from 6+ levels lower (IMG.coarse_imgs).
+117. **DONE** (`d61e178`, new app setting imagery_fallback, default
+    ["Arc", "BI"]; CHANGES OUTPUT for textures fetched from now on): on a
+    404 at the asked level a piece is asked from each fallback provider at
+    that level (webmercator, same piece size, within max_zl, not the
+    provider itself) before the provider's own lower levels. In the Arctic
+    GO2 drops 2-3 levels for about a quarter of the ZL15 textures and those
+    pieces are coarse blocks; Arc has sharp imagery there. Fallback pieces
+    can differ in colour and season (Arc: summer, GO2: snow patches). One
+    NOTE per tile (IMG.fallback_imgs). The pause's probe asks the provider
+    only. Existing JPEG/DDS are reused: built tiles change only when their
+    textures are deleted and step 3 runs again.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2108,6 +2155,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     with the user's OK before batch B+D (122 tiles, +64-052 first). The
     built tiles with flatten airports (scan list) need steps 1-3 again.
     Batch A done 2026-11-18; all checks passed, `test` @ (this merge).
+34. #116, #117 — imagery holes and fallback providers, from batch B+D;
+    on `test` @ 5f96c6d, to `dev` with the user's OK once batch B+D has
+    ended (the running GUI keeps the old code). Then step 3 again for
+    +79-069/070/071 and +82-039; for the Arctic GO2 tiles with coarse
+    textures, deleting their textures and running step 3 fetches Arc.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
