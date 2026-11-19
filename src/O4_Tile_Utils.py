@@ -306,6 +306,7 @@ def build_tile(tile, white_retry_follows=False):
     IMG.incomplete_imgs.pop(tile_coords, None)
     IMG.no_data_imgs.pop(tile_coords, None)
     IMG.coarse_imgs.pop(tile_coords, None)
+    IMG.fallback_imgs.pop(tile_coords, None)
     dsf_result = {"ok": 0}
 
     def _build_dsf():
@@ -369,6 +370,7 @@ def build_tile(tile, white_retry_follows=False):
         UI.exit_message_and_bottom_line()
         return 0
     _note_coarse_imagery(tile, IMG.coarse_imgs.get(tile_coords, {}))
+    _note_fallback_imagery(tile, IMG.fallback_imgs.get(tile_coords, {}))
     # Only activate a complete tile: a DSF that references missing textures
     # looks like a successful build but shows holes in X-Plane. Leaving it
     # inactive makes the tile count as failed (CLI exit 1, batch summary);
@@ -852,6 +854,21 @@ def _note_coarse_imagery(tile, coarse):
         + str(min(coarse.values())), "(provider", tile.default_website,
         "has nothing finer there): blurry there, e.g.",
         sorted(coarse)[0] + ".",
+    )
+
+
+def _note_fallback_imagery(tile, used):
+    """One logged NOTE for the textures with pieces from a fallback
+    provider ({file name: [codes]}, IMG.fallback_imgs, #117)."""
+    if not used:
+        return
+    codes = sorted({c for v in used.values() for c in v})
+    UI.lvprint(
+        0, "   NOTE:", len(used), "texture(s) of tile",
+        FNAMES.short_latlon(tile.lat, tile.lon), "have pieces from",
+        ", ".join(codes), "(provider", tile.default_website,
+        "has no image at that zoom level there), e.g.",
+        sorted(used)[0] + ".",
     )
 
 

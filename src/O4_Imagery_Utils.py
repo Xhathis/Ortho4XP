@@ -68,6 +68,17 @@ failed_conversions = []  # DDS that could not be converted (see build_tile)
 # no white hole. Only textures that were white before change.
 MAX_DOWN_SAMPLE = 8
 COARSE_NOTE_FROM = 6  # the first level the old limit never reached
+# Providers asked, in order, for a webmercator piece the texture's provider
+# has no image for at the asked zoom level, before that provider's lower
+# levels (#117). Where GO2 drops 2-3 levels (a quarter of the Arctic ZL15
+# textures sampled on 2026-11-19), its pieces are a few blocks per piece
+# while Arc has sharp imagery at the full level; at +82-039 Bing has ZL15
+# where GO2 has ZL12. A fallback piece can differ in colour from its
+# neighbours. Empty: off.
+imagery_fallback = ["Arc", "BI"]
+# Textures with pieces from a fallback provider:
+# {tile coords: {file name: [provider codes]}} (#117).
+fallback_imgs = {}
 
 
 class ImageryReport:
@@ -79,7 +90,12 @@ class ImageryReport:
         self.failed = 0  # pieces white for any other reason
         self.coarsest_zl = None  # lowest zoom level a piece came from
         self.down_sample = 0  # how far below the asked zoom level that is
+        self.fallbacks = set()  # codes of the fallback providers used
         self._lock = threading.Lock()
+
+    def fell_back(self, code):
+        with self._lock:
+            self.fallbacks.add(code)
 
     def got(self, zoomlevel, down_sample):
         with self._lock:
@@ -1293,14 +1309,19 @@ def get_wms_image(bbox, width, height, provider, http_session, report=None):
 
 ################################################################################
 def get_wmts_image(tilematrix, til_x, til_y, provider, http_session,
-                   report=None):
+                   report=None, fallback=True, max_down_sample=None):
     """(success, image) of one piece; white when it could not be had.
 
     report (an ImageryReport) learns how coarse a downsampled piece is,
     and whether a white one is "no data" (404 down to MAX_DOWN_SAMPLE
-    levels lower, #116) or any other failure.
+    levels lower, #116) or any other failure. fallback: on "no data" at
+    the asked level, ask the imagery_fallback providers at that level
+    before going down (#117). max_down_sample: MAX_DOWN_SAMPLE if None.
     """
+    if max_down_sample is None:
+        max_down_sample = MAX_DOWN_SAMPLE
     til_x_orig, til_y_orig = til_x, til_y
+    tilematrix_orig = tilematrix
     down_sample = 0
     while True:
         request_headers = None
@@ -1426,15 +1447,46 @@ def get_wmts_image(tilematrix, til_x, til_y, provider, http_session,
                 provider["grid_type"] != "webmercator"
             ):
                 return _white_piece(width, height, report, no_data=True)
+            if fallback and not down_sample:
+                found = _fallback_piece(tilematrix_orig, til_x_orig,
+                                        til_y_orig, provider, http_session)
+                if found:
+                    (code, image) = found
+                    if report is not None:
+                        report.fell_back(code)
+                    return (1, image)
             til_x = til_x // 2
             til_y = til_y // 2
             tilematrix -= 1
             down_sample += 1
-            if (down_sample > MAX_DOWN_SAMPLE or tilematrix < 0
+            if (down_sample > max_down_sample or tilematrix < 0
                     or width >> down_sample == 0):
                 return _white_piece(width, height, report, no_data=True)
         else:
             return _white_piece(width, height, report, no_data=False)
+
+
+def _fallback_piece(tilematrix, til_x, til_y, provider, http_session):
+    """(code, image) from the first imagery_fallback provider that has the
+    piece at this very level (#117), or None. Only webmercator providers
+    with the same piece size fit; a fallback is asked once, without going
+    down itself (the main provider's lower levels come next)."""
+    size = provider.get("tile_size", 256)
+    for code in imagery_fallback:
+        other = providers_dict.get(code)
+        if (other is None or code == provider.get("code")
+                or other.get("grid_type") != "webmercator"
+                or other.get("tile_size", 256) != size
+                or tilematrix > int(other.get("max_zl", tilematrix))):
+            continue
+        (success, image) = get_wmts_image(
+            tilematrix, til_x, til_y, other, http_session,
+            fallback=False, max_down_sample=0)
+        if success:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            return (code, image)
+    return None
 
 
 def _white_piece(width, height, report, no_data):
@@ -1538,8 +1590,10 @@ def provider_answers(lat, lon, zoomlevel, provider_code):
     if provider.get("grid_type") == "webmercator":
         session = texture_session(1)
         try:
+            # The provider itself, not its fallbacks (#117).
             (success, _) = get_wmts_image(zoomlevel, til_x, til_y, provider,
-                                          session, report=report)
+                                          session, report=report,
+                                          fallback=False)
         finally:
             session.close()
         return bool(success) or report.only_no_data()
@@ -1817,6 +1871,9 @@ def download_jpeg_ortho(
     if report.down_sample >= COARSE_NOTE_FROM:
         coarse_imgs.setdefault(tile_coords, {})[file_name] = (
             report.coarsest_zl)
+    if report.fallbacks:
+        fallback_imgs.setdefault(tile_coords, {})[file_name] = sorted(
+            report.fallbacks)
     out_file = os.path.join(file_dir, file_name)
     tmp_file = FNAMES.temp_path_for(out_file)
     try:
