@@ -289,7 +289,9 @@ def test_provider_answers(monkeypatch):
     monkeypatch.setattr(IMG, "combined_providers_dict", {
         "MIX": [{"layer_code": "GO2"}, {"layer_code": "WMS"}]})
 
-    def wmts(zl, til_x, til_y, provider, session, report=None):
+    def wmts(zl, til_x, til_y, provider, session, report=None,
+             fallback=True):
+        assert fallback is False  # the probe asks the provider only (#117)
         asked.append(("wmts", provider["code"], zl, til_x, til_y))
         return (1, None)
 

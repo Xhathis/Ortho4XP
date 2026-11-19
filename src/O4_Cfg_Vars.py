@@ -112,6 +112,12 @@ cfg_app_vars = {
         "default": 5,
         "hint": "How much times do we try again after an internal server error for an imagery request. Only used if check_tms_response is set to True.",
     },
+    "imagery_fallback": {
+        "module": "IMG",
+        "type": list,
+        "default": ["Arc", "BI"],
+        "hint": "Providers asked, in this order, for the parts of a texture where its own provider has no image at the zoom level asked, before using that provider's lower (blurrier) levels. Where GO2 has only coarse imagery (much of the Arctic), Arc often has sharp imagery. A part taken from another provider can differ in colour. Only grid_type=webmercator providers are used; [] turns it off. Textures already on disk are not fetched again.",
+    },
     "xp_flatten_airports": {
         "module": "XPAPT",
         "type": bool,
@@ -416,6 +422,7 @@ list_app_vars = [
     "http_timeout",
     "max_connect_retries",
     "max_baddata_retries",
+    "imagery_fallback",
     "xp_flatten_airports",
     "ovl_exclude_pol",
     "ovl_exclude_net",
