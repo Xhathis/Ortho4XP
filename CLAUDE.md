@@ -2044,6 +2044,22 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     with the new URLs finds the extracts on disk (us/us-virgin-islands is
     the old form). prepare_tiles: a file that cannot be had fails only the
     tiles that need it (a merged group used to fail whole).
+119. **FIXED** (`d6474c7`, CHANGES OUTPUT around airports X-Plane
+    flattens): #115 built the inside of the flatten boundary flat, but the
+    mesh outside followed the DEM, so the wall moved to the boundary (Nuuk
+    BGGH in the built +64-052: 86 m next to 45-53 m within 9-21 m, found
+    with DSFTool --dsf2text on 2026-11-20). XPAPT.ramp_dem_around_areas
+    sets the DEM inside each area to its elevation and blends linearly back
+    to the data within FLATTEN_RAMP_M 100 m, before
+    smooth_raster_over_airports writes the alt file step 2 reads; airports
+    with a user patch are skipped (areas_without_user_patch). +64-052 steps
+    1-2 in a scratch cwd: triangles > 60 deg within ~300 m of BGGH 231 ->
+    12 (the rest 107-160 m away: roads, rock), > 45 deg 316 -> 28. 4 new
+    unit tests, 655 pass, pyflakes 0, regression --overlay PASS (DSF, 17/17
+    masks, app log identical: the frozen Global Scenery has no apt.dat).
+    `test` @ 43e1fa6. The user's Patches\+64-052\BGGH.patch.osm was never
+    read (patch_dir is Patches\+60-060\+64-052); moved there it would
+    skip the ramp. The tiles with flatten airports need steps 1-3 again.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
