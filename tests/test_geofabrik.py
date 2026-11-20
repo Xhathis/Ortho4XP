@@ -938,3 +938,158 @@ def test_road_level_raise_refreshes_the_cache(fake_files, gf):
     assert any("small_roads layer of +55+012 was 1 days old, refreshed"
                in line for line in gf)
     assert GEOFABRIK.needed_layers(55, 12, 5) == {}
+
+
+# --- Geofabrik's folder layout of 2026-11 (#118) ------------------------------
+@pytest.mark.parametrize("new, old", [
+    ("europe/france/alsace/alsace-latest.osm.pbf",
+     "europe/france/alsace-latest.osm.pbf"),
+    ("europe/germany/germany-latest.osm.pbf", "europe/germany-latest.osm.pbf"),
+    ("europe/germany/bayern/bayern-latest.osm.pbf",
+     "europe/germany/bayern-latest.osm.pbf"),
+    ("north-america/us/georgia/georgia-latest.osm.pbf",
+     "north-america/us/georgia-latest.osm.pbf"),
+    ("europe/georgia/georgia-latest.osm.pbf", "europe/georgia-latest.osm.pbf"),
+    # region us-virgin-islands in folder us: its name starts with "us-"
+    ("north-america/us/us-virgin-islands/us-virgin-islands-latest.osm.pbf",
+     "north-america/us/us-virgin-islands-latest.osm.pbf"),
+])
+def test_local_path_same_in_both_layouts(gf, new, old):
+    # The files downloaded before stay in use when the index (refreshed
+    # every 30 days) gives the new URLs: no download of them all again.
+    assert GEOFABRIK.local_path(B + new) == GEOFABRIK.local_path(B + old)
+    assert GEOFABRIK.local_path(B + old) == os.path.join(
+        GEOFABRIK.data_dir(), *old.split("/"))
+
+
+@pytest.fixture
+def redirecting(monkeypatch):
+    """files {url: (data, headers)}; moved {url: url it redirects to}."""
+    (files, moved, asked) = ({}, {}, [])
+
+    class Resp(FakeResp):
+        def __init__(self, url):
+            final = moved.get(url, url)
+            (data, headers) = files.get(final, (b"", {}))
+            super().__init__(data, 200 if final in files else 404)
+            self.headers.update(headers)
+            self.url = final
+
+    class Session:
+        headers = {}
+
+        def get(self, url, timeout, stream=False):
+            asked.append(url)
+            return Resp(url)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(GEOFABRIK, "_session", lambda: Session())
+    return (files, moved, asked)
+
+
+LATEST = B + "europe/france/alsace-latest.osm.pbf"
+DATED = B + "europe/france/alsace/alsace-261119.osm.pbf"
+DATA = b"pbf data " * 20
+
+
+def md5_line(data, name="alsace-261119.osm.pbf"):
+    return (hashlib.md5(data).hexdigest().encode() + b"  " + name.encode(), {})
+
+
+def test_md5_of_the_dated_file(gf, redirecting):
+    # The batch of 2026-11-20: the -latest .md5 is gone (404), the file
+    # redirects to the dated one, which has its .md5.
+    (files, moved, asked) = redirecting
+    moved[LATEST] = DATED
+    files[DATED] = (DATA, {})
+    files[DATED + ".md5"] = md5_line(DATA)
+    path = GEOFABRIK.local_path(LATEST)
+    GEOFABRIK._download(LATEST, path)
+    assert open(path, "rb").read() == DATA
+    assert asked == [LATEST, DATED + ".md5"]
+    files[DATED + ".md5"] = md5_line(b"other")
+    os.remove(path)
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="MD5"):
+        GEOFABRIK._download(LATEST, path)
+    assert not os.path.exists(path)
+
+
+def test_md5_of_the_old_name_still_used(gf, redirecting):
+    (files, moved, asked) = redirecting
+    moved[LATEST] = DATED
+    files[DATED] = (DATA, {})
+    files[LATEST + ".md5"] = md5_line(b"other")
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="MD5"):
+        GEOFABRIK._download(LATEST, GEOFABRIK.local_path(LATEST))
+    assert asked == [LATEST, DATED + ".md5", LATEST + ".md5"]
+
+
+def test_no_md5_checks_the_size(gf, redirecting):
+    (files, moved, asked) = redirecting
+    files[LATEST] = (DATA, {})
+    path = GEOFABRIK.local_path(LATEST)
+    GEOFABRIK._download(LATEST, path)
+    assert open(path, "rb").read() == DATA
+    os.remove(path)
+    files[LATEST] = (DATA, {"Content-Length": str(len(DATA) + 5)})
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="download cut"):
+        GEOFABRIK._download(LATEST, path)
+    assert os.listdir(os.path.dirname(path)) == []
+    # A gzip answer is decoded: its Content-Length is the compressed size.
+    files[LATEST] = (DATA, {"Content-Length": "7", "Content-Encoding": "gzip"})
+    GEOFABRIK._download(LATEST, path, md5=False)
+    assert open(path, "rb").read() == DATA
+
+
+def test_md5_server_error_raises(gf, redirecting, monkeypatch):
+    # Only a 404 means "no .md5"; a server error stops the download.
+    (files, moved, asked) = redirecting
+    files[LATEST] = (DATA, {})
+    real = GEOFABRIK._session
+
+    def session():
+        s = real()
+        get = s.get
+        s.get = lambda url, timeout, stream=False: (
+            FakeResp(b"", 503) if url.endswith(".md5") else get(url, timeout))
+        return s
+
+    monkeypatch.setattr(GEOFABRIK, "_session", session)
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="503"):
+        GEOFABRIK._download(LATEST, GEOFABRIK.local_path(LATEST))
+
+
+def test_failed_file_fails_only_its_tiles(gf, tmp_path, monkeypatch,
+                                          fresh_failures):
+    # +55+012 needs a only, +55+013 needs a and b: one group. b's download
+    # failing used to send both tiles to Overpass.
+    monkeypatch.setattr(GEOFABRIK, "load_index", lambda download=True: [
+        region("europe", -20, 30, 40, 80), region("a", 11, 54, 13.5, 56),
+        region("b", 13.5, 54, 15, 56)])
+    src = osm_file(tmp_path / "a.osm", [
+        (1, 55.1, 12.1, {}), (2, 55.2, 12.1, {}), (3, 55.2, 12.2, {})],
+        [(10, [1, 2, 3, 1], {"natural": "water"})])
+    fetched = []
+
+    def ensure_file(url):
+        fetched.append(url)
+        if "/b-" in url:
+            raise GEOFABRIK.GeofabrikError(f"{url}: HTTPError: 404")
+        return src
+
+    monkeypatch.setattr(GEOFABRIK, "ensure_file", ensure_file)
+    wanted = {(55, 12): {"water": "w"}, (55, 13): {"water": "w"}}
+    (plan, _, _) = GEOFABRIK.plan_tiles(wanted, GEOFABRIK.load_index())
+    assert len(GEOFABRIK.group_tiles(plan)) == 1
+    monkeypatch.setattr(EXTRACT, "extract_answers", lambda files, w, log: (
+        {t: {"water": b"<osm/>"} for t in w}, {}))
+    (done, left) = GEOFABRIK.prepare_tiles(wanted, write=False)
+    assert set(done) == {(55, 12)} and set(left) == {(55, 13)}
+    assert "b-latest" in left[(55, 13)]
+    assert sorted(fetched) == [B + "europe/a-latest.osm.pbf",
+                               B + "europe/b-latest.osm.pbf"]
