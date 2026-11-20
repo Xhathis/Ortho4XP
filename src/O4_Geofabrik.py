@@ -99,10 +99,21 @@ def index_path():
 
 def local_path(url):
     """The file for a Geofabrik URL: its path below the server's root
-    (us/georgia and georgia have the same file name)."""
+    (us/georgia and georgia have the same file name).
+
+    Since 2026-11 Geofabrik puts every region in a folder of its own
+    (europe/france/alsace/alsace-latest.osm.pbf, was
+    europe/france/alsace-latest.osm.pbf; the old URLs redirect). That
+    folder is left out, so the files downloaded before stay where they
+    are, whichever form the index gives (#118)."""
     rel = url[len(BASE_URL):] if url.startswith(BASE_URL) else \
         url.rsplit("/", 1)[-1]
-    return os.path.join(data_dir(), *rel.split("/"))
+    parts = rel.split("/")
+    # Exactly the region's name: us/us-virgin-islands-latest is the old
+    # form (region us-virgin-islands in folder us), not the new one.
+    if len(parts) >= 2 and parts[-1].split("-latest.", 1)[0] == parts[-2]:
+        del parts[-2]
+    return os.path.join(data_dir(), *parts)
 
 
 # --- index and regions -----------------------------------------------------------
@@ -304,23 +315,49 @@ def _md5_of(text, url):
     return digest
 
 
+def _expected_md5(s, urls):
+    """The checksum from the first of urls' .md5 files that exists; None
+    when none does (HTTP 404). Other failures raise."""
+    for u in urls:
+        with s.get(u + ".md5", timeout=(30, 60)) as r:
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            return _md5_of(r.text, u)
+    return None
+
+
 def _download(url, path, md5=True, check=None):
     """Download url to path (temp name, os.replace). With md5, check the
-    file against Geofabrik's url.md5; check(temp path) may raise
-    GeofabrikError to refuse the file."""
+    file against Geofabrik's .md5; check(temp path) may raise
+    GeofabrikError to refuse the file.
+
+    Since 2026-11 Geofabrik's ...-latest.osm.pbf redirects to the dated
+    file (alsace-261119.osm.pbf), and only that one has a .md5 (#118): the
+    checksum is asked for the URL the download ended at, which also keeps
+    file and checksum together when a new day's file appears in between.
+    Without any .md5 the size must match the announced Content-Length.
+    """
     import requests
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = FNAMES.temp_path_for(path)
     try:
         with _session() as s:
             expected = None
-            if md5:
-                with s.get(url + ".md5", timeout=(30, 60)) as r:
-                    r.raise_for_status()
-                    expected = _md5_of(r.text, url)
             with s.get(url, stream=True, timeout=(30, 120)) as r:
                 r.raise_for_status()
+                if md5:
+                    final = getattr(r, "url", None) or url
+                    expected = _expected_md5(
+                        s, [final] + ([url] if final != url else []))
+                    if expected is None:
+                        UI.vprint(1, f"    No .md5 for {final}: checking the "
+                                  "download's size only.")
                 total = int(r.headers.get("Content-Length", 0))
+                # requests decodes a gzip answer: Content-Length is then
+                # the compressed size.
+                if r.headers.get("Content-Encoding", "identity") != "identity":
+                    total = 0
                 (h, done, shown) = (hashlib.md5(), 0, time.time())
                 with open(tmp, "wb") as f:
                     for chunk in r.iter_content(CHUNK):
@@ -334,6 +371,9 @@ def _download(url, path, md5=True, check=None):
                                       f"{total / 1e6:.0f} MB")
         if expected and h.hexdigest() != expected:
             raise GeofabrikError(f"{url}: MD5 mismatch (download cut?)")
+        if total and done != total:
+            raise GeofabrikError(f"{url}: {done} of {total} bytes "
+                                 "(download cut)")
         if check:
             check(tmp)
         os.replace(tmp, path)
@@ -600,13 +640,24 @@ def prepare_tiles(wanted, write=True):
                               if not _cached(*tile, layer)})
           for tile in sea})
     for (urls, tiles) in group_tiles(plan):
-        names = ", ".join(u.rsplit("/", 1)[-1] for u in urls)
-        try:
-            files = [ensure_file(u) for u in urls]
-        except (GeofabrikError, OSError) as e:
-            for tile in tiles:
-                left[tile] = f"no extract file ({e})"
+        # A file that cannot be had fails only the tiles that need it: a
+        # merged group used to send all its tiles to Overpass (batch C,
+        # 2026-11-20: alsace and jihocesky failed 18 of 20 tiles, #118).
+        (paths, missing) = ({}, {})
+        for u in sorted(urls):
+            try:
+                paths[u] = ensure_file(u)
+            except (GeofabrikError, OSError) as e:
+                missing[u] = e
+        for tile in [t for t in tiles if plan[t] & missing.keys()]:
+            u = min(plan[tile] & missing.keys())
+            left[tile] = f"no extract file ({missing[u]})"
+            tiles.remove(tile)
+        if not tiles:
             continue
+        needed = sorted(set().union(*(plan[t] for t in tiles)))
+        files = [paths[u] for u in needed]
+        names = ", ".join(u.rsplit("/", 1)[-1] for u in needed)
         UI.vprint(1, f"    Reading {names} for {len(tiles)} tile(s)")
         start = time.time()
 
