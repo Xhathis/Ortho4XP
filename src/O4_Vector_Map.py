@@ -333,10 +333,26 @@ def include_airports(vector_map, tile):
         )
         UI.red_flag = True
         return (0, 0)
+    xp_areas = XPAPT.flatten_areas_for_tile(
+        tile, (OVL.custom_overlay_src, OVL.custom_overlay_src_alternate)
+    )
+    # Before the airport smoothing, which writes the elevation file step 2
+    # meshes from: the ramp around X-Plane's flat areas must be in it (#119).
+    ramped = XPAPT.ramp_dem_around_areas(
+        tile.dem.alt_dem,
+        (tile.dem.x0, tile.dem.y0, tile.dem.x1, tile.dem.y1),
+        XPAPT.areas_without_user_patch(
+            xp_areas, FNAMES.patch_dir(tile.lat, tile.lon)
+        ),
+        tile.lat,
+    )
+    if ramped:
+        UI.vprint(1, f"   Elevation data ramped to {ramped} samples around "
+                  "the airports X-Plane flattens.")
     APT.smooth_raster_over_airports(tile, dico_airports)
     (patches_area, patches_list) = include_patches(vector_map, tile)
     patches_area = include_xp_flatten_areas(
-        vector_map, tile, dico_airports, patches_area, patches_list
+        vector_map, tile, xp_areas, dico_airports, patches_area, patches_list
     )
     runway_taxiway_apron_area = APT.encode_runways_taxiways_and_aprons(
         tile, airport_layer, dico_airports, vector_map, patches_list
@@ -756,7 +772,7 @@ def include_water(vector_map, tile):
 
 ################################################################################
 def include_xp_flatten_areas(
-    vector_map, tile, dico_airports, patches_area, patches_list
+    vector_map, tile, areas, dico_airports, patches_area, patches_list
 ):
     """Build the areas X-Plane flattens (apt.dat "flatten 1" airports) flat
     at the airport elevation, like a patch with cst_alt_abs, so X-Plane's
@@ -764,12 +780,11 @@ def include_xp_flatten_areas(
     patch named after the airport (Patches/<tile>/<ICAO>.patch.osm) wins.
     The OSM runways, taxiways and aprons inside such an area are not
     levelled again (they would get altitudes from the elevation data).
+    The elevation data around them was ramped to their height before
+    (XPAPT.ramp_dem_around_areas, #119). areas: XPAPT.flatten_areas_for_tile.
     Returns patches_area with the areas added; patches_list gets the keys
     of the OSM airports to leave out of encode_runways_taxiways_and_aprons.
     """
-    areas = XPAPT.flatten_areas_for_tile(
-        tile, (OVL.custom_overlay_src, OVL.custom_overlay_src_alternate)
-    )
     for icao, elev, area in areas:
         if icao in patches_list:
             UI.vprint(1, f"   {icao}: user patch used, not X-Plane's flatten "
@@ -799,7 +814,8 @@ def include_xp_flatten_areas(
             1,
             f"   Airport {icao}: built flat at {elev} m inside X-Plane's "
             f"airport boundary ({XPAPT.degrees_area_to_km2(area.area, tile.lat):.2f}"
-            " km2 in this tile; apt.dat has flatten 1)"
+            " km2 in this tile; apt.dat has flatten 1; sloped back to the"
+            f" elevation data within {XPAPT.FLATTEN_RAMP_M:.0f} m around it)"
             + (f", OSM surfaces of {', '.join(inside)} not levelled"
                if inside else "") + ".",
         )

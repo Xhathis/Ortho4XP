@@ -6,7 +6,9 @@ Where the elevation data under it differs (data older than a new runway,
 blasting and fill, uneven ground in a large boundary), the edge of that
 area shows as vertical walls in the sim (Nuuk BGGH: 18-107 m data under a
 flat 86 m). Step 1 builds the same areas flat at the same height, as a
-hand-made patch would, so the mesh meets X-Plane's ground with slopes.
+hand-made patch would, and ramps the elevation data around them from that
+height back to the data over FLATTEN_RAMP_M (#119): flat inside alone only
+moved the walls to the boundary (BGGH: 86 m next to 45-53 m within 9-21 m).
 
 apt.dat (~400 MB) is read once into a small index next to the tile data
 (tmp/xp_flatten_airports.json) and read again only when apt.dat changes.
@@ -15,13 +17,21 @@ import json
 import math
 import os
 
+import numpy
+import shapely
 from shapely import affinity, geometry, ops
 
 import O4_File_Names as FNAMES
+import O4_Geo_Utils as GEO
 import O4_UI_Utils as UI
 
 # App setting (Ortho4XP.cfg): match X-Plane's airport flattening in step 1.
 xp_flatten_airports = True
+
+# Width of the ramp around a flattened airport from its elevation back to
+# the elevation data (#119): Nuuk's 30-40 m steps become slopes of ~20 deg,
+# about an embankment's.
+FLATTEN_RAMP_M = 100.0
 
 APT_DAT_REL = os.path.join("Global Airports", "Earth nav data", "apt.dat")
 INDEX_VERSION = 1
@@ -223,6 +233,50 @@ def flatten_areas_for_tile(tile, overlay_srcs):
     if not airports:
         return []
     return tile_flatten_areas(airports, tile.lat, tile.lon)
+
+
+def areas_without_user_patch(areas, patch_dir):
+    """The flatten areas whose airport has no user patch (<ICAO>.patch.osm in
+    patch_dir): a user patch replaces X-Plane's area (include_patches)."""
+    return [a for a in areas
+            if not os.path.isfile(os.path.join(patch_dir, a[0] + ".patch.osm"))]
+
+
+def ramp_dem_around_areas(alt_dem, bounds, areas, lat, width_m=FLATTEN_RAMP_M):
+    """Set the elevation samples inside each (icao, elev, area) to elev and
+    blend them linearly back to the data within width_m around the area
+    (distance in metres). alt_dem: rows from north to south, samples from
+    x0 to x1 and y1 to y0 inclusive; bounds (x0, y0, x1, y1) and the areas
+    in tile coordinates. Changed in place; returns the samples changed."""
+    (x0, y0, x1, y1) = bounds
+    (ny, nx) = alt_dem.shape
+    xstep = (x1 - x0) / (nx - 1)
+    ystep = (y1 - y0) / (ny - 1)
+    mx = GEO.lon_to_m(lat)
+    my = GEO.lat_to_m
+    wx = width_m / mx
+    wy = width_m / my
+    changed = 0
+    for (_icao, elev, area) in areas:
+        (xmin, ymin, xmax, ymax) = area.bounds
+        c0 = max(math.floor((xmin - wx - x0) / xstep), 0)
+        c1 = min(math.ceil((xmax + wx - x0) / xstep), nx - 1)
+        r0 = max(math.floor((y1 - ymax - wy) / ystep), 0)
+        r1 = min(math.ceil((y1 - ymin + wy) / ystep), ny - 1)
+        if c0 > c1 or r0 > r1:
+            continue
+        (X, Y) = numpy.meshgrid(x0 + numpy.arange(c0, c1 + 1) * xstep,
+                                y1 - numpy.arange(r0, r1 + 1) * ystep)
+        metric = affinity.scale(area, mx, my, origin=(0, 0))
+        dist = shapely.distance(
+            metric, shapely.points(X.ravel() * mx, Y.ravel() * my)
+        ).reshape(X.shape)
+        t = numpy.clip(dist / width_m, 0, 1)
+        window = alt_dem[r0:r1 + 1, c0:c1 + 1]  # a view: written in place
+        near = t < 1
+        window[near] = (elev + (window - elev) * t)[near]
+        changed += int(near.sum())
+    return changed
 
 
 def degrees_area_to_km2(area, lat):
