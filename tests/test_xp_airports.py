@@ -167,15 +167,14 @@ def airport(runway=None):
 def test_include_inserts_flat_rings_and_skips_osm_surfaces(monkeypatch):
     area = geometry.MultiPolygon([geometry.Polygon(
         square(0.3, 0.18, 0.33, 0.2), [square(0.31, 0.185, 0.32, 0.19)])])
-    monkeypatch.setattr(XPAPT, "flatten_areas_for_tile",
-                        lambda tile, srcs: [("BGGH", 85.95, area)])
     rwy = geometry.MultiPolygon([geometry.box(0.305, 0.181, 0.306, 0.199)])
     dico = {"BGGH": airport(rwy), "Other": airport(
         geometry.MultiPolygon([geometry.box(0.5, 0.5, 0.51, 0.51)]))}
     vm, patches_list = FakeVectorMap(), []
     tile = types.SimpleNamespace(lat=64, lon=-52)
     out = VMAP.include_xp_flatten_areas(
-        vm, tile, dico, geometry.Polygon(), patches_list)
+        vm, tile, [("BGGH", 85.95, area)], dico, geometry.Polygon(),
+        patches_list)
     assert [m for _, m in vm.ways] == ["INTERP_ALT", "INTERP_ALT"]
     for way, _ in vm.ways:
         assert way.shape[1] == 3 and (way[:, 2] == 85.95).all()
@@ -186,14 +185,12 @@ def test_include_inserts_flat_rings_and_skips_osm_surfaces(monkeypatch):
     assert out.area == pytest.approx(area.area)
 
 
-def test_user_patch_named_after_airport_wins(monkeypatch):
+def test_user_patch_named_after_airport_wins():
     area = geometry.MultiPolygon([geometry.box(0.3, 0.18, 0.33, 0.2)])
-    monkeypatch.setattr(XPAPT, "flatten_areas_for_tile",
-                        lambda tile, srcs: [("BGGH", 85.95, area)])
     vm, patches_list = FakeVectorMap(), ["BGGH"]
     out = VMAP.include_xp_flatten_areas(
-        vm, types.SimpleNamespace(lat=64, lon=-52), {"BGGH": airport()},
-        geometry.Polygon(), patches_list)
+        vm, types.SimpleNamespace(lat=64, lon=-52), [("BGGH", 85.95, area)],
+        {"BGGH": airport()}, geometry.Polygon(), patches_list)
     assert vm.ways == [] and vm.seeds == {} and out.is_empty
     assert patches_list == ["BGGH"]
 
@@ -203,3 +200,67 @@ def test_setting_is_an_app_setting_on_by_default():
     assert CV.cfg_vars["xp_flatten_airports"]["default"] is True
     assert "xp_flatten_airports" in CV.list_app_vars
     assert XPAPT.xp_flatten_airports is True
+
+
+# --- #119: elevation data ramped around the flat areas -------------------
+
+def flat_dem(n=1001, value=40.0):
+    import numpy
+    return numpy.full((n, n), value, dtype=numpy.float32)
+
+
+def sample(dem, x, y, n=1001):
+    """Sample at tile coordinates (x, y) of a DEM spanning 0..1."""
+    return float(dem[round((1 - y) * (n - 1)), round(x * (n - 1))])
+
+
+def test_ramp_flat_inside_linear_around_untouched_beyond():
+    import O4_Geo_Utils as GEO
+    dem = flat_dem()
+    area = geometry.MultiPolygon([geometry.box(0.4, 0.4, 0.6, 0.6)])
+    n = XPAPT.ramp_dem_around_areas(dem, (0, 0, 1, 1),
+                                    [("BGGH", 86.0, area)], 64, width_m=100)
+    assert n > 0
+    assert sample(dem, 0.5, 0.5) == pytest.approx(86.0)
+    assert sample(dem, 0.4, 0.5) == pytest.approx(86.0)  # on the boundary
+    # 50 m north of the area (the grid is 0.001 deg: 111 m per row, so
+    # check by distance: one row north is 111 m, beyond the ramp).
+    assert sample(dem, 0.5, 0.601) == pytest.approx(40.0)
+    # East: one column is 0.001 deg = ~48.8 m at 64 N, inside the ramp.
+    d = 0.001 * GEO.lon_to_m(64)
+    assert sample(dem, 0.601, 0.5) == pytest.approx(86 + (40 - 86) * d / 100,
+                                                     abs=0.01)
+    assert sample(dem, 0.603, 0.5) == pytest.approx(40.0)
+    assert sample(dem, 0.1, 0.1) == pytest.approx(40.0)
+
+
+def test_ramp_keeps_the_slope_gentle():
+    import numpy
+    import O4_Geo_Utils as GEO
+    dem = flat_dem(value=40.0)
+    area = geometry.MultiPolygon([geometry.box(0.4, 0.4, 0.6, 0.6)])
+    XPAPT.ramp_dem_around_areas(dem, (0, 0, 1, 1), [("X", 86.0, area)], 64,
+                                width_m=100)
+    row = dem[500].astype(float)
+    step_m = 0.001 * GEO.lon_to_m(64)
+    worst = numpy.degrees(numpy.arctan(numpy.abs(numpy.diff(row)) / step_m))
+    # 46 m over 100 m: 24.7 deg at most (before: one sample from 86 to 40).
+    assert worst.max() < 25.5
+
+
+def test_ramp_without_areas_or_outside_the_dem_changes_nothing():
+    dem = flat_dem()
+    assert XPAPT.ramp_dem_around_areas(dem, (0, 0, 1, 1), [], 64) == 0
+    far = geometry.MultiPolygon([geometry.box(3, 3, 4, 4)])
+    assert XPAPT.ramp_dem_around_areas(
+        dem, (0, 0, 1, 1), [("X", 86.0, far)], 64) == 0
+    assert (dem == 40.0).all()
+
+
+def test_areas_without_user_patch(tmp_path):
+    area = geometry.MultiPolygon([geometry.box(0.3, 0.18, 0.33, 0.2)])
+    areas = [("BGGH", 85.95, area), ("BGSF", 50.0, area)]
+    (tmp_path / "BGGH.patch.osm").write_text("<osm></osm>")
+    assert XPAPT.areas_without_user_patch(areas, str(tmp_path)) == areas[1:]
+    assert XPAPT.areas_without_user_patch(
+        areas, str(tmp_path / "missing")) == areas
