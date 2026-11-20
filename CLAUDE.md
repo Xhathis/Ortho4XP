@@ -987,6 +987,29 @@ Test results:
   1-5 levels, Arc has the full level for 33; ZL16 4 of 150; ZL18 5 of
   150. `test` @ 5f96c6d (#116 + #117): 640 unit tests, pyflakes 0.
   Not run: gui_smoke (the user's batch GUI was open in G:\Ortho4XP).
+- Batch B+D ended 2026-11-19 22:58 (30h38m): 363 built, 2 open sea, 4
+  failed in step 3 (imagery: +79-069/070/071, +82-039). `dev`
+  fast-forwarded to 92ead0f (#116, #117) and pushed. Step 3 + overlay of
+  the 4 on dev (scratchpad script calling build_tile_list, 23:35, 21m35s):
+  4 built; the three +79 tiles partly cut from ZL9 (neither Arc nor BI
+  has ZL15 there, NOTE), +82-039's 304 textures filled from BI; no
+  overlay (no X-Plane DSF north of ~76 N, WARNING); the batch then
+  removed the 12 meshes kept next to them.
+- Batch C on `dev` 92ead0f (20 tiles, GO2 ZL16, started 2026-11-19
+  23:57 from a script, the GUI closed): Geofabrik answered 404 for the
+  .md5 of alsace and jihocesky (#118), so 18 tiles went to Overpass
+  (DE 429/502/timeouts, FR 403: no answer); 5 built, 10 meshed and held
+  by the neighbour barrier (#82) behind 6 held in the Overpass pause.
+  Stopped 2026-11-20 ~07:00. #118 `fix/geofabrik-layout` @ 704ce67
+  (from dev 92ead0f): 10 new unit tests (9 fail on dev; the 503 one
+  passes there too), 651 pass, pyflakes 0; regression --overlay PASS
+  (DSF, 17/17 masks, app log identical); sim_geofabrik_step1 +28-018 0
+  failures; all 554 regions give the same local path from the old index,
+  the new one and dev's rule (152 extracts on disk found); 9 extracts
+  downloaded with the fix (alsace 132 MB, jihocesky 97 MB, hessen,
+  champagne-ardenne, oberfranken, 4 BW Regierungsbezirke; MD5 of the
+  dated files). `test` @ dce73b3: 651 unit tests. Batch C restarted on
+  dev 92ead0f with its 15 unfinished tiles (all extracts on disk).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2008,6 +2031,19 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     NOTE per tile (IMG.fallback_imgs). The pause's probe asks the provider
     only. Existing JPEG/DDS are reused: built tiles change only when their
     textures are deleted and step 3 runs again.
+118. **FIXED** (`704ce67`): Geofabrik moved every region into a folder of
+    its own in 2026-11 (europe/france/alsace/alsace-latest.osm.pbf; the old
+    URLs redirect there, then 307 to a dated file alsace-261119.osm.pbf)
+    and dropped the -latest .md5 files (404). _download asked url + ".md5"
+    first, so every extract not yet on disk failed and its tiles went to
+    Overpass; existing extracts still updated (the replication URL in the
+    file header redirects too). Now: .md5 of the URL the download ended at,
+    then of the old name; none at all -> the size must equal Content-Length
+    (skipped for a gzip answer); other HTTP errors still stop. local_path
+    leaves out a folder named exactly like the region, so a refreshed index
+    with the new URLs finds the extracts on disk (us/us-virgin-islands is
+    the old form). prepare_tiles: a file that cannot be had fails only the
+    tiles that need it (a merged group used to fail whole).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2160,6 +2196,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     ended (the running GUI keeps the old code). Then step 3 again for
     +79-069/070/071 and +82-039; for the Arctic GO2 tiles with coarse
     textures, deleting their textures and running step 3 fetches Arc.
+    Done: dev 92ead0f pushed 2026-11-19; the 4 tiles built 2026-11-19.
+35. #118 — Geofabrik's new folder layout; on `test` @ dce73b3, to `dev`
+    with the user's OK (given) once batch C has ended.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
