@@ -1070,7 +1070,11 @@ Test results:
   the unbuilt +50+006). `test` @ a0aafa0: 671 unit tests, regression PASS
   (DSF, 17/17 masks, app log identical: the frozen inputs have no
   apt.dat). The user links the pack into Custom Scenery above Global
-  Airports and removes the BGGH_no_flatten test pack.
+  Airports and removes the BGGH_no_flatten test pack. -> `dev`
+  fast-forwarded to 5ad0b07 on 2026-11-21 (not pushed): 671 unit tests,
+  pyflakes 0. The user linked the pack (yOrtho4XP_Airports.lnk) and
+  removed the test pack; X-Plane's Log.txt (17:08) loads it as pack 152,
+  right above Global Airports (153), no APT error for its airports.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2326,10 +2330,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 37. ~~#122~~ — on `dev` bf6f064 since 2026-11-21. Was: on `test` @ 5000800, to
     `dev` with the user's OK (with #120/#121). Until then, put the Nuuk
     zone line back into +64-052's tile config after each build of it.
-38. #123 — airport override pack without X-Plane's flatten; on `test` @
-    a0aafa0, to `dev` with the user's OK. Until then the GUI writes no
-    markers and does not rewrite the pack (the 52-airport pack of
-    2026-11-21 stays valid).
+38. ~~#123~~ — airport override pack without X-Plane's flatten; on `dev`
+    5ad0b07 since 2026-11-21, pack linked in Custom Scenery.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
