@@ -306,9 +306,12 @@ class Tile:
         config_file_bak = config_file + ".bak"
         try:
             lines = []
-            tile_zones = zones_in_tile(
-                globals()["zone_list"], self.lat, self.lon
-            )
+            # The tile's own zones: in the GUI a Tile is made from the
+            # globals (zone_list included), in a batch read_from_config
+            # sets the tile config's zones. The global list held only the
+            # GUI's zones, so a batch erased a zone set in the tile config
+            # after building with it (#122).
+            tile_zones = zones_in_tile(self.zone_list, self.lat, self.lon)
             _LOGGER.debug("Zones in tile found: %s", tile_zones)
             for var in list_tile_vars:
                 if var == "zone_list":
