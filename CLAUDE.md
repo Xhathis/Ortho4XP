@@ -1015,10 +1015,11 @@ Test results:
   gap textures (zl15_arc_prepare.py, 130 GB; 11h23m: Arc pieces in 165
   tiles, BI in 59), 10 continent-only island tiles from central-america
   (795 MB, downloaded with the user's OK) and the OSM API: all built, 0
-  failed. Full tile audit 2026-11-21 (G:\Ortho4XP_testsatches  evaluation_2026-11-21.md): found #120 and #121; 20 tiles to rebuild
+  failed. Full tile audit 2026-11-21 (G:\Ortho4XP_tests\batches\
+  evaluation_2026-11-21.md): found #120 and #121; 20 tiles to rebuild
   (rebuild_audit_2026-11-21.txt, answers prepared) plus 14 Canadian
   tiles of the +61/+62 rows raised to ZL16 in their tile configs (user's
-  OK; backups in cfg_backups6-11-21_canada_zl16; GO2 has real ZL16
+  OK; backups in cfg_backups\2026-11-21_canada_zl16; GO2 has real ZL16
   there, 2x the fine detail of ZL15). #120 `fix/geofabrik-continent-gap`
   @ 353446d and #121 `fix/stale-distance-masks` @ 03c3c5d (from dev
   98fddee): 6 new unit tests (all fail on dev), pyflakes 0, regression
