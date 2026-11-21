@@ -1092,9 +1092,12 @@ Test results:
   2 (+47-123, +51+006) crash DSFTool 2.4.0 already as sources (also with
   a 64 MB stack), their per-airport command counts match. Regression PASS
   (DSF, 17/17 masks, app log identical). `test` @ 1cbeae0: 701 unit tests.
-  Not yet: the user's pack rewritten on `dev` (the next step 3 or batch
-  does it, or a call of TILE.update_airport_override()), and a look at
-  Nuuk in X-Plane.
+  -> `dev` fast-forwarded to 9287de3 on 2026-11-21 (not pushed); the
+  user's pack rewritten from G:\Ortho4XP (XPAPT.update_override_pack with
+  the cfg's two overlay sources; the #123 apt.dat and stamp backed up in
+  G:\Ortho4XP_tests\cfg_backups6-11-21_airport_pack_123): apt.dat
+  unchanged, 48 DSFs byte-identical to the verified scratch pack. Not yet:
+  a look at Nuuk in X-Plane (restart needed).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2365,9 +2368,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     zone line back into +64-052's tile config after each build of it.
 38. ~~#123~~ — airport override pack without X-Plane's flatten; on `dev`
     5ad0b07 since 2026-11-21, pack linked in Custom Scenery.
-39. #124 — the pack's airports get their Global Airports 3D; on `test` @
-    1cbeae0, to `dev` with the user's OK, then rewrite the user's pack and
-    check Nuuk's buildings in X-Plane.
+39. ~~#124~~ — the pack's airports get their Global Airports 3D; on `dev`
+    9287de3 since 2026-11-21, the user's pack rewritten. Open: Nuuk's
+    buildings checked in X-Plane.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
