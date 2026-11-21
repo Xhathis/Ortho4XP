@@ -119,6 +119,8 @@ Utils_dir = resource_path("Utils")
 Tile_dir = resource_path("Tiles")
 Tmp_dir = resource_path("tmp")
 Overlay_dir = resource_path("yOrtho4XP_Overlays")
+# The airport override pack (#123), a scenery pack of its own.
+Airport_pack_dir = resource_path("yOrtho4XP_Airports")
 
 ##############################################################################
 def short_latlon(lat, lon):

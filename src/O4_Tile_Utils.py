@@ -20,6 +20,7 @@ import O4_Mesh_Utils as MESH
 import O4_Mask_Utils as MASK
 import O4_DSF_Utils as DSF
 import O4_Overlay_Utils as OVL
+import O4_XP_Airports as XPAPT
 from O4_Parallel_Utils import parallel_launch, parallel_join
 
 max_download_slots = 1
@@ -446,11 +447,28 @@ def build_tile(tile, white_retry_follows=False):
         _remove_mesh_files(tile.build_dir, tile.lat, tile.lon)
     if UI.cleaning_level > 1 and not tile.grouped:
         remove_unwanted_textures(tile)
+    if not keep_mesh_after_step3:
+        # A batch does it once at its end (its workers never).
+        update_airport_override()
     UI.timings_and_bottom_line(timer)
     UI.logprint(
         "Step 3 for tile lat=", tile.lat, ", lon=", tile.lon, ": normal exit."
     )
     return 1
+
+
+def update_airport_override():
+    """The pack of X-Plane airports without their flatten where the tiles
+    are built flat (#123); a failure leaves the built tiles as they are."""
+    try:
+        XPAPT.update_override_pack(
+            (OVL.custom_overlay_src, OVL.custom_overlay_src_alternate)
+        )
+    except OSError as e:
+        UI.lvprint(
+            1, "   WARNING: the X-Plane airport override pack was not "
+            f"written ({e}); X-Plane flattens those airports as before.",
+        )
 
 ################################################################################
 # cleaning_level > 2 deletes a tile's mesh and .apt after its step 3. In a
@@ -638,8 +656,12 @@ def build_tile_list(
                 return 0
             GEOFABRIK.batch_prepared = True
         if batch_parallel_tiles > 1 and len(list_lat_lon) > 1:
-            return _build_tile_list_parallel(tile, list_lat_lon, flags)
-        return _build_tile_list_sequential(tile, list_lat_lon, flags)
+            result = _build_tile_list_parallel(tile, list_lat_lon, flags)
+        else:
+            result = _build_tile_list_sequential(tile, list_lat_lon, flags)
+        if do_dsf:
+            update_airport_override()
+        return result
     finally:
         keep_mesh_after_step3 = False
         GEOFABRIK.batch_prepared = False

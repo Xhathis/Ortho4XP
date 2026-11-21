@@ -1,14 +1,16 @@
 """Airports that X-Plane flattens, read from X-Plane's own apt.dat.
 
 An airport with "1302 flatten 1" in apt.dat is drawn by X-Plane on ground it
-forces flat at the airport elevation, inside the airport boundary (row 130).
-Where the elevation data under it differs (data older than a new runway,
-blasting and fill, uneven ground in a large boundary), the edge of that
-area shows as vertical walls in the sim (Nuuk BGGH: 18-107 m data under a
-flat 86 m). Step 1 builds the same areas flat at the same height, as a
-hand-made patch would, and ramps the elevation data around them from that
-height back to the data over FLATTEN_RAMP_M (#119): flat inside alone only
-moved the walls to the boundary (BGGH: 86 m next to 45-53 m within 9-21 m).
+forces flat at the airport elevation. Step 1 builds the airport boundary
+(row 130) flat at that height, as a hand-made patch would, and ramps the
+elevation data around it back to the data over FLATTEN_RAMP_M (#115, #119),
+so the airport needs no flattening by X-Plane.
+
+X-Plane's own flatten covers far more than the boundary: at Nuuk BGGH it
+raised the sea to 86 m and cut the hills with straight walls over a DSF
+that was flat inside the boundary and ramped around it (#123). The walls
+went only without the flag, so an override pack holds those airports
+without it once their tiles are built flat (update_override_pack).
 
 apt.dat (~400 MB) is read once into a small index next to the tile data
 (tmp/xp_flatten_airports.json) and read again only when apt.dat changes.
@@ -281,3 +283,198 @@ def ramp_dem_around_areas(alt_dem, bounds, areas, lat, width_m=FLATTEN_RAMP_M):
 
 def degrees_area_to_km2(area, lat):
     return area * 111.32 ** 2 * math.cos(math.radians(lat))
+
+
+################################################################################
+# Override pack (#123): X-Plane's own flatten covers far more than the
+# boundary (Nuuk: the sea raised to 86 m with straight edges, hills cut, all
+# over a DSF that was flat inside the boundary and ramped around it). The
+# walls went only when the airport came from a pack above Global Airports
+# without "1302 flatten 1". Such a pack is written for every airport the
+# built tiles have flat: step 1 records the airports it built flat in the
+# tile folder (MARKER), and an airport goes into the pack once every tile
+# its boundary reaches has it recorded and a DSF built since.
+
+MARKER = "xp_flattened_airports.json"
+PACK_APT_DAT = os.path.join("Earth nav data", "apt.dat")
+PACK_STAMP = "ortho4xp_pack.json"
+
+
+def pack_dir():
+    return FNAMES.Airport_pack_dir
+
+
+def marker_path(build_dir):
+    return os.path.join(build_dir, MARKER)
+
+
+def write_marker(build_dir, icaos):
+    """Record the airports step 1 built flat in this tile folder; no file
+    when there are none (a mesh built without them must not count)."""
+    path = marker_path(build_dir)
+    if not icaos:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        return
+    FNAMES.write_text_atomic(path, json.dumps(sorted(set(icaos))))
+
+
+def read_marker(build_dir):
+    try:
+        with open(marker_path(build_dir), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return set()
+    return {str(x) for x in data} if isinstance(data, list) else set()
+
+
+def built_flat_tiles(tile_dir):
+    """{(lat, lon): {icao, ...}} of the tile folders in tile_dir whose DSF
+    was built from (or after) the mesh that has those airports flat: the DSF
+    is not older than the marker."""
+    out = {}
+    try:
+        names = os.listdir(tile_dir)
+    except OSError:
+        return out
+    for name in names:
+        if not name.startswith("zOrtho4XP_"):
+            continue
+        try:
+            (lat, lon) = (int(name[10:13]), int(name[13:17]))
+        except ValueError:
+            continue
+        build_dir = os.path.join(tile_dir, name)
+        try:
+            marked = os.path.getmtime(marker_path(build_dir))
+            built = os.path.getmtime(FNAMES.dsf_file(build_dir, lat, lon))
+        except OSError:
+            continue
+        if built >= marked:
+            icaos = read_marker(build_dir)
+            if icaos:
+                out[(lat, lon)] = icaos
+    return out
+
+
+def airport_tiles(apt):
+    """The tiles (lat, lon) the airport's boundary reaches into (with area,
+    as tile_flatten_areas counts them)."""
+    tiles = set()
+    for rings in apt["polygons"]:
+        lons = [p[0] for r in rings for p in r]
+        lats = [p[1] for r in rings for p in r]
+        for lat in range(math.floor(min(lats)), math.floor(max(lats)) + 1):
+            for lon in range(math.floor(min(lons)),
+                             math.floor(max(lons)) + 1):
+                if tile_flatten_areas([apt], lat, lon):
+                    tiles.add((lat, lon))
+    return tiles
+
+
+def override_airports(airports, flat_tiles):
+    """ICAOs of the flatten airports built flat in every tile they reach."""
+    out = []
+    for apt in airports:
+        tiles = airport_tiles(apt)
+        if tiles and all(apt["icao"] in flat_tiles.get(t, ()) for t in tiles):
+            out.append(apt["icao"])
+    return sorted(set(out))
+
+
+def extract_blocks(lines, icaos):
+    """{icao: [lines]} of the airports in icaos, from apt.dat lines (str or
+    bytes), as they are there but for "1302 flatten 1"; trailing blank
+    lines dropped."""
+    want = set(icaos)
+    out = {}
+    cur = None
+    for line in lines:
+        if isinstance(line, bytes):
+            line = line.decode("utf-8", "replace")
+        line = line.rstrip("\r\n")
+        p = line.split()
+        if p and p[0] in ("1", "16", "17", "99"):
+            cur = None
+            if p[0] != "99" and len(p) > 4 and p[4] in want \
+                    and p[4] not in out:
+                cur = out[p[4]] = []
+        if cur is None:
+            continue
+        if p[:3] == ["1302", "flatten", "1"]:
+            continue
+        cur.append(line)
+    for block in out.values():
+        while block and not block[-1].strip():
+            block.pop()
+    return out
+
+
+def pack_text(blocks):
+    lines = ["I", "1200 Version - Ortho4XP: X-Plane's airports without "
+             "'1302 flatten 1' where the Ortho4XP tiles are built flat "
+             "(written by Ortho4XP, do not edit)", ""]
+    for icao in sorted(blocks):
+        lines += blocks[icao] + [""]
+    lines.append("99")
+    return "\n".join(lines) + "\n"
+
+
+def _write_apt_dat(path, text):
+    """UTF-8 (apt.dat's encoding; names outside the ANSI code page would
+    not encode otherwise) with CRLF as X-Plane's own, written atomically."""
+    tmp = FNAMES.temp_path_for(path)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\r\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def update_override_pack(overlay_srcs, tile_dir=None, out_dir=None):
+    """Write the override pack when the airports in it or X-Plane's apt.dat
+    changed. Returns the number of airports in it, None when nothing was
+    done (setting off, no apt.dat)."""
+    if not xp_flatten_airports:
+        return None
+    apt_dat = find_apt_dat(overlay_srcs)
+    if not apt_dat:
+        return None
+    airports = load_airports(apt_dat)
+    if airports is None:
+        return None
+    icaos = override_airports(
+        airports, built_flat_tiles(tile_dir or FNAMES.Tile_dir))
+    out_dir = out_dir or pack_dir()
+    st = os.stat(apt_dat)
+    stamp = {"apt_dat": os.path.normcase(os.path.abspath(apt_dat)),
+             "size": st.st_size, "mtime_ns": st.st_mtime_ns,
+             "airports": icaos}
+    stamp_file = os.path.join(out_dir, PACK_STAMP)
+    target = os.path.join(out_dir, PACK_APT_DAT)
+    try:
+        with open(stamp_file, encoding="utf-8") as f:
+            if json.load(f) == stamp and os.path.isfile(target):
+                return len(icaos)
+    except (OSError, ValueError):
+        pass
+    blocks = {}
+    if icaos:
+        with open(apt_dat, "rb") as f:
+            blocks = extract_blocks(f, icaos)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    _write_apt_dat(target, pack_text(blocks))
+    FNAMES.write_text_atomic(stamp_file, json.dumps(stamp))
+    UI.lvprint(
+        1, f"   X-Plane airport override: {len(blocks)} airport(s) without "
+        f"X-Plane's flatten in {out_dir} ({', '.join(sorted(blocks)) or '-'})."
+        " It must be in Custom Scenery above Global Airports.",
+    )
+    return len(blocks)
