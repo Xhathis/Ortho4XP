@@ -1031,6 +1031,16 @@ Test results:
   boundary, slopes up to 44 deg within 25 m outside; GO2's imagery is
   from the construction (old runway only), BI has the finished runway,
   Arc has nothing there (2521-byte answers at ZL15-18).
+  Nuuk BI zone (user's OK): +64-052's tile config zone_list = BI at ZL15
+  over lat 64.145-64.240 / lon -51.772..-51.587 (all 45 ZL18 airport
+  cover textures of the last build inside; the cover raises them to BI
+  ZL18; BI ZL18 probed 121/121 real images; backup in
+  cfg_backups\2026-11-21_nuuk_bi_zone); +64-052 added to the batch list
+  (35 tiles). The batch must run without the global-cfg override (the
+  zone and the Canadian ZL16 are tile settings). Found #122 on the way:
+  `fix/tile-zones-kept` @ 57966d9 (from dev 98fddee): 2 new unit tests
+  (both fail on dev), pyflakes 0. `test` @ 5000800: 663 unit tests,
+  regression PASS (DSF, 17/17 masks, app log identical).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2098,6 +2108,14 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     bathymetry ratio of any square that has one. 129 tiles hold 483 such
     files; in +65-024 all 2,891 water vertices in those squares had the
     full-depth or coast value, so nothing visible: no rebuild.
+122. **FIXED** (`57966d9`): Tile.write_to_config (step 3) wrote the zones
+    of the GUI's global zone_list that overlap the tile. A batch reads
+    each tile config, zones included, and builds with them, but the
+    global list holds only the GUI's zones: step 3 rewrote the config
+    without the tile's own zone, so the next rebuild silently lost it.
+    Now it writes the tile's own zone_list (in the GUI a Tile is made from
+    the globals, so the GUI is unchanged). Found while adding the Nuuk BI
+    zone; no tile had a zone before.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2258,6 +2276,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     would empty the Caribbean islands again. Then the 34-tile rebuild
     (20 audit tiles, 14 Canadian ZL16 tiles; afterwards remove their
     ZL15 .dds/.ter).
+37. #122 — a tile config's zones kept by step 3; on `test` @ 5000800, to
+    `dev` with the user's OK (with #120/#121). Until then, put the Nuuk
+    zone line back into +64-052's tile config after each build of it.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
