@@ -1052,6 +1052,25 @@ Test results:
   (GO218 at airports; 726 textures with Arc pieces). No unused or missing
   .dds/.ter in the 35 tiles. -> `dev` fast-forwarded to bf6f064 (#120,
   #121, #122) on 2026-11-21 (not pushed); 663 unit tests, pyflakes 0.
+- Nuuk walls after the rebuild (user's screenshots, 2026-11-21): the sea
+  raised to runway height with straight edges, hills cut by straight walls.
+  The DSF has none of it (decoded: no steep or tall triangle within 600 m
+  of BGGH's boundary, slope map); the only base mesh for +64-052 is ours
+  (the 6 other packs are overlays); no raster-elevated vertex. A pack with
+  BGGH's gateway block minus "1302 flatten 1" (the user copied it into
+  Custom Scenery, X-Plane put it above *GLOBAL_AIRPORTS*; a first try by
+  editing scenery_packs.ini was lost, Log.txt showed it not loaded): the
+  walls were gone. So X-Plane's flatten covers far more than the boundary
+  and overrides the DSF: #123. `fix/xp-flatten-override` @ 9677a01 (from
+  dev b5300b0): 8 new unit tests (all fail on dev), pyflakes 0, real step
+  1 of +64-052 writes ["BGGH"] (setting off: no marker). Markers seeded for
+  the user's 49 tiles with a flatten airport (all DSFs after #119 reached
+  dev, 2026-11-20 13:37:32; marker mtime = DSF mtime - 1 s), pack written:
+  52 airports in G:\Ortho4XP\yOrtho4XP_Airports (XED002S left out: reaches
+  the unbuilt +50+006). `test` @ a0aafa0: 671 unit tests, regression PASS
+  (DSF, 17/17 masks, app log identical: the frozen inputs have no
+  apt.dat). The user links the pack into Custom Scenery above Global
+  Airports and removes the BGGH_no_flatten test pack.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2127,6 +2146,21 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Now it writes the tile's own zone_list (in the GUI a Tile is made from
     the globals, so the GUI is unchanged). Found while adding the Nuuk BI
     zone; no tile had a zone before.
+123. **DONE** (`9677a01`): #115/#119 assumed X-Plane flattens the airport
+    boundary; it flattens far more (BGGH: sea at 86 m, hills cut, straight
+    edges), over the DSF. Airports X-Plane flattens are therefore given to
+    X-Plane without the flag: step 1 writes xp_flattened_airports.json in
+    the tile folder (the airports this mesh has flat; none: no file), and
+    after a single step 3 or at the end of a batch (TILE.
+    update_airport_override; workers never) XPAPT.update_override_pack
+    writes yOrtho4XP_Airports/Earth nav data/apt.dat next to the overlays:
+    X-Plane's own block of each flatten airport whose every tile (the
+    boundary reaching in) has it recorded and a DSF not older than the
+    record, minus "1302 flatten 1" (UTF-8, CRLF), only rewritten when that
+    list or apt.dat changed (ortho4xp_pack.json). The pack must be in
+    Custom Scenery above Global Airports (a shortcut keeps it current).
+    Airports reaching an unbuilt tile stay flattened by X-Plane (without
+    the flag X-Plane's own mesh would leave their runways bumpy).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2292,6 +2326,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 37. ~~#122~~ — on `dev` bf6f064 since 2026-11-21. Was: on `test` @ 5000800, to
     `dev` with the user's OK (with #120/#121). Until then, put the Nuuk
     zone line back into +64-052's tile config after each build of it.
+38. #123 — airport override pack without X-Plane's flatten; on `test` @
+    a0aafa0, to `dev` with the user's OK. Until then the GUI writes no
+    markers and does not rewrite the pack (the 52-airport pack of
+    2026-11-21 stays valid).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
