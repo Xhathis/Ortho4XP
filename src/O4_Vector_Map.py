@@ -351,6 +351,11 @@ def include_airports(vector_map, tile):
                   "the airports X-Plane flattens.")
     APT.smooth_raster_over_airports(tile, dico_airports)
     (patches_area, patches_list) = include_patches(vector_map, tile)
+    # The airports this mesh has flat at X-Plane's areas (a user patch wins
+    # over X-Plane's area): their override without X-Plane's flatten (#123).
+    XPAPT.write_marker(
+        tile.build_dir, [a[0] for a in xp_areas if a[0] not in patches_list]
+    )
     patches_area = include_xp_flatten_areas(
         vector_map, tile, xp_areas, dico_airports, patches_area, patches_list
     )
