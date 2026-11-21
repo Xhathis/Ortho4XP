@@ -94,8 +94,7 @@ def test_tile_config_round_trip(tile):
     again = CFG.Tile(55, 12, os.path.dirname(tile.build_dir) + os.sep)
     assert again.read_from_config() == 1
     for var in CFG.list_tile_vars:
-        if var != "zone_list":  # written from the global zone list
-            assert getattr(again, var) == getattr(tile, var), var
+        assert getattr(again, var) == getattr(tile, var), var
 
 
 def test_write_to_config_keeps_a_backup(tile):
@@ -124,3 +123,31 @@ def test_no_config_found(tmp_path, monkeypatch):
     tile = CFG.Tile(55, 12, str(tmp_path) + os.sep)
     monkeypatch.setattr(CFG, "global_cfg_file", str(tmp_path / "missing.cfg"))
     assert tile.read_from_config() == 0
+
+
+NUUK_ZONE = ([64.172, -51.705, 64.172, -51.655, 64.212, -51.655,
+              64.212, -51.705, 64.172, -51.705], 18, "BI")
+TILE_ZONE = ([55.2, 12.2, 55.2, 12.4, 55.4, 12.4, 55.4, 12.2, 55.2, 12.2],
+             18, "BI")
+
+
+def test_write_keeps_zone_from_tile_config(tile, monkeypatch):
+    # A batch reads the tile config (with its zone) while the GUI's global
+    # zone list is empty; step 3 rewrote the config without the zone (#122).
+    monkeypatch.setattr(CFG, "zone_list", [])
+    _write_cfg(tile, "zone_list=" + str([TILE_ZONE]) + "\n")
+    assert tile.read_from_config() == 1
+    assert tile.write_to_config() == 1
+    again = CFG.Tile(55, 12, os.path.dirname(tile.build_dir) + os.sep)
+    assert again.read_from_config() == 1
+    assert again.zone_list == [TILE_ZONE]
+
+
+def test_write_keeps_only_zones_in_the_tile(tile):
+    # A Tile made from the GUI's globals: zones elsewhere are not saved.
+    tile.zone_list = [NUUK_ZONE, TILE_ZONE]
+    os.makedirs(tile.build_dir, exist_ok=True)
+    assert tile.write_to_config() == 1
+    again = CFG.Tile(55, 12, os.path.dirname(tile.build_dir) + os.sep)
+    assert again.read_from_config() == 1
+    assert again.zone_list == [TILE_ZONE]
