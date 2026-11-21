@@ -67,7 +67,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~18 s, 551
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 701
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -1078,6 +1078,23 @@ Test results:
   pyflakes 0. The user linked the pack (yOrtho4XP_Airports.lnk) and
   removed the test pack; X-Plane's Log.txt (17:08) loads it as pack 152,
   right above Global Airports (153), no APT error for its airports.
+- The user found Nuuk's airport buildings gone with the pack (2026-11-21):
+  Global Airports' +64-052.dsf holds BGGH's 3D (236 objects, 200
+  polygons/facades) behind "sim/filter/aptid BGGH", which X-Plane draws
+  only while BGGH comes from Global Airports. All 52 pack airports were
+  affected: #124. `fix/xp-airport-objects` @ 4f00a6c (from dev 4f24899):
+  30 new unit tests (new functions), 701 pass, pyflakes 0. All 7,077
+  Global Airports DSFs read and rewritten with every filter kept come out
+  byte-identical (the command parser's check). Real pack in a scratch
+  folder (user's apt.dat and Tiles read only, 5.7 s): 48 DSFs, 6.9 MB, all
+  52 airports with 3D (BGGH 436 commands); 46 decode with DSFTool to
+  exactly the source's blocks and exclusions of those airports; the other
+  2 (+47-123, +51+006) crash DSFTool 2.4.0 already as sources (also with
+  a 64 MB stack), their per-airport command counts match. Regression PASS
+  (DSF, 17/17 masks, app log identical). `test` @ 1cbeae0: 701 unit tests.
+  Not yet: the user's pack rewritten on `dev` (the next step 3 or batch
+  does it, or a call of TILE.update_airport_override()), and a look at
+  Nuuk in X-Plane.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2168,6 +2185,19 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Custom Scenery above Global Airports (a shortcut keeps it current).
     Airports reaching an unbuilt tile stay flattened by X-Plane (without
     the flag X-Plane's own mesh would leave their runways bumpy).
+124. **FIXED** (`4f00a6c`): the #123 pack took its airports' 3D away. Global
+    Airports' DSF of a tile holds each airport's buildings, hangars, cars
+    and lights in a block behind FILTER n (a comment command: uint16 1,
+    int32 n; n counts the "sim/filter/aptid <ICAO>" properties, the
+    sim/exclude_* after one belong to it), drawn only while the airport
+    comes from that pack. update_override_pack now writes per tile a DSF
+    with only its airports' blocks and exclusions (XPAPT.filter_dsf, in
+    Python: DSFTool crashes on 2 of the 48 sources; definitions and pools
+    copied, state commands and the other comment kind (uint16 2, before
+    objects, 1,299 files) kept everywhere, MD5 rewritten), for the tiles
+    around each airport's boundary; DSFs of tiles that left the pack are
+    removed. A failure is a WARNING without stamp (retried next time);
+    PACK_VERSION 2 in the stamp redoes #123's pack.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2335,6 +2365,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     zone line back into +64-052's tile config after each build of it.
 38. ~~#123~~ — airport override pack without X-Plane's flatten; on `dev`
     5ad0b07 since 2026-11-21, pack linked in Custom Scenery.
+39. #124 — the pack's airports get their Global Airports 3D; on `test` @
+    1cbeae0, to `dev` with the user's OK, then rewrite the user's pack and
+    check Nuuk's buildings in X-Plane.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
