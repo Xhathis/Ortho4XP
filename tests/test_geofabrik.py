@@ -1093,3 +1093,74 @@ def test_failed_file_fails_only_its_tiles(gf, tmp_path, monkeypatch,
     assert "b-latest" in left[(55, 13)]
     assert sorted(fetched) == [B + "europe/a-latest.osm.pbf",
                                B + "europe/b-latest.osm.pbf"]
+
+
+# --- land only a continent file holds (#120) --------------------------------
+def write_hgt(tmp_path, monkeypatch, lat, lon, land):
+    """A 121 x 121 .hgt for the tile, 0 m except the boxes in land
+    ((lon0, lat0, lon1, lat1) in degrees), 50 m there."""
+    import numpy as np
+    monkeypatch.setattr(FNAMES, "Elevation_dir", str(tmp_path / "dem"))
+    n = 121
+    a = np.zeros((n, n), dtype=">i2")
+    ys = lat + 1 - np.arange(n) / (n - 1)
+    xs = lon + np.arange(n) / (n - 1)
+    for (x0, y0, x1, y1) in land:
+        a[np.ix_((ys >= y0) & (ys <= y1), (xs >= x0) & (xs <= x1))] = 50
+    path = FNAMES.viewfinderpanorama(lat, lon)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    a.tofile(path)
+
+
+CARIBBEAN = [region("central-america", -20, -20, 20, 20, "central-america"),
+             region("guadeloupe", 0, 0, 0.5, 1, "europe/france/guadeloupe")]
+
+
+def test_island_only_in_a_continent_is_found(gf, tmp_path, monkeypatch):
+    # +15-062: guadeloupe's outline reaches the tile, Dominica lies outside
+    # it and only central-america holds it. It was taken for sea.
+    write_hgt(tmp_path, monkeypatch, 0, 0, [(0.1, 0.1, 0.3, 0.3),
+                                            (0.7, 0.2, 0.9, 0.6)])
+    assert [r.id for r in GEOFABRIK.gap_continents(0, 0, CARIBBEAN)] == [
+        "central-america"]
+
+
+def test_gap_continent_read_when_on_disk(gf, tmp_path, monkeypatch):
+    write_hgt(tmp_path, monkeypatch, 0, 0, [(0.7, 0.2, 0.9, 0.6)])
+    wanted = {(0, 0): {"coastline": ("x",)}}
+    (plan, left, sea) = GEOFABRIK.plan_tiles(wanted, CARIBBEAN)
+    assert not plan and not sea
+    assert "central-america" in left[(0, 0)] and "not downloaded" in left[(0, 0)]
+    path = GEOFABRIK.local_path(CARIBBEAN[0].url)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "wb").close()
+    (plan, left, sea) = GEOFABRIK.plan_tiles(wanted, CARIBBEAN)
+    assert plan == {(0, 0): frozenset(r.url for r in CARIBBEAN)} and not left
+
+
+def test_sea_beyond_the_country_stays_sea(gf, tmp_path, monkeypatch):
+    # Land only inside the country outline (and a sample on its edge):
+    # the continent's part of the tile is sea, as before.
+    write_hgt(tmp_path, monkeypatch, 0, 0, [(0.1, 0.1, 0.5, 0.3)])
+    assert GEOFABRIK.gap_continents(0, 0, CARIBBEAN) == []
+    (plan, left, sea) = GEOFABRIK.plan_tiles({(0, 0): {"water": ("x",)}},
+                                             CARIBBEAN)
+    assert plan == {(0, 0): frozenset([CARIBBEAN[1].url])} and not left
+
+
+def test_gap_without_elevation_file_as_before(gf, tmp_path, monkeypatch):
+    monkeypatch.setattr(FNAMES, "Elevation_dir", str(tmp_path / "dem"))
+    assert GEOFABRIK.gap_continents(0, 0, CARIBBEAN) == []
+
+
+def test_continent_only_tile_read_when_on_disk(gf, tmp_path, monkeypatch):
+    # Diego Garcia: only asia holds it. Overpass unless the file is there.
+    regions = [region("asia", -20, -20, 20, 20, "asia")]
+    wanted = {(0, 0): {"coastline": ("x",)}}
+    (plan, left, _) = GEOFABRIK.plan_tiles(wanted, regions)
+    assert not plan and "not downloaded" in left[(0, 0)]
+    path = GEOFABRIK.local_path(regions[0].url)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "wb").close()
+    (plan, left, _) = GEOFABRIK.plan_tiles(wanted, regions)
+    assert plan == {(0, 0): frozenset([regions[0].url])} and not left

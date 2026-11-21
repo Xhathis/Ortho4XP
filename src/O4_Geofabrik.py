@@ -11,8 +11,10 @@ answers Overpass would give; the build reads them as before, #100):
    area stands in for file size, so a state beats its country and a
    country beats "alps" or "dach"). Sea outside every region needs no file.
    A tile only continents cover (an island in no country extract, e.g.
-   Diego Garcia in "asia") is left to Overpass: a continent file is tens
-   of GB.
+   Diego Garcia in "asia"), or with land outside its country regions
+   that only a continent holds (gap_continents, #120), reads the
+   continent file when it is on disk and is left to Overpass otherwise:
+   a continent file is tens of GB and never downloaded here.
 3. Each file is downloaded once (MD5 checked, temp name) into
    geofabrik_dir with Geofabrik's folder layout. A file whose data is
    older than geofabrik_max_age days gets Geofabrik's daily changes
@@ -264,6 +266,71 @@ def choose_regions(lat, lon, regions):
         if rest and target.difference(ops.unary_union(rest)).area <= MIN_GAP:
             chosen.remove(r)
     return (sorted(chosen, key=lambda r: r.id), "land")
+
+
+# Land that only a continent file holds (#120). choose_regions takes the
+# part of a tile outside every country region for sea: true for nearly
+# all of the 3,668 tiles a continent reaches beyond its countries, but
+# not for islands in no country extract next to one that has a file
+# (Dominica, Montserrat, Saba, the Turks and Caicos next to guadeloupe,
+# the US Virgin Islands, the Bahamas): their cache refresh of 2026-11-14
+# replaced good Overpass data with answers without them, and the tiles
+# were built with those islands as sea. The tile's elevation file tells
+# land from sea there.
+GAP_EDGE = 0.002  # deg: outlines and DEM samples along a border
+GAP_LAND_MIN = 4  # land samples (3" grid: ~0.03 km2) that count as land
+GAP_GRID = 1201  # finer elevation files are read at this grid
+
+
+def _land_samples(lat, lon):
+    """(lons, lats) of the tile's elevation samples above 0 m, from its
+    Viewfinder/SRTM .hgt (read only), or None without one."""
+    import numpy
+    path = FNAMES.viewfinderpanorama(lat, lon)
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    n = int(round((size // 2) ** 0.5))
+    if n < 2 or n * n * 2 != size:
+        return None
+    alt = numpy.fromfile(path, dtype=">i2").reshape(n, n)
+    step = max(1, (n - 1) // (GAP_GRID - 1))
+    alt = alt[::step, ::step]
+    (rows, cols) = numpy.nonzero(alt > 0)
+    m = alt.shape[0] - 1
+    return (lon + cols / m, lat + 1 - rows / m)
+
+
+def gap_continents(lat, lon, regions):
+    """The continents holding land of the tile that no country region
+    covers (empty when its elevation file shows none, or there is no
+    such file: then the old rule, sea, stands)."""
+    import shapely
+    from shapely import geometry, ops
+    box = geometry.box(lon, lat, lon + 1, lat + 1)
+    near = [r for r in regions if r.area.intersects(box)]
+    countries = [r for r in near if r.id not in EXTRACT.CONTINENTS]
+    continents = [r for r in near if r.id in EXTRACT.CONTINENTS]
+    if not countries or not continents:
+        return []
+    cover = ops.unary_union([r.area.intersection(box) for r in countries])
+    gap = ops.unary_union([r.area.intersection(box) for r in continents]) \
+        .difference(cover.buffer(GAP_EDGE))
+    if gap.area <= MIN_GAP:
+        return []
+    land = _land_samples(lat, lon)
+    if land is None:
+        return []
+    inside = shapely.contains_xy(gap, *land)
+    if inside.sum() < GAP_LAND_MIN:
+        return []
+    (xs, ys) = (land[0][inside], land[1][inside])
+    return [r for r in continents if shapely.contains_xy(r.area, xs, ys).any()]
+
+
+def _on_disk(regions):
+    return all(os.path.isfile(local_path(r.url)) for r in regions)
 
 
 def group_tiles(plan):
@@ -597,11 +664,28 @@ def plan_tiles(wanted, regions):
         (chosen, kind) = choose_regions(lat, lon, regions)
         if kind == "sea":
             sea.append((lat, lon))
-        elif kind == "continent":
-            left[(lat, lon)] = ("only in a continent extract, "
-                                "not downloaded")
+            continue
+        if kind == "continent":
+            from shapely import geometry
+            box = geometry.box(lon, lat, lon + 1, lat + 1)
+            extra = [r for r in regions if r.id in EXTRACT.CONTINENTS
+                     and r.area.intersects(box)]
+            what = "only in"
         else:
-            plan[(lat, lon)] = frozenset(r.url for r in chosen)
+            extra = gap_continents(lat, lon, regions)
+            what = "land outside the country extracts, only in"
+        # A continent file is tens of GB: read only one already on disk
+        # (put there by hand, e.g. central-america for the Caribbean).
+        if extra and not _on_disk(extra):
+            left[(lat, lon)] = (f"{what} "
+                                + ", ".join(sorted(r.id for r in extra))
+                                + " (not downloaded)")
+            continue
+        if extra and kind == "land":
+            UI.vprint(1, f"    Geofabrik: {FNAMES.short_latlon(lat, lon)} "
+                      "has land only in " + ", ".join(r.id for r in extra)
+                      + ", read as well.")
+        plan[(lat, lon)] = frozenset(r.url for r in chosen + extra)
     return (plan, left, sea)
 
 
