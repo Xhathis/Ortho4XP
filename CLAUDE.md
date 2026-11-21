@@ -55,6 +55,9 @@ Guidance for Claude Code working in this repository.
   deleted on 2026-11-05 (the commit SHAs in this file still resolve),
   fix/overpass-dangling-refs, fix/local-osm-extracts and
   fix/geofabrik-auto (#99-#101, never on origin) on 2026-11-13.
+  fix/geofabrik-continent-gap, fix/stale-distance-masks,
+  fix/tile-zones-kept and fix/xp-flatten-override (#120-#123, never on
+  origin) on 2026-11-21, after dev 4864d7c was pushed.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
