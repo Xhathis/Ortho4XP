@@ -1095,7 +1095,7 @@ Test results:
   -> `dev` fast-forwarded to 9287de3 on 2026-11-21 (not pushed); the
   user's pack rewritten from G:\Ortho4XP (XPAPT.update_override_pack with
   the cfg's two overlay sources; the #123 apt.dat and stamp backed up in
-  G:\Ortho4XP_tests\cfg_backups6-11-21_airport_pack_123): apt.dat
+  G:\Ortho4XP_tests\cfg_backups\2026-11-21_airport_pack_123): apt.dat
   unchanged, 48 DSFs byte-identical to the verified scratch pack. Not yet:
   a look at Nuuk in X-Plane (restart needed).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
