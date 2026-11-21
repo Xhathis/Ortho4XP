@@ -10,14 +10,18 @@ X-Plane's own flatten covers far more than the boundary: at Nuuk BGGH it
 raised the sea to 86 m and cut the hills with straight walls over a DSF
 that was flat inside the boundary and ramped around it (#123). The walls
 went only without the flag, so an override pack holds those airports
-without it once their tiles are built flat (update_override_pack).
+without it once their tiles are built flat (update_override_pack), with
+their 3D (buildings, hangars, ...) copied from Global Airports' DSFs: X-Plane
+draws those only for an airport taken from Global Airports itself (#124).
 
 apt.dat (~400 MB) is read once into a small index next to the tile data
 (tmp/xp_flatten_airports.json) and read again only when apt.dat changes.
 """
+import hashlib
 import json
 import math
 import os
+import struct
 
 import numpy
 import shapely
@@ -298,6 +302,270 @@ def degrees_area_to_km2(area, lat):
 MARKER = "xp_flattened_airports.json"
 PACK_APT_DAT = os.path.join("Earth nav data", "apt.dat")
 PACK_STAMP = "ortho4xp_pack.json"
+# Bumped when the pack gains content, so packs written before are redone.
+# 2: the airports' 3D from Global Airports (#124).
+PACK_VERSION = 2
+
+# The 3D of a gateway airport (buildings, hangars, cars, lights) lives in
+# Global Airports' DSF of its tile, in a block behind "FILTER n", where n
+# counts the DSF's "sim/filter/aptid <ICAO>" properties; the exclusions
+# after such a property belong to that airport. X-Plane draws a block only
+# while the airport comes from that same pack, so with the airport taken
+# from the override pack its buildings were gone (Nuuk, 2026-11-21). The
+# pack therefore carries, per tile, a DSF with only its airports' blocks
+# (the others stay with Global Airports, so nothing is drawn twice).
+GA_DSF_DIR = os.path.join("Global Airports", "Earth nav data")
+APTID_PROPERTY = "sim/filter/aptid"
+
+
+def ga_dsf_path(apt_dat, lat, lon):
+    """Global Airports' DSF of a tile, next to its apt.dat."""
+    return FNAMES.dsf_file(
+        os.path.dirname(os.path.dirname(apt_dat)), lat, lon)
+
+
+def _atoms(data, start, end):
+    """(name, payload start, payload end) of the DSF atoms in data[start:end];
+    ValueError when they do not fit."""
+    out = []
+    pos = start
+    while pos < end:
+        if pos + 8 > end:
+            raise ValueError("DSF atom header cut off")
+        (aid, length) = struct.unpack_from("<4sI", data, pos)
+        if length < 8 or pos + length > end:
+            raise ValueError("DSF atom length out of range")
+        out.append((aid[::-1].decode("latin-1"), pos + 8, pos + length))
+        pos += length
+    return out
+
+
+def _atom(name, payload):
+    return struct.pack("<4sI", name[::-1].encode("latin-1"),
+                       8 + len(payload)) + payload
+
+
+def read_dsf(path):
+    """(file header, top-level atoms {name: payload}, their order, the
+    properties [(key, value)]) of an uncompressed DSF; ValueError when it is
+    none or is broken."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if data.startswith(b"7z\xbc\xaf"):
+        raise ValueError("compressed DSF")
+    if not data.startswith(b"XPLNEDSF") or len(data) < 28:
+        raise ValueError("not a DSF")
+    if hashlib.md5(data[:-16]).digest() != data[-16:]:
+        raise ValueError("DSF checksum wrong")
+    atoms = {}
+    order = []
+    for (name, a, b) in _atoms(data, 12, len(data) - 16):
+        atoms[name] = data[a:b]
+        order.append(name)
+    head = atoms.get("HEAD", b"")
+    props = []
+    for (name, a, b) in _atoms(head, 0, len(head)):
+        if name == "PROP":
+            strings = head[a:b].split(b"\x00")
+            props = [(strings[i].decode("utf-8", "replace"),
+                      strings[i + 1].decode("utf-8", "replace"))
+                     for i in range(0, len(strings) - 1, 2)]
+    return (data[:12], atoms, order, props)
+
+
+def dsf_airport_ids(path):
+    """The airports with a filter block in a DSF, in filter order."""
+    return [v for (k, v) in read_dsf(path)[3] if k == APTID_PROPERTY]
+
+
+def filter_properties(props, icaos):
+    """The properties without the aptid filters of other airports and the
+    exclusions that follow them (exclusions before any aptid too: Global
+    Airports applies them anyway). Returns (properties, {old filter index:
+    new one})."""
+    want = set(icaos)
+    out = []
+    renumber = {}
+    n_ids = 0
+    kept = False
+    for (k, v) in props:
+        if k == APTID_PROPERTY:
+            kept = v in want
+            if kept:
+                renumber[n_ids] = len(renumber)
+                out.append((k, v))
+            n_ids += 1
+        elif k.startswith("sim/exclude_"):
+            if kept:
+                out.append((k, v))
+        else:
+            kept = False
+            out.append((k, v))
+    return (out, renumber)
+
+
+# DSF commands (DSF specification). State commands change what later
+# commands refer to (pool, definition, junction offset, road subtype): they
+# are kept whatever filter they sit under, so a kept block still sees the
+# state an earlier block set. A filter is a comment whose payload is
+# uint16 1 and the int32 filter index. Global Airports has one other
+# comment (payload uint16 2, int32 1; 1,299 of its 7,077 DSFs, before an
+# object command; DSFTool does not show it): kept like a state command,
+# as are any other comments.
+_STATE_CMDS = {1: 2, 2: 4, 3: 1, 4: 2, 5: 4, 6: 1}  # id: argument bytes
+_COMMENTS = {32: 1, 33: 2, 34: 4}  # id: bytes of the length field
+_FILTER_COMMENT = 1
+
+
+def _cmd_end(cmds, pos):
+    """End of the command starting at pos."""
+    c = cmds[pos]
+    p = pos + 1
+    if c in _STATE_CMDS:
+        return p + _STATE_CMDS[c]
+    if c == 7:                      # object
+        return p + 2
+    if c in (8, 10, 25, 28, 31):    # ranges: first, last
+        return p + 4
+    if c in (9, 23, 26, 29):        # count, uint16 indices
+        return p + 1 + 2 * cmds[p]
+    if c in (11, 24, 27, 30):       # count, uint32 / (pool, index) pairs
+        return p + 1 + 4 * cmds[p]
+    if c == 12:                     # polygon: param, count, uint16 indices
+        return p + 3 + 2 * cmds[p + 2]
+    if c == 15:                     # nested polygon range: param, count,
+        return p + 3 + 2 * (cmds[p + 2] + 1)  # count + 1 winding bounds
+    if c == 13:                     # polygon range: param, first, last
+        return p + 6
+    if c == 14:                     # nested polygon: param, windings, each
+        n = cmds[p + 2]             # a count and uint16 indices
+        p += 3
+        for _ in range(n):
+            p += 1 + 2 * cmds[p]
+        return p
+    if c == 16:                     # terrain patch
+        return p
+    if c == 17:                     # patch with flags
+        return p + 1
+    if c == 18:                     # patch with flags and LOD
+        return p + 9
+    if c in _COMMENTS:
+        size = _COMMENTS[c]
+        length = int.from_bytes(cmds[p:p + size], "little")
+        return p + size + length
+    raise ValueError(f"unknown DSF command {c} at byte {pos}")
+
+
+def _filter_index(cmds, pos, end):
+    """The filter index a comment command sets, None for another comment."""
+    payload = cmds[pos + 1 + _COMMENTS[cmds[pos]]:end]
+    if len(payload) == 6 and \
+            struct.unpack_from("<H", payload)[0] == _FILTER_COMMENT:
+        return struct.unpack_from("<i", payload, 2)[0]
+    return None
+
+
+def filter_commands(cmds, renumber):
+    """The command stream with only the blocks of the filters in renumber
+    (renumbered), the state commands everywhere; drawing commands outside
+    any filter are left out (Global Airports shows them anyway)."""
+    out = bytearray()
+    current = None
+    pos = 0
+    n = len(cmds)
+    while pos < n:
+        end = _cmd_end(cmds, pos)
+        if end > n:
+            raise ValueError("DSF command cut off")
+        c = cmds[pos]
+        idx = _filter_index(cmds, pos, end) if c in _COMMENTS else None
+        if idx is not None:
+            current = renumber.get(idx)
+            if current is not None:
+                out += struct.pack("<BBHi", 32, 6, _FILTER_COMMENT, current)
+        elif c in _STATE_CMDS or c in _COMMENTS or current is not None:
+            out += cmds[pos:end]
+        pos = end
+    return bytes(out)
+
+
+def filter_dsf(src, dst, icaos):
+    """Write to dst Global Airports' DSF src with only the blocks of the
+    airports in icaos; False (nothing written) when none of them is in it.
+    Definitions and point pools are copied as they are."""
+    (head, atoms, order, props) = read_dsf(src)
+    (kept, renumber) = filter_properties(props, icaos)
+    if not renumber:
+        return False
+    prop = b"".join(k.encode("utf-8") + b"\x00" + v.encode("utf-8") + b"\x00"
+                    for (k, v) in kept)
+    body = bytearray(head)
+    for name in order:
+        if name == "HEAD":
+            body += _atom("HEAD", _atom("PROP", prop))
+        elif name == "CMDS":
+            body += _atom("CMDS", filter_commands(atoms["CMDS"], renumber))
+        else:
+            body += _atom(name, atoms[name])
+    body += hashlib.md5(body).digest()
+    tmp = FNAMES.temp_path_for(dst)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(body)
+        os.replace(tmp, dst)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return True
+
+
+def candidate_tiles(apt):
+    """Tiles that may hold the airport's 3D: those its boundary's bounding
+    box touches and their neighbours (objects can lie outside the
+    boundary)."""
+    lons = [p[0] for rings in apt["polygons"] for r in rings for p in r]
+    lats = [p[1] for rings in apt["polygons"] for r in rings for p in r]
+    return {(lat, lon)
+            for lat in range(math.floor(min(lats)) - 1,
+                             math.floor(max(lats)) + 2)
+            for lon in range(math.floor(min(lons)) - 1,
+                             math.floor(max(lons)) + 2)
+            if -90 <= lat < 90 and -180 <= lon < 180}
+
+
+def write_object_dsfs(apt_dat, airports, icaos, out_dir):
+    """The pack's DSFs: per tile, Global Airports' blocks of the airports in
+    icaos. Pack DSFs of other tiles are removed. Returns (tiles written,
+    failures as text)."""
+    want = set(icaos)
+    tiles = set()
+    for apt in airports:
+        if apt["icao"] in want:
+            tiles |= candidate_tiles(apt)
+    written = set()
+    failures = []
+    for (lat, lon) in sorted(tiles):
+        src = ga_dsf_path(apt_dat, lat, lon)
+        if not os.path.isfile(src):
+            continue
+        target = FNAMES.dsf_file(out_dir, lat, lon)
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if filter_dsf(src, target, icaos):
+                written.add(os.path.normcase(target))
+        except (OSError, ValueError, struct.error, IndexError) as e:
+            failures.append(f"{FNAMES.short_latlon(lat, lon)}: {e}")
+    # DSFs of tiles no longer in the pack (an airport left it).
+    for root, _dirs, files in os.walk(os.path.join(out_dir, "Earth nav data")):
+        for f in files:
+            path = os.path.join(root, f)
+            if f.lower().endswith(".dsf") \
+                    and os.path.normcase(path) not in written:
+                os.remove(path)
+    return (len(written), failures)
 
 
 def pack_dir():
@@ -439,8 +707,8 @@ def _write_apt_dat(path, text):
 
 
 def update_override_pack(overlay_srcs, tile_dir=None, out_dir=None):
-    """Write the override pack when the airports in it or X-Plane's apt.dat
-    changed. Returns the number of airports in it, None when nothing was
+    """Write the override pack (apt.dat, and the airports' 3D as DSFs) when
+    the airports in it, X-Plane's apt.dat or PACK_VERSION changed. Returns the number of airports in it, None when nothing was
     done (setting off, no apt.dat)."""
     if not xp_flatten_airports:
         return None
@@ -456,7 +724,7 @@ def update_override_pack(overlay_srcs, tile_dir=None, out_dir=None):
     st = os.stat(apt_dat)
     stamp = {"apt_dat": os.path.normcase(os.path.abspath(apt_dat)),
              "size": st.st_size, "mtime_ns": st.st_mtime_ns,
-             "airports": icaos}
+             "airports": icaos, "version": PACK_VERSION}
     stamp_file = os.path.join(out_dir, PACK_STAMP)
     target = os.path.join(out_dir, PACK_APT_DAT)
     try:
@@ -470,11 +738,21 @@ def update_override_pack(overlay_srcs, tile_dir=None, out_dir=None):
         with open(apt_dat, "rb") as f:
             blocks = extract_blocks(f, icaos)
     os.makedirs(os.path.dirname(target), exist_ok=True)
+    (n_dsf, failures) = write_object_dsfs(apt_dat, airports, icaos, out_dir)
     _write_apt_dat(target, pack_text(blocks))
-    FNAMES.write_text_atomic(stamp_file, json.dumps(stamp))
     UI.lvprint(
         1, f"   X-Plane airport override: {len(blocks)} airport(s) without "
-        f"X-Plane's flatten in {out_dir} ({', '.join(sorted(blocks)) or '-'})."
+        f"X-Plane's flatten in {out_dir} ({', '.join(sorted(blocks)) or '-'}),"
+        f" their 3D from Global Airports in {n_dsf} DSF(s)."
         " It must be in Custom Scenery above Global Airports.",
     )
+    if failures:
+        # No stamp: the next step 3 or batch tries again.
+        UI.lvprint(
+            1, "   WARNING: X-Plane airport override: the 3D of these tiles "
+            "was not copied, their airports show without buildings: "
+            + "; ".join(failures),
+        )
+    else:
+        FNAMES.write_text_atomic(stamp_file, json.dumps(stamp))
     return len(blocks)
