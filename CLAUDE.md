@@ -58,6 +58,8 @@ Guidance for Claude Code working in this repository.
   fix/geofabrik-continent-gap, fix/stale-distance-masks,
   fix/tile-zones-kept and fix/xp-flatten-override (#120-#123, never on
   origin) on 2026-11-21, after dev 4864d7c was pushed.
+  fix/xp-airport-objects (#124, never on origin) on 2026-11-21, after
+  dev 22fb48e was pushed.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -2369,8 +2371,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 38. ~~#123~~ — airport override pack without X-Plane's flatten; on `dev`
     5ad0b07 since 2026-11-21, pack linked in Custom Scenery.
 39. ~~#124~~ — the pack's airports get their Global Airports 3D; on `dev`
-    9287de3 since 2026-11-21, the user's pack rewritten; Nuuk's buildings
-    back in X-Plane.
+    9287de3 since 2026-11-21 (pushed 22fb48e), the user's pack rewritten;
+    Nuuk's buildings back in X-Plane.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
