@@ -1041,6 +1041,17 @@ Test results:
   `fix/tile-zones-kept` @ 57966d9 (from dev 98fddee): 2 new unit tests
   (both fail on dev), pyflakes 0. `test` @ 5000800: 663 unit tests,
   regression PASS (DSF, 17/17 masks, app log identical).
+- The 35-tile rebuild (2026-11-21 14:00-15:35, GUI batch on dev 98fddee):
+  35 built, 0 failed, no ERROR or WARNING; all 100 OSM layers of the 20
+  audit tiles refreshed from the extracts. DSFs decoded: the islands are
+  land again (water / land patch vertices, old -> new: +15-062 9.36 M /
+  1.74 M -> 0.52 M / 11.27 M; +21-072 0 / 0.78 M -> 0.80 M / 1.55 M;
+  +16-063 and +17-064 had no water, now 0.11 M and 0.09 M). Nuuk: 45
+  BI18 + 2 BI15 textures, all used by the DSF; step 3 erased the zone line
+  (#122 not yet on dev), put back by hand. The 14 Canadian tiles GO216
+  (GO218 at airports; 726 textures with Arc pieces). No unused or missing
+  .dds/.ter in the 35 tiles. -> `dev` fast-forwarded to bf6f064 (#120,
+  #121, #122) on 2026-11-21 (not pushed); 663 unit tests, pyflakes 0.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2271,12 +2282,14 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Done: dev 92ead0f pushed 2026-11-19; the 4 tiles built 2026-11-19.
 35. #118 — Geofabrik's new folder layout; on `test` @ dce73b3, to `dev`
     with the user's OK (given) once batch C has ended.
-36. #120, #121 — from the full tile audit; on `test` @ 2351a5e, to `dev`
+36. ~~#120, #121~~ — from the full tile audit; on `dev` bf6f064 since
+    2026-11-21 (with the user's OK, before the cache refresh ~2026-12-14);
+    the 34-tile rebuild done. Was: on `test` @ 2351a5e, to `dev`
     with the user's OK, before the 30-day cache refresh (~2026-12-14)
     would empty the Caribbean islands again. Then the 34-tile rebuild
     (20 audit tiles, 14 Canadian ZL16 tiles; afterwards remove their
     ZL15 .dds/.ter).
-37. #122 — a tile config's zones kept by step 3; on `test` @ 5000800, to
+37. ~~#122~~ — on `dev` bf6f064 since 2026-11-21. Was: on `test` @ 5000800, to
     `dev` with the user's OK (with #120/#121). Until then, put the Nuuk
     zone line back into +64-052's tile config after each build of it.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
