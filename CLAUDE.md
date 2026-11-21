@@ -1010,6 +1010,26 @@ Test results:
   champagne-ardenne, oberfranken, 4 BW Regierungsbezirke; MD5 of the
   dated files). `test` @ dce73b3: 651 unit tests. Batch C restarted on
   dev 92ead0f with its 15 unfinished tiles (all extracts on disk).
+- Batches 2026-11-20/21 on dev 98fddee (GUI): 215 road_level 5 /
+  flatten rebuilds (4h52m), 218 ZL15 tiles after deleting the 10,811 GO2
+  gap textures (zl15_arc_prepare.py, 130 GB; 11h23m: Arc pieces in 165
+  tiles, BI in 59), 10 continent-only island tiles from central-america
+  (795 MB, downloaded with the user's OK) and the OSM API: all built, 0
+  failed. Full tile audit 2026-11-21 (G:\Ortho4XP_testsatches  evaluation_2026-11-21.md): found #120 and #121; 20 tiles to rebuild
+  (rebuild_audit_2026-11-21.txt, answers prepared) plus 14 Canadian
+  tiles of the +61/+62 rows raised to ZL16 in their tile configs (user's
+  OK; backups in cfg_backups6-11-21_canada_zl16; GO2 has real ZL16
+  there, 2x the fine detail of ZL15). #120 `fix/geofabrik-continent-gap`
+  @ 353446d and #121 `fix/stale-distance-masks` @ 03c3c5d (from dev
+  98fddee): 6 new unit tests (all fail on dev), pyflakes 0, regression
+  PASS for both (DSF, 17/17 masks, app log identical),
+  sim_geofabrik_step1 +28-018 0 failures; #120 against the real index
+  and the user's .hgt files: of 1,178 tiles exactly the 19 Caribbean
+  ones change (all read central-america). `test` @ 2351a5e: 661 unit
+  tests. Nuuk (+64-052) after #119: mesh flat at 85.95 m inside the
+  boundary, slopes up to 44 deg within 25 m outside; GO2's imagery is
+  from the construction (old runway only), BI has the finished runway,
+  Arc has nothing there (2521-byte answers at ZL15-18).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2060,6 +2080,23 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     `test` @ 43e1fa6. The user's Patches\+64-052\BGGH.patch.osm was never
     read (patch_dir is Patches\+60-060\+64-052); moved there it would
     skip the ramp. The tiles with flatten airports need steps 1-3 again.
+120. **FIXED** (`353446d`): choose_regions took the part of a tile outside
+    every country region for sea. Islands in no country extract next to
+    one that has a file (Dominica +15-062, Montserrat +16-063, Saba
+    +17-064, Grand Turk/South Caicos +21-072, the Caicos +21-073, part of
+    the BVI +18-065) lost their good Overpass caches in the refresh of
+    2026-11-14 and were built as sea (+21-072 had no water at all).
+    plan_tiles checks that part against the tile's .hgt (gap_continents,
+    read only; GAP_EDGE 0.002 deg, GAP_LAND_MIN 4 samples): land there
+    reads the continent file when it is on disk, else Overpass with the
+    file named; a continent-only tile also reads its continent when on
+    disk. Without a .hgt the old rule stands. 3,668 tiles worldwide have
+    continent-only area, nearly all sea.
+121. **FIXED** (`03c3c5d`): delete_old_masks_in_tile removed the .png
+    masks but not their _dist.png; step 3 reads a distance mask for the
+    bathymetry ratio of any square that has one. 129 tiles hold 483 such
+    files; in +65-024 all 2,891 water vertices in those squares had the
+    full-depth or coast value, so nothing visible: no rebuild.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2215,6 +2252,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Done: dev 92ead0f pushed 2026-11-19; the 4 tiles built 2026-11-19.
 35. #118 — Geofabrik's new folder layout; on `test` @ dce73b3, to `dev`
     with the user's OK (given) once batch C has ended.
+36. #120, #121 — from the full tile audit; on `test` @ 2351a5e, to `dev`
+    with the user's OK, before the 30-day cache refresh (~2026-12-14)
+    would empty the Caribbean islands again. Then the 34-tile rebuild
+    (20 audit tiles, 14 Canadian ZL16 tiles; afterwards remove their
+    ZL15 .dds/.ter).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
