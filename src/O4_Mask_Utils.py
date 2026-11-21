@@ -331,17 +331,22 @@ def delete_old_masks_in_tile(tile, dest_dir):
 
     for til_x in range(til_x_min, til_x_max + 1, 16):
         for til_y in range(til_y_min, til_y_max + 1, 16):
-            mask_file = os.path.join(dest_dir, FNAMES.legacy_mask(til_x, til_y))
-            try:
-                os.remove(mask_file)
-            except FileNotFoundError:
-                pass
-            except OSError as e:
-                # An old mask that stays would be used as if it were new.
-                UI.lvprint(
-                    1, "WARNING: could not delete old mask", mask_file,
-                    f"({e.strerror}).",
-                )
+            # The distance mask too (#121): step 3 reads it for the
+            # bathymetry of any square that has one, also where the new
+            # build makes no mask.
+            for name in (FNAMES.legacy_mask(til_x, til_y),
+                         FNAMES.distance_mask(til_x, til_y)):
+                mask_file = os.path.join(dest_dir, name)
+                try:
+                    os.remove(mask_file)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    # An old mask that stays would be used as if it were new.
+                    UI.lvprint(
+                        1, "WARNING: could not delete old mask", mask_file,
+                        f"({e.strerror}).",
+                    )
 ################################################################################
     
 ################################################################################
