@@ -1096,8 +1096,8 @@ Test results:
   user's pack rewritten from G:\Ortho4XP (XPAPT.update_override_pack with
   the cfg's two overlay sources; the #123 apt.dat and stamp backed up in
   G:\Ortho4XP_tests\cfg_backups\2026-11-21_airport_pack_123): apt.dat
-  unchanged, 48 DSFs byte-identical to the verified scratch pack. Not yet:
-  a look at Nuuk in X-Plane (restart needed).
+  unchanged, 48 DSFs byte-identical to the verified scratch pack. After
+  an X-Plane restart the user saw Nuuk's buildings back (2026-11-21).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2369,8 +2369,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 38. ~~#123~~ — airport override pack without X-Plane's flatten; on `dev`
     5ad0b07 since 2026-11-21, pack linked in Custom Scenery.
 39. ~~#124~~ — the pack's airports get their Global Airports 3D; on `dev`
-    9287de3 since 2026-11-21, the user's pack rewritten. Open: Nuuk's
-    buildings checked in X-Plane.
+    9287de3 since 2026-11-21, the user's pack rewritten; Nuuk's buildings
+    back in X-Plane.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
