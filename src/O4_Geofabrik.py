@@ -5,7 +5,8 @@ prepared from Geofabrik's .osm.pbf extracts (O4_OSM_Extract writes the
 answers Overpass would give; the build reads them as before, #100):
 
 1. Geofabrik's index-v1.json (regions with their outlines and URLs) is
-   kept in geofabrik_dir, fetched again after INDEX_MAX_AGE days.
+   kept in geofabrik_dir, fetched again after INDEX_MAX_AGE days, and
+   when an extract's URL answers 404 (at most once a day, #128).
 2. The regions for a tile: the cheapest set of non-continent regions that
    covers the part of the tile inside any of them (choose_regions; region
    area stands in for file size, so a state beats its country and a
@@ -52,6 +53,9 @@ osm_cache_max_age = 0.0  # days: older cached layers are refreshed; 0 = never
 BASE_URL = "https://download.geofabrik.de/"
 INDEX_URL = BASE_URL + "index-v1.json"
 INDEX_MAX_AGE = 30  # days
+# An extract URL answering 404 fetches the index again, unless it is
+# younger than this (#128).
+INDEX_RECHECK = 1.0  # days
 UPDATE_RUNS = 30  # pyosmium-up-to-date runs of up to 1 GB of changes each
 UPDATE_RECHECK = 3600  # s: an update that found nothing waits this long
 CHUNK = 1 << 22
@@ -75,10 +79,16 @@ _index_cache = {}  # path -> (mtime, regions)
 # (Geofabrik objects to repeated downloads of the same file).
 _failed_downloads = {}  # url -> error message
 _failed_updates = set()  # local paths
+# Why fetching the index again after a 404 failed (one try per preparation).
+_index_refresh_error = None
 
 
 class GeofabrikError(Exception):
     pass
+
+
+class GeofabrikNotFound(GeofabrikError):
+    """The extract's URL answered 404 (in every folder layout tried)."""
 
 
 class Stopped(Exception):
@@ -442,6 +452,11 @@ def _download(url, path, md5=True, check=None):
                 UI.vprint(1, f"    {asked}: not found (HTTP 404), trying "
                           f"{variants[n + 1]}")
             with r:
+                if r.status_code == 404:
+                    raise GeofabrikNotFound(
+                        f"{url}: HTTP 404 Not Found"
+                        + (f" (also {', '.join(variants[1:])})"
+                           if len(variants) > 1 else ""))
                 r.raise_for_status()
                 if md5:
                     final = getattr(r, "url", None) or asked
@@ -566,9 +581,58 @@ def _remove_leftover_temps(path):
                 UI.vprint(1, f"    Could not remove {n} ({e}).")
 
 
+def current_url(url):
+    """After url answered 404: the URL Geofabrik's index gives now for the
+    same region, fetching the index again unless it is younger than
+    INDEX_RECHECK days; None when that is url itself, the region is not in
+    the index or the index cannot be had.
+
+    The index is the one place that names every extract's URL; it was kept
+    for INDEX_MAX_AGE (30) days, so a reorganisation of Geofabrik's folders
+    (2026-11, #118) stayed broken for us until then wherever their
+    redirects failed (#127). Following the index needs no guess about the
+    new layout (#128)."""
+    global _index_refresh_error
+    rid = next((r.id for r in load_index(download=False) if r.url == url),
+               None)
+    if rid is None:
+        return None
+    path = index_path()
+    if time.time() - os.path.getmtime(path) > INDEX_RECHECK * 86400:
+        if _index_refresh_error:
+            return None
+        UI.vprint(1, f"    Fetching Geofabrik's index again ({url} is gone)")
+        try:
+            _download(INDEX_URL, path, md5=False, check=read_index)
+        except (OSError, GeofabrikError) as e:
+            _index_refresh_error = str(e)
+            UI.vprint(1, f"    Could not fetch the index again ({e}).")
+            return None
+    new = next((r.url for r in load_index(download=False) if r.id == rid),
+               None)
+    return new if new and new != url else None
+
+
 def ensure_file(url):
     """The local file for url: downloaded if missing, updated if older
-    than geofabrik_max_age days. Locked against other processes."""
+    than geofabrik_max_age days. Locked against other processes. When url
+    answers 404, the URL the index now gives for its region is used
+    (current_url, #128)."""
+    try:
+        return _ensure_file(url)
+    except GeofabrikNotFound:
+        new = current_url(url)
+        if new is None:
+            raise
+    UI.lvprint(1, f"    Geofabrik: {url} is gone; the index now gives {new}.")
+    try:
+        return _ensure_file(new)
+    except (GeofabrikError, OSError) as e:
+        _failed_downloads[url] = str(e)
+        raise
+
+
+def _ensure_file(url):
     path = local_path(url)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with _FileLock(path + ".lock"):
@@ -734,6 +798,8 @@ def prepare_tiles(wanted, write=True):
     # A new preparation (the next batch or build) may try failed files again.
     _failed_downloads.clear()
     _failed_updates.clear()
+    global _index_refresh_error
+    _index_refresh_error = None
     regions = load_index()
     (plan, left, sea) = plan_tiles(wanted, regions)
     done = {}

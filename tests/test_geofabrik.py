@@ -1233,3 +1233,112 @@ def test_both_forms_missing_is_an_error(gf, redirecting):
         GEOFABRIK._download(PAPUA_OLD, path)
     assert asked == [PAPUA_OLD, PAPUA_NEW]
     assert not os.path.exists(path)
+
+
+# --- the index fetched again when an extract is gone (#128) ------------------
+def index_bytes(urls):
+    """An index with one region per {id: url}."""
+    import json
+    return json.dumps({"features": [
+        {"type": "Feature", "properties": {"id": rid, "urls": {"pbf": url}},
+         "geometry": {"type": "Polygon", "coordinates":
+                      [[[11, 54], [13, 54], [13, 56], [11, 56], [11, 54]]]}}
+        for (rid, url) in urls.items()]}).encode()
+
+
+DK_OLD = B + "europe/dk-latest.osm.pbf"
+DK_NEW = B + "extracts/2027/europe/dk.osm.pbf"  # a layout we cannot guess
+SE_OLD = B + "europe/se-latest.osm.pbf"
+
+
+def old_index(urls, age_days):
+    os.makedirs(GEOFABRIK.data_dir(), exist_ok=True)
+    with open(GEOFABRIK.index_path(), "wb") as fh:
+        fh.write(index_bytes(urls))
+    t = time.time() - age_days * 86400
+    os.utime(GEOFABRIK.index_path(), (t, t))
+
+
+@pytest.fixture
+def no_refresh_error(monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "_index_refresh_error", None)
+    monkeypatch.setattr(GEOFABRIK, "_failed_downloads", {})
+
+
+def test_gone_url_follows_the_refreshed_index(gf, redirecting,
+                                             no_refresh_error, monkeypatch):
+    (files, moved, asked) = redirecting
+    old_index({"dk": DK_OLD}, 2)
+    files[GEOFABRIK.INDEX_URL] = (index_bytes({"dk": DK_NEW}), {})
+    files[DK_NEW] = (DATA, {})
+    files[DK_NEW + ".md5"] = md5_line(DATA, "dk.osm.pbf")
+    path = GEOFABRIK.ensure_file(DK_OLD)
+    assert path == GEOFABRIK.local_path(DK_NEW)
+    assert open(path, "rb").read() == DATA
+    assert asked == [DK_OLD, B + "europe/dk/dk-latest.osm.pbf",
+                     GEOFABRIK.INDEX_URL, DK_NEW, DK_NEW + ".md5"]
+    assert any("is gone; the index now gives " + DK_NEW in line
+               for line in gf)
+    # The next plan uses the new URL, and finds the file on disk.
+    assert [r.url for r in GEOFABRIK.load_index()] == [DK_NEW]
+    asked.clear()
+    monkeypatch.setattr(GEOFABRIK, "_age_days", lambda p: 0)  # fake .pbf
+    assert GEOFABRIK.ensure_file(DK_NEW) == path
+    assert asked == []
+
+
+def test_young_index_is_not_fetched_again(gf, redirecting, no_refresh_error):
+    (files, moved, asked) = redirecting
+    old_index({"dk": DK_OLD}, 0.5)
+    with pytest.raises(GEOFABRIK.GeofabrikNotFound, match="404"):
+        GEOFABRIK.ensure_file(DK_OLD)
+    assert GEOFABRIK.INDEX_URL not in asked
+
+
+def test_index_unchanged_keeps_the_404(gf, redirecting, no_refresh_error):
+    (files, moved, asked) = redirecting
+    old_index({"dk": DK_OLD}, 2)
+    files[GEOFABRIK.INDEX_URL] = (index_bytes({"dk": DK_OLD}), {})
+    with pytest.raises(GEOFABRIK.GeofabrikNotFound):
+        GEOFABRIK.ensure_file(DK_OLD)
+    assert asked.count(GEOFABRIK.INDEX_URL) == 1
+    # Not asked again in this preparation.
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="failed earlier"):
+        GEOFABRIK.ensure_file(DK_OLD)
+
+
+def test_failed_index_fetch_is_tried_once(gf, redirecting, no_refresh_error):
+    (files, moved, asked) = redirecting
+    old_index({"dk": DK_OLD, "se": SE_OLD}, 2)
+    for url in (DK_OLD, SE_OLD):
+        with pytest.raises(GEOFABRIK.GeofabrikNotFound):
+            GEOFABRIK.ensure_file(url)
+    assert asked.count(GEOFABRIK.INDEX_URL) == 1  # 404 for the index too
+    assert GEOFABRIK._index_refresh_error
+
+
+def test_url_not_in_the_index_is_not_looked_up(gf, redirecting,
+                                              no_refresh_error):
+    (files, moved, asked) = redirecting
+    old_index({"se": SE_OLD}, 2)
+    with pytest.raises(GEOFABRIK.GeofabrikNotFound):
+        GEOFABRIK.ensure_file(DK_OLD)
+    assert GEOFABRIK.INDEX_URL not in asked
+
+
+def test_other_download_errors_do_not_fetch_the_index(gf, redirecting,
+                                                      no_refresh_error,
+                                                      monkeypatch):
+    (files, moved, asked) = redirecting
+    old_index({"dk": DK_OLD}, 2)
+    files[DK_OLD] = (DATA, {"Content-Length": str(len(DATA) + 5)})
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="download cut"):
+        GEOFABRIK.ensure_file(DK_OLD)
+    assert GEOFABRIK.INDEX_URL not in asked
+
+
+def test_preparation_clears_the_index_error(gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "_index_refresh_error", "earlier")
+    monkeypatch.setattr(GEOFABRIK, "load_index", lambda: [])
+    GEOFABRIK.prepare_tiles({(55, 12): {"water": "x"}}, write=False)
+    assert GEOFABRIK._index_refresh_error is None
