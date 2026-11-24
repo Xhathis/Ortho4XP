@@ -394,6 +394,28 @@ def _expected_md5(s, urls):
     return None
 
 
+def url_variants(url):
+    """url, then the same extract in Geofabrik's other folder layout
+    (europe/france/alsace/alsace-latest.osm.pbf <->
+    europe/france/alsace-latest.osm.pbf, #118).
+
+    On 2026-11-21/22 the old URL of papua redirected to
+    indonesia/papua/papua-latest.osm.pbf, without "asia/" (404), and our
+    index (fetched every 30 days) still gave the old URLs: 5 tiles went to
+    Overpass. Geofabrik fixed the redirect by 11-24; asking the new form
+    ourselves no longer depends on their redirects (#127). Both forms give
+    the same local_path."""
+    if not url.startswith(BASE_URL) or "-latest." not in url:
+        return [url]
+    parts = url[len(BASE_URL):].split("/")
+    rid = parts[-1].split("-latest.", 1)[0]
+    if len(parts) >= 3 and parts[-2] == rid:
+        other = parts[:-2] + parts[-1:]
+    else:
+        other = parts[:-1] + [rid, parts[-1]]
+    return [url, BASE_URL + "/".join(other)]
+
+
 def _download(url, path, md5=True, check=None):
     """Download url to path (temp name, os.replace). With md5, check the
     file against Geofabrik's .md5; check(temp path) may raise
@@ -411,12 +433,20 @@ def _download(url, path, md5=True, check=None):
     try:
         with _session() as s:
             expected = None
-            with s.get(url, stream=True, timeout=(30, 120)) as r:
+            variants = url_variants(url)
+            for (n, asked) in enumerate(variants):
+                r = s.get(asked, stream=True, timeout=(30, 120))
+                if r.status_code != 404 or n + 1 == len(variants):
+                    break
+                r.close()
+                UI.vprint(1, f"    {asked}: not found (HTTP 404), trying "
+                          f"{variants[n + 1]}")
+            with r:
                 r.raise_for_status()
                 if md5:
-                    final = getattr(r, "url", None) or url
+                    final = getattr(r, "url", None) or asked
                     expected = _expected_md5(
-                        s, [final] + ([url] if final != url else []))
+                        s, [final] + ([asked] if final != asked else []))
                     if expected is None:
                         UI.vprint(1, f"    No .md5 for {final}: checking the "
                                   "download's size only.")

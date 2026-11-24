@@ -295,6 +295,9 @@ class FakeResp:
         for i in range(0, len(self.data), 3):
             yield self.data[i:i + 3]
 
+    def close(self):
+        pass
+
     def __enter__(self):
         return self
 
@@ -1164,3 +1167,69 @@ def test_continent_only_tile_read_when_on_disk(gf, tmp_path, monkeypatch):
     open(path, "wb").close()
     (plan, left, _) = GEOFABRIK.plan_tiles(wanted, regions)
     assert plan == {(0, 0): frozenset([regions[0].url])} and not left
+
+
+# --- the other folder layout when a URL is not found (#127) --------------------
+@pytest.mark.parametrize("url, other", [
+    ("asia/indonesia/papua-latest.osm.pbf",
+     "asia/indonesia/papua/papua-latest.osm.pbf"),
+    ("asia/indonesia/papua/papua-latest.osm.pbf",
+     "asia/indonesia/papua-latest.osm.pbf"),
+    ("europe/germany-latest.osm.pbf", "europe/germany/germany-latest.osm.pbf"),
+    ("europe/germany/germany-latest.osm.pbf", "europe/germany-latest.osm.pbf"),
+    # region us-virgin-islands in folder us (old form)
+    ("north-america/us/us-virgin-islands-latest.osm.pbf",
+     "north-america/us/us-virgin-islands/us-virgin-islands-latest.osm.pbf"),
+])
+def test_url_variants(gf, url, other):
+    assert GEOFABRIK.url_variants(B + url) == [B + url, B + other]
+    assert GEOFABRIK.local_path(B + url) == GEOFABRIK.local_path(B + other)
+
+
+@pytest.mark.parametrize("url", [GEOFABRIK.INDEX_URL,
+                                 "https://example.org/x-latest.osm.pbf",
+                                 B + "asia/indonesia/papua-261123.osm.pbf"])
+def test_url_variants_only_for_latest_extracts(gf, url):
+    assert GEOFABRIK.url_variants(url) == [url]
+
+
+PAPUA_OLD = B + "asia/indonesia/papua-latest.osm.pbf"
+PAPUA_NEW = B + "asia/indonesia/papua/papua-latest.osm.pbf"
+PAPUA_DATED = B + "asia/indonesia/papua/papua-261123.osm.pbf"
+
+
+def test_broken_redirect_tries_the_new_folder(gf, redirecting):
+    # 2026-11-21: the old URL redirected to a URL without "asia/" (404).
+    (files, moved, asked) = redirecting
+    moved[PAPUA_OLD] = B + "indonesia/papua/papua-latest.osm.pbf"
+    moved[PAPUA_NEW] = PAPUA_DATED
+    files[PAPUA_DATED] = (DATA, {})
+    files[PAPUA_DATED + ".md5"] = md5_line(DATA, "papua-261123.osm.pbf")
+    path = GEOFABRIK.local_path(PAPUA_OLD)
+    GEOFABRIK._download(PAPUA_OLD, path)
+    assert open(path, "rb").read() == DATA
+    assert asked == [PAPUA_OLD, PAPUA_NEW, PAPUA_DATED + ".md5"]
+
+
+def test_new_url_falls_back_to_the_old_one(gf, redirecting):
+    (files, moved, asked) = redirecting
+    files[PAPUA_OLD] = (DATA, {})
+    files[PAPUA_OLD + ".md5"] = md5_line(DATA, "papua-latest.osm.pbf")
+    GEOFABRIK._download(PAPUA_NEW, GEOFABRIK.local_path(PAPUA_NEW))
+    assert asked == [PAPUA_NEW, PAPUA_OLD, PAPUA_OLD + ".md5"]
+
+
+def test_found_url_asks_nothing_else(gf, redirecting):
+    (files, moved, asked) = redirecting
+    files[PAPUA_OLD] = (DATA, {})
+    GEOFABRIK._download(PAPUA_OLD, GEOFABRIK.local_path(PAPUA_OLD))
+    assert asked == [PAPUA_OLD, PAPUA_OLD + ".md5"]
+
+
+def test_both_forms_missing_is_an_error(gf, redirecting):
+    (files, moved, asked) = redirecting
+    path = GEOFABRIK.local_path(PAPUA_OLD)
+    with pytest.raises(GEOFABRIK.GeofabrikError, match="404"):
+        GEOFABRIK._download(PAPUA_OLD, path)
+    assert asked == [PAPUA_OLD, PAPUA_NEW]
+    assert not os.path.exists(path)
