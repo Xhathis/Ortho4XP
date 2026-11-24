@@ -218,3 +218,48 @@ def test_broken_source_dsf_warns_and_retries_next_time(xp, monkeypatch):
     assert XPAPT.update_override_pack((src,), tiles, pack) == 1
     assert os.path.exists(FNAMES.dsf_file(pack, 64, -52))
     assert os.path.exists(os.path.join(pack, XPAPT.PACK_STAMP))
+
+
+def test_failed_rewrite_keeps_the_last_pack_dsf(xp, monkeypatch):
+    # #132: X-Plane holds the pack DSF open, so it cannot be replaced: it
+    # used to be deleted by the sweep of stale DSFs (BGGH without 3D).
+    (src, apt, tiles, pack) = xp
+    make_dsf(ga_dsf(apt, 64, -52), ga_props(("BGGH", [])), flt(0) + OBJ)
+    make_tile(tiles, 64, -52, ["BGGH"])
+    assert XPAPT.update_override_pack((src,), tiles, pack) == 1
+    bggh = FNAMES.dsf_file(pack, 64, -52)
+    before = open(bggh, "rb").read()
+    os.remove(os.path.join(pack, XPAPT.PACK_STAMP))  # make it redo the pack
+    real = os.replace
+
+    def replace(a, b):
+        if os.path.normcase(b) == os.path.normcase(bggh):
+            raise PermissionError(13, "in use")
+        return real(a, b)
+
+    monkeypatch.setattr(XPAPT.os, "replace", replace)
+    lines = []
+    monkeypatch.setattr(UI, "lvprint", lambda lvl, *a: lines.append(" ".join(a)))
+    assert XPAPT.update_override_pack((src,), tiles, pack) == 1
+    assert open(bggh, "rb").read() == before
+    assert any("WARNING" in line and "in use" in line for line in lines)
+
+
+def test_stale_dsf_that_cannot_be_removed_warns(xp, monkeypatch):
+    (src, apt, tiles, pack) = xp
+    make_dsf(ga_dsf(apt, 64, -52), ga_props(("BGGH", [])), flt(0) + OBJ)
+    make_tile(tiles, 64, -52, ["BGGH"])
+    stale = FNAMES.dsf_file(pack, 10, 10)
+    make_dsf(stale, ga_props(("CROS", [])), flt(0) + OBJ)
+
+    def remove(path):
+        raise PermissionError(13, "in use")
+
+    monkeypatch.setattr(XPAPT.os, "remove", remove)
+    lines = []
+    monkeypatch.setattr(UI, "lvprint", lambda lvl, *a: lines.append(" ".join(a)))
+    # Used to raise out of update_override_pack before apt.dat was written.
+    assert XPAPT.update_override_pack((src,), tiles, pack) == 1
+    assert os.path.exists(os.path.join(pack, XPAPT.PACK_APT_DAT))
+    assert any("not removed" in line for line in lines)
+    assert not os.path.exists(os.path.join(pack, XPAPT.PACK_STAMP))
