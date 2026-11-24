@@ -67,6 +67,9 @@ Guidance for Claude Code working in this repository.
   hardening and fix/airport-pack-sweep (#130-#132, never on origin) on
   2026-11-24, when dev was pushed with them. fix/drop-fr-overpass (never
   on origin) the same day, when dev was pushed with it.
+  fix/overpass-out-plain, fix/remove-unused, fix/flatten-ramp-edges,
+  fix/extract-answer-leftover and fix/overlay-source-check (#133-#137,
+  never on origin) on 2026-11-24, when dev fb066b2 was pushed.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -2607,8 +2610,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     when their step 1 runs again (no rebuild needed for it). Not run:
     gui_smoke (user away; no GUI code changed).
 44. ~~FR Overpass server dropped~~ — on `dev` since 2026-11-24 (pushed).
-45. #133-#137 — fifth review 2026-11-24; on `test` @ f66f37f, to `dev`
-    with the user's OK. #138 (Faroe provider) on its branch; the imagery
+45. ~~#133-#137~~ — fifth review 2026-11-24; on `dev` since 2026-11-24
+    (pushed). #138 (Faroe provider) on its branch; the imagery
     audit's zones and rebuilds need the user's OK.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
