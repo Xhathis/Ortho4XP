@@ -2450,6 +2450,19 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     23 Danish tile configs with DF coverage set to DFA on 2026-11-24
     (backup cfg_backups\2026-11-24_dk_dfa); +54+013, +55+013 and +57+012
     (no DF coverage) stay GO2.
+140. **FIXED** (`d8e868a`, CHANGES OUTPUT for tiles with zones):
+    zone_list_to_ortho_dico gave each texture block (16 mesh_zl tiles,
+    one ZL18 texture at mesh_zl 18, ~1.2 km) the zone at its centre pixel
+    only, so a zone narrower than a block could take no block and change
+    nothing, silently: after the 66-tile rebuild of 2026-11-24, 6 of the
+    82 Greenland zones (1 km helipad boxes) took none and 7 sites were not
+    on their zone's imagery. DSF.block_zone_index: the topmost zone on any
+    pixel a full pixel inside the block (polygon vertices round to whole
+    pixels, rings are stored to 4 decimals), so a zone along texture edges
+    (Vágar) does not grow. A zone now also gets the blocks it partly
+    covers (the user's 45 zone tiles: 605 -> 899 blocks; Nuuk +30).
+    5 new unit tests (3 fail on dev), 793 pass, pyflakes 0, regression
+    --overlay PASS (DSF, 17/17 masks, app log identical: no zones).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2637,6 +2650,11 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     tile configs, no override) started 2026-11-24 12:47 from
     G:\Ortho4XP_tests\batches\batch_run.py (log
     run_2026-11-24_gl_dk.log there). +62-008 (Vágar FOA zone) after it.
+    Done: 66 built, 0 failed (4h21m); +62-008 built after it (all 54
+    airport textures FOA18). 6 helipad zones took no block: #140.
+47. #140 — small zones; on `test` @ 5fbd748, to `dev` with the user's
+    OK, then steps 1-3 of +60-044, +60-046, +60-047, +61-049 (the
+    other zone tiles get the wider zones whenever rebuilt).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
