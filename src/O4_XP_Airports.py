@@ -223,8 +223,39 @@ def tile_flatten_areas(airports, lat, lon):
     return out
 
 
-def flatten_areas_for_tile(tile, overlay_srcs):
-    """tile_flatten_areas from X-Plane's apt.dat, [] when the setting is off
+def ramp_areas(airports, lat, lon, bounds, width_m=FLATTEN_RAMP_M):
+    """[(icao, elev_m, area in tile coordinates)] of the airports whose
+    boundary lies within width_m of the elevation data bounds (x0, y0, x1,
+    y1 in tile coordinates, the tile and its margin): all polygons of each,
+    unclipped. The ramp must not depend on which tile is built: an airport
+    just across the edge, or the part of a boundary in the neighbour tile,
+    ramps the edge samples there too, and both tiles then give their
+    shared edge the same elevations (tile_flatten_areas clips to the tile
+    and missed both)."""
+    (x0, y0, x1, y1) = bounds
+    far = min(max(abs(lat + y0), abs(lat + y1)), 89.0)
+    (wx, wy) = (width_m / GEO.lon_to_m(far), width_m / GEO.lat_to_m)
+    box = geometry.box(lon + x0 - wx, lat + y0 - wy,
+                       lon + x1 + wx, lat + y1 + wy)
+    out = []
+    for apt in airports:
+        polys = []
+        for rings in apt["polygons"]:
+            try:
+                pol = geometry.Polygon(rings[0], rings[1:]).buffer(0)
+            except (ValueError, TypeError):
+                continue
+            if not pol.is_empty and pol.area > 0:
+                polys.append(pol)
+        if not polys or not any(p.intersects(box) for p in polys):
+            continue
+        out.append((apt["icao"], apt["elev_m"],
+                    affinity.translate(ops.unary_union(polys), -lon, -lat)))
+    return out
+
+
+def _tile_airports(overlay_srcs):
+    """The flatten airports of X-Plane's apt.dat, [] when the setting is off
     or X-Plane's apt.dat is not found (console note only: a build without
     an X-Plane installation is unchanged)."""
     if not xp_flatten_airports:
@@ -235,17 +266,34 @@ def flatten_areas_for_tile(tile, overlay_srcs):
                   "custom_overlay_src: airports X-Plane flattens are not",
                   "matched.")
         return []
-    airports = load_airports(apt_dat)
+    return load_airports(apt_dat) or []
+
+
+def flatten_areas_for_tile(tile, overlay_srcs):
+    """tile_flatten_areas from X-Plane's apt.dat, [] when the setting is off
+    or X-Plane's apt.dat is not found."""
+    airports = _tile_airports(overlay_srcs)
     if not airports:
         return []
     return tile_flatten_areas(airports, tile.lat, tile.lon)
 
 
-def areas_without_user_patch(areas, patch_dir):
+def ramp_areas_for_tile(tile, overlay_srcs, bounds):
+    """ramp_areas from X-Plane's apt.dat ([] as flatten_areas_for_tile)."""
+    airports = _tile_airports(overlay_srcs)
+    if not airports:
+        return []
+    return ramp_areas(airports, tile.lat, tile.lon, bounds)
+
+
+def areas_without_user_patch(areas, patch_dir, usable=os.path.isfile):
     """The flatten areas whose airport has no user patch (<ICAO>.patch.osm in
-    patch_dir): a user patch replaces X-Plane's area (include_patches)."""
+    patch_dir): a user patch replaces X-Plane's area (include_patches).
+    usable(path) tells whether a patch file counts: include_patches skips
+    one it cannot read, and X-Plane's area is then built after all, so the
+    ramp around it must be there too."""
     return [a for a in areas
-            if not os.path.isfile(os.path.join(patch_dir, a[0] + ".patch.osm"))]
+            if not usable(os.path.join(patch_dir, a[0] + ".patch.osm"))]
 
 
 def ramp_dem_around_areas(alt_dem, bounds, areas, lat, width_m=FLATTEN_RAMP_M):
@@ -253,17 +301,19 @@ def ramp_dem_around_areas(alt_dem, bounds, areas, lat, width_m=FLATTEN_RAMP_M):
     blend them linearly back to the data within width_m around the area
     (distance in metres). alt_dem: rows from north to south, samples from
     x0 to x1 and y1 to y0 inclusive; bounds (x0, y0, x1, y1) and the areas
-    in tile coordinates. Changed in place; returns the samples changed."""
+    in tile coordinates. Changed in place; returns the samples changed.
+    Distances are measured at the area's own latitude, not the tile's, so
+    two tiles ramping the same airport agree on their shared edge."""
     (x0, y0, x1, y1) = bounds
     (ny, nx) = alt_dem.shape
     xstep = (x1 - x0) / (nx - 1)
     ystep = (y1 - y0) / (ny - 1)
-    mx = GEO.lon_to_m(lat)
     my = GEO.lat_to_m
-    wx = width_m / mx
     wy = width_m / my
     changed = 0
     for (_icao, elev, area) in areas:
+        mx = GEO.lon_to_m(lat + area.centroid.y)
+        wx = width_m / mx
         (xmin, ymin, xmax, ymax) = area.bounds
         c0 = max(math.floor((xmin - wx - x0) / xstep), 0)
         c1 = min(math.ceil((xmax + wx - x0) / xstep), nx - 1)
