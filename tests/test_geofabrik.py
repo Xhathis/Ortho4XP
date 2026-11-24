@@ -40,6 +40,8 @@ def gf(tmp_path, monkeypatch):
                         lambda level, *a: lines.append(" ".join(map(str, a))))
     monkeypatch.setattr(UI, "stop_requested", False)
     monkeypatch.setattr(UI, "red_flag", False)
+    # Their fake files are no PBFs; test_geofabrik_store checks that test.
+    monkeypatch.setattr(GEOFABRIK, "_looks_like_pbf", lambda path: True)
     return lines
 
 
@@ -186,12 +188,19 @@ def fake_files(gf, tmp_path, monkeypatch):
          (11, [4, 5], {"highway": "primary"})])
     fetched = []
 
-    def ensure_file(url):
-        fetched.append(url)
+    def ensure_extract(r):
+        fetched.append(r.url)
         return src
 
-    monkeypatch.setattr(GEOFABRIK, "ensure_file", ensure_file)
+    monkeypatch.setattr(GEOFABRIK, "ensure_extract", ensure_extract)
     return fetched
+
+
+def ensure(url, rid=None):
+    """ensure_extract of a region with url (id from the file name)."""
+    rid = rid or url.rsplit("/", 1)[-1].split("-latest.", 1)[0]
+    return GEOFABRIK.ensure_extract(
+        GEOFABRIK.Region(rid, url, geometry.box(0, 0, 1, 1)))
 
 
 class FakeTile:
@@ -260,7 +269,7 @@ def test_continent_only_left_to_overpass(fake_files, gf):
 def test_download_failure_left_to_overpass(fake_files, gf, monkeypatch):
     def broken(url):
         raise GEOFABRIK.GeofabrikError("HTTPError: 503")
-    monkeypatch.setattr(GEOFABRIK, "ensure_file", broken)
+    monkeypatch.setattr(GEOFABRIK, "ensure_extract", broken)
     assert GEOFABRIK.prepare_tile(FakeTile(55, 12))
     assert not os.path.exists(EXTRACT.answer_path(55, 12, "water"))
     assert any("no extract file" in line and "503" in line for line in gf)
@@ -364,19 +373,21 @@ def test_ensure_file_downloads_once_then_updates(gf, monkeypatch):
 
     monkeypatch.setattr(GEOFABRIK, "_download", download)
     monkeypatch.setattr(GEOFABRIK, "_update",
-                        lambda path: calls.append("update") or True)
+                        lambda path, server=None: calls.append("update")
+                        or True)
     age = [0.2]
     monkeypatch.setattr(GEOFABRIK, "_age_days", lambda path: age[0])
     monkeypatch.setattr(GEOFABRIK, "data_time", lambda path: __import__(
         "datetime").datetime(2026, 11, 12))
-    path = GEOFABRIK.ensure_file(url)
+    path = ensure(url)
+    assert path == GEOFABRIK.extract_path("x")
     assert calls == ["download"]
-    assert GEOFABRIK.ensure_file(url) == path and calls == ["download"]
+    assert ensure(url) == path and calls == ["download"]
     age[0] = 3  # older than geofabrik_max_age (1 day)
-    GEOFABRIK.ensure_file(url)
+    ensure(url)
     assert calls == ["download", "update"]
     # Geofabrik had nothing newer: not asked again within the hour.
-    GEOFABRIK.ensure_file(url)
+    ensure(url)
     assert calls == ["download", "update"]
 
 
@@ -398,28 +409,28 @@ def test_failed_download_not_asked_again(gf, monkeypatch, fresh_failures):
 
     monkeypatch.setattr(GEOFABRIK, "_download", download)
     with pytest.raises(GEOFABRIK.GeofabrikError, match="cut"):
-        GEOFABRIK.ensure_file(url)
+        ensure(url)
     with pytest.raises(GEOFABRIK.GeofabrikError,
                        match="cut.*not asked again"):
-        GEOFABRIK.ensure_file(url)
+        ensure(url)
     assert calls == [url]
 
 
 def test_failed_update_not_asked_again(gf, monkeypatch, fresh_failures):
     url = B + "europe/old-latest.osm.pbf"
-    path = GEOFABRIK.local_path(url)
+    path = GEOFABRIK.extract_path("old")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(b"pbf")
     calls = []
     monkeypatch.setattr(GEOFABRIK, "_update",
-                        lambda p: calls.append(p) and False)
+                        lambda p, server=None: calls.append(p) and False)
     monkeypatch.setattr(GEOFABRIK, "_age_days", lambda p: 3)
     monkeypatch.setattr(GEOFABRIK, "data_time", lambda p: __import__(
         "datetime").datetime(2026, 11, 12))
     # The file is used as it is (older data), the update tried once.
-    assert GEOFABRIK.ensure_file(url) == path
-    assert GEOFABRIK.ensure_file(url) == path
+    assert ensure(url) == path
+    assert ensure(url) == path
     assert calls == [path]
 
 
@@ -635,17 +646,15 @@ def test_failed_update_leaves_no_temp_file(gf, monkeypatch, tmp_path):
 
 def test_ensure_file_removes_leftover_temp_files(gf, monkeypatch):
     url = B + "europe/x-latest.osm.pbf"
-    path = GEOFABRIK.local_path(url)
+    path = GEOFABRIK.extract_path("x")
     os.makedirs(os.path.dirname(path))
-    for name in ("x-latest.osm.pbf", ".tmp12_34_x-latest.osm.pbf",
-                 ".tmp56_78_y-latest.osm.pbf"):
+    for name in ("x.osm.pbf", ".tmp12_34_x.osm.pbf", ".tmp56_78_y.osm.pbf"):
         with open(os.path.join(os.path.dirname(path), name), "wb") as fh:
             fh.write(b"pbf")
     monkeypatch.setattr(GEOFABRIK, "_age_days", lambda p: 0.1)
-    assert GEOFABRIK.ensure_file(url) == path
+    assert ensure(url) == path
     assert sorted(os.listdir(os.path.dirname(path))) == [
-        ".tmp56_78_y-latest.osm.pbf", "x-latest.osm.pbf",
-        "x-latest.osm.pbf.lock"]
+        ".lock", ".tmp56_78_y.osm.pbf", "x.osm.pbf"]
 
 
 def test_prepare_tiles_writes_each_group_at_once(fake_files, gf):
@@ -749,7 +758,7 @@ def test_refresh_failure_keeps_the_cache(fake_files, gf, monkeypatch):
 
     def broken(url):
         raise GEOFABRIK.GeofabrikError("HTTPError: 503")
-    monkeypatch.setattr(GEOFABRIK, "ensure_file", broken)
+    monkeypatch.setattr(GEOFABRIK, "ensure_extract", broken)
     assert GEOFABRIK.prepare_tile(FakeTile(55, 12))
     assert any("+55+012 not refreshed" in line and "cached layers are used"
                in line for line in gf)
@@ -1079,13 +1088,13 @@ def test_failed_file_fails_only_its_tiles(gf, tmp_path, monkeypatch,
         [(10, [1, 2, 3, 1], {"natural": "water"})])
     fetched = []
 
-    def ensure_file(url):
-        fetched.append(url)
-        if "/b-" in url:
-            raise GEOFABRIK.GeofabrikError(f"{url}: HTTPError: 404")
+    def ensure_extract(r):
+        fetched.append(r.url)
+        if r.id == "b":
+            raise GEOFABRIK.GeofabrikError(f"{r.url}: HTTPError: 404")
         return src
 
-    monkeypatch.setattr(GEOFABRIK, "ensure_file", ensure_file)
+    monkeypatch.setattr(GEOFABRIK, "ensure_extract", ensure_extract)
     wanted = {(55, 12): {"water": "w"}, (55, 13): {"water": "w"}}
     (plan, _, _) = GEOFABRIK.plan_tiles(wanted, GEOFABRIK.load_index())
     assert len(GEOFABRIK.group_tiles(plan)) == 1
@@ -1134,11 +1143,11 @@ def test_gap_continent_read_when_on_disk(gf, tmp_path, monkeypatch):
     (plan, left, sea) = GEOFABRIK.plan_tiles(wanted, CARIBBEAN)
     assert not plan and not sea
     assert "central-america" in left[(0, 0)] and "not downloaded" in left[(0, 0)]
-    path = GEOFABRIK.local_path(CARIBBEAN[0].url)
+    path = GEOFABRIK.extract_path(CARIBBEAN[0].id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "wb").close()
     (plan, left, sea) = GEOFABRIK.plan_tiles(wanted, CARIBBEAN)
-    assert plan == {(0, 0): frozenset(r.url for r in CARIBBEAN)} and not left
+    assert plan == {(0, 0): frozenset(r.id for r in CARIBBEAN)} and not left
 
 
 def test_sea_beyond_the_country_stays_sea(gf, tmp_path, monkeypatch):
@@ -1148,7 +1157,7 @@ def test_sea_beyond_the_country_stays_sea(gf, tmp_path, monkeypatch):
     assert GEOFABRIK.gap_continents(0, 0, CARIBBEAN) == []
     (plan, left, sea) = GEOFABRIK.plan_tiles({(0, 0): {"water": ("x",)}},
                                              CARIBBEAN)
-    assert plan == {(0, 0): frozenset([CARIBBEAN[1].url])} and not left
+    assert plan == {(0, 0): frozenset([CARIBBEAN[1].id])} and not left
 
 
 def test_gap_without_elevation_file_as_before(gf, tmp_path, monkeypatch):
@@ -1162,11 +1171,11 @@ def test_continent_only_tile_read_when_on_disk(gf, tmp_path, monkeypatch):
     wanted = {(0, 0): {"coastline": ("x",)}}
     (plan, left, _) = GEOFABRIK.plan_tiles(wanted, regions)
     assert not plan and "not downloaded" in left[(0, 0)]
-    path = GEOFABRIK.local_path(regions[0].url)
+    path = GEOFABRIK.extract_path(regions[0].id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "wb").close()
     (plan, left, _) = GEOFABRIK.plan_tiles(wanted, regions)
-    assert plan == {(0, 0): frozenset([regions[0].url])} and not left
+    assert plan == {(0, 0): frozenset([regions[0].id])} and not left
 
 
 # --- the other folder layout when a URL is not found (#127) --------------------
@@ -1272,8 +1281,8 @@ def test_gone_url_follows_the_refreshed_index(gf, redirecting,
     files[GEOFABRIK.INDEX_URL] = (index_bytes({"dk": DK_NEW}), {})
     files[DK_NEW] = (DATA, {})
     files[DK_NEW + ".md5"] = md5_line(DATA, "dk.osm.pbf")
-    path = GEOFABRIK.ensure_file(DK_OLD)
-    assert path == GEOFABRIK.local_path(DK_NEW)
+    path = ensure(DK_OLD)
+    assert path == GEOFABRIK.extract_path("dk")
     assert open(path, "rb").read() == DATA
     assert asked == [DK_OLD, B + "europe/dk/dk-latest.osm.pbf",
                      GEOFABRIK.INDEX_URL, DK_NEW, DK_NEW + ".md5"]
@@ -1283,15 +1292,17 @@ def test_gone_url_follows_the_refreshed_index(gf, redirecting,
     assert [r.url for r in GEOFABRIK.load_index()] == [DK_NEW]
     asked.clear()
     monkeypatch.setattr(GEOFABRIK, "_age_days", lambda p: 0)  # fake .pbf
-    assert GEOFABRIK.ensure_file(DK_NEW) == path
+    assert ensure(DK_NEW, "dk") == path
     assert asked == []
+    # The manifest names where the file came from.
+    assert GEOFABRIK.read_manifest()["dk"]["url"] == DK_NEW
 
 
 def test_young_index_is_not_fetched_again(gf, redirecting, no_refresh_error):
     (files, moved, asked) = redirecting
     old_index({"dk": DK_OLD}, 0.5)
     with pytest.raises(GEOFABRIK.GeofabrikNotFound, match="404"):
-        GEOFABRIK.ensure_file(DK_OLD)
+        ensure(DK_OLD)
     assert GEOFABRIK.INDEX_URL not in asked
 
 
@@ -1300,11 +1311,11 @@ def test_index_unchanged_keeps_the_404(gf, redirecting, no_refresh_error):
     old_index({"dk": DK_OLD}, 2)
     files[GEOFABRIK.INDEX_URL] = (index_bytes({"dk": DK_OLD}), {})
     with pytest.raises(GEOFABRIK.GeofabrikNotFound):
-        GEOFABRIK.ensure_file(DK_OLD)
+        ensure(DK_OLD)
     assert asked.count(GEOFABRIK.INDEX_URL) == 1
     # Not asked again in this preparation.
     with pytest.raises(GEOFABRIK.GeofabrikError, match="failed earlier"):
-        GEOFABRIK.ensure_file(DK_OLD)
+        ensure(DK_OLD)
 
 
 def test_failed_index_fetch_is_tried_once(gf, redirecting, no_refresh_error):
@@ -1312,18 +1323,19 @@ def test_failed_index_fetch_is_tried_once(gf, redirecting, no_refresh_error):
     old_index({"dk": DK_OLD, "se": SE_OLD}, 2)
     for url in (DK_OLD, SE_OLD):
         with pytest.raises(GEOFABRIK.GeofabrikNotFound):
-            GEOFABRIK.ensure_file(url)
+            ensure(url)
     assert asked.count(GEOFABRIK.INDEX_URL) == 1  # 404 for the index too
     assert GEOFABRIK._index_refresh_error
 
 
-def test_url_not_in_the_index_is_not_looked_up(gf, redirecting,
-                                              no_refresh_error):
+def test_region_gone_from_the_index(gf, redirecting, no_refresh_error):
+    # Geofabrik dropped (merged or renamed) the region: the 404 stands.
     (files, moved, asked) = redirecting
-    old_index({"se": SE_OLD}, 2)
+    old_index({"dk": DK_OLD}, 2)
+    files[GEOFABRIK.INDEX_URL] = (index_bytes({"se": SE_OLD}), {})
     with pytest.raises(GEOFABRIK.GeofabrikNotFound):
-        GEOFABRIK.ensure_file(DK_OLD)
-    assert GEOFABRIK.INDEX_URL not in asked
+        ensure(DK_OLD)
+    assert asked.count(GEOFABRIK.INDEX_URL) == 1
 
 
 def test_other_download_errors_do_not_fetch_the_index(gf, redirecting,
@@ -1333,7 +1345,7 @@ def test_other_download_errors_do_not_fetch_the_index(gf, redirecting,
     old_index({"dk": DK_OLD}, 2)
     files[DK_OLD] = (DATA, {"Content-Length": str(len(DATA) + 5)})
     with pytest.raises(GEOFABRIK.GeofabrikError, match="download cut"):
-        GEOFABRIK.ensure_file(DK_OLD)
+        ensure(DK_OLD)
     assert GEOFABRIK.INDEX_URL not in asked
 
 

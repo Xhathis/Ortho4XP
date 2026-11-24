@@ -153,6 +153,12 @@ def read_index(path):
     return regions
 
 
+def store_name(rid):
+    """File name of Geofabrik region rid in Ortho4XP's store (#129):
+    alsace.osm.pbf, us__georgia.osm.pbf (ids hold "/" only as a prefix)."""
+    return rid.replace("/", "__") + ".osm.pbf"
+
+
 MIN_GAP = 1e-6  # square degrees (~0.01 km2): slivers along shared borders
 
 

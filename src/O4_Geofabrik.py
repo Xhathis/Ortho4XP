@@ -17,9 +17,15 @@ answers Overpass would give; the build reads them as before, #100):
    continent file when it is on disk and is left to Overpass otherwise:
    a continent file is tens of GB and never downloaded here.
 3. Each file is downloaded once (MD5 checked, temp name) into
-   geofabrik_dir with Geofabrik's folder layout. A file whose data is
+   geofabrik_dir/extracts, named after its region id (alsace.osm.pbf,
+   us__georgia.osm.pbf), not after Geofabrik's URL: their folder layout
+   changed in 2026-11 and may again (#129). extracts/extracts.json records
+   where each came from and how its updates went. A file whose data is
    older than geofabrik_max_age days gets Geofabrik's daily changes
-   (pyosmium-up-to-date, a few MB a day) instead of a new download.
+   (pyosmium-up-to-date, a few MB a day) instead of a new download; when
+   updates keep failing or the data is very old, it is downloaded again.
+   A file that cannot be read is set aside and downloaded again. Files of
+   the old layout are moved into extracts/ (migrate_store).
 4. One read of the files per group of tiles: a batch prepares all its
    tiles before phase 1 (prepare_batch), grouped by the files they need.
 
@@ -37,6 +43,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 
 import O4_File_Names as FNAMES
@@ -57,7 +64,14 @@ INDEX_MAX_AGE = 30  # days
 # younger than this (#128).
 INDEX_RECHECK = 1.0  # days
 UPDATE_RUNS = 30  # pyosmium-up-to-date runs of up to 1 GB of changes each
+UPDATE_TIMEOUT = 7200  # s per run; a hung pyosmium is killed (#129)
 UPDATE_RECHECK = 3600  # s: an update that found nothing waits this long
+# A file is downloaded again instead of updated when its updates failed this
+# many preparations in a row, or its data is older than REFRESH_AGE days
+# (a month of daily diffs is about as big as the file).
+UPDATE_FAILURES_MAX = 3
+REFRESH_AGE = 30  # days
+STORE_DIR = "extracts"
 CHUNK = 1 << 22
 # group_tiles: groups that share a file are read as one up to this many
 # tiles (a group that is bigger on its own is never split).
@@ -77,8 +91,8 @@ _index_cache = {}  # path -> (mtime, regions)
 # that failed to download or update is not asked for again: several tile
 # groups can share a file, and each would start the whole download anew
 # (Geofabrik objects to repeated downloads of the same file).
-_failed_downloads = {}  # url -> error message
-_failed_updates = set()  # local paths
+_failed_downloads = {}  # region id -> error message
+_failed_updates = set()  # region ids
 # Why fetching the index again after a 404 failed (one try per preparation).
 _index_refresh_error = None
 
@@ -109,9 +123,24 @@ def index_path():
     return os.path.join(data_dir(), "index-v1.json")
 
 
+def extract_path(rid):
+    """The file of Geofabrik region rid (#129): one folder, a name from the
+    region id alone, so a change of Geofabrik's URLs moves nothing."""
+    return os.path.join(store_dir(), EXTRACT.store_name(rid))
+
+
+def store_dir():
+    return os.path.join(data_dir(), STORE_DIR)
+
+
+def manifest_path():
+    return os.path.join(store_dir(), "extracts.json")
+
+
 def local_path(url):
-    """The file for a Geofabrik URL: its path below the server's root
-    (us/georgia and georgia have the same file name).
+    """Where files were kept before #129 (migrate_store moves them): the
+    URL's path below the server's root (us/georgia and georgia have the
+    same file name).
 
     Since 2026-11 Geofabrik puts every region in a folder of its own
     (europe/france/alsace/alsace-latest.osm.pbf, was
@@ -130,11 +159,12 @@ def local_path(url):
 
 # --- index and regions -----------------------------------------------------------
 class Region:
-    __slots__ = ("id", "url", "area", "size", "container")
+    __slots__ = ("id", "url", "area", "size", "container", "updates")
 
-    def __init__(self, rid, url, area, container=False):
+    def __init__(self, rid, url, area, container=False, updates=None):
         (self.id, self.url, self.area, self.size) = (rid, url, area, area.area)
         self.container = container
+        self.updates = updates  # replication server of the extract (index)
 
     def __repr__(self):
         return f"Region({self.id})"
@@ -186,7 +216,8 @@ def parse_index(text):
                 # Some outlines cross themselves (2026-11: a Chinese one);
                 # GEOS refuses to intersect those.
                 area = shapely.make_valid(area)
-            regions.append(Region(props["id"], url, area))
+            regions.append(Region(props["id"], url, area,
+                                  updates=props["urls"].get("updates")))
     return mark_containers(regions)
 
 
@@ -340,11 +371,11 @@ def gap_continents(lat, lon, regions):
 
 
 def _on_disk(regions):
-    return all(os.path.isfile(local_path(r.url)) for r in regions)
+    return all(os.path.isfile(extract_path(r.id)) for r in regions)
 
 
 def group_tiles(plan):
-    """[(urls, tiles)] from plan {tile: frozenset(urls)}: tiles needing the
+    """[(ids, tiles)] from plan {tile: frozenset(region ids)}: tiles needing the
     same files share one read, and a tile whose files are a subset of a
     bigger group's joins that group (an extra file costs only its read).
     Then groups that share a file are read together (norway for the tiles
@@ -523,35 +554,48 @@ _UPDATE_CODE = ("import sys; from osmium.tools.pyosmium_up_to_date import main;"
 
 def _update(path):
     """Apply Geofabrik's changes since the file's data time (in place,
-    through a temp file). True when up to date; False if the server could
-    not be used (the file is left as it was)."""
+    through a temp file), from the replication server the file names.
+    True when up to date; False if the server could not be used (the file
+    is left as it was)."""
     for _ in range(UPDATE_RUNS):
         tmp = FNAMES.temp_path_for(path)
-        proc = subprocess.Popen(
-            [sys.executable, "-c", _UPDATE_CODE, "-v", "--size", "1024",
-             "-o", tmp, path],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            env=UI.subprocess_env())
-        complete = False
-        try:
-            while proc.poll() is None:
-                if UI.stop_requested:
-                    proc.kill()
-                    proc.wait()
-                    raise Stopped()
-                time.sleep(0.5)
-            out = proc.stdout.read().decode("utf-8", "replace")
-            complete = proc.returncode in (0, 1)
-        finally:
-            proc.stdout.close()
-            # Not on the exit code alone: on Windows a killed process
-            # exits 1, the code for "more changes to come" (Stop used to
-            # leave a temp file as big as the extract).
-            if not complete and os.path.exists(tmp):
-                os.remove(tmp)
+        # Output to a file, not a pipe: a pipe nobody reads while the
+        # process runs blocks it once the buffer is full.
+        with tempfile.TemporaryFile() as log:
+            proc = subprocess.Popen(
+                [sys.executable, "-c", _UPDATE_CODE, "-v", "--size", "1024",
+                 "-o", tmp, path],
+                stdout=log, stderr=subprocess.STDOUT,
+                env=UI.subprocess_env())
+            complete = False
+            timed_out = False
+            try:
+                start = time.monotonic()
+                while proc.poll() is None:
+                    if UI.stop_requested:
+                        proc.kill()
+                        proc.wait()
+                        raise Stopped()
+                    if time.monotonic() - start > UPDATE_TIMEOUT:
+                        proc.kill()
+                        proc.wait()
+                        timed_out = True
+                        break
+                    time.sleep(0.5)
+                complete = not timed_out and proc.returncode in (0, 1)
+            finally:
+                # Not on the exit code alone: on Windows a killed process
+                # exits 1, the code for "more changes to come" (Stop used
+                # to leave a temp file as big as the extract).
+                if not complete and os.path.exists(tmp):
+                    os.remove(tmp)
+            log.seek(0)
+            out = log.read().decode("utf-8", "replace")
         if not complete:
-            UI.lvprint(1, f"   WARNING: could not update {path} (exit "
-                       f"{proc.returncode}): {out.strip()[-300:]}")
+            why = (f"no end after {UPDATE_TIMEOUT} s" if timed_out
+                   else f"exit {proc.returncode}")
+            UI.lvprint(1, f"   WARNING: could not update {path} ({why}): "
+                       f"{out.strip()[-300:]}")
             return False
         if os.path.exists(tmp):
             os.replace(tmp, path)
@@ -560,13 +604,9 @@ def _update(path):
     return True
 
 
-def _checked_path(path):
-    return path + ".checked"
-
-
 def _remove_leftover_temps(path):
     """Temp files of path (FNAMES.temp_path_for) that a killed run left.
-    Called under path's lock: no other process is writing one."""
+    Called under the store's lock: no other process is writing one."""
     (folder, name) = os.path.split(path)
     try:
         names = os.listdir(folder)
@@ -581,11 +621,53 @@ def _remove_leftover_temps(path):
                 UI.vprint(1, f"    Could not remove {n} ({e}).")
 
 
-def current_url(url):
-    """After url answered 404: the URL Geofabrik's index gives now for the
-    same region, fetching the index again unless it is younger than
-    INDEX_RECHECK days; None when that is url itself, the region is not in
-    the index or the index cannot be had.
+# --- the store: extracts by region id (#129) ------------------------------------
+TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime(TIME_FORMAT)
+
+
+def read_manifest():
+    """{region id: record} of extracts.json; {} when missing or broken (the
+    files are found by name without it, only their history is lost)."""
+    try:
+        with open(manifest_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        UI.vprint(1, f"    {manifest_path()} unreadable ({e}), starting a new "
+                  "one.")
+        return {}
+
+
+def _record(rid, **fields):
+    """Update the manifest record of rid (under the store's lock); a field
+    set to None is removed."""
+    data = read_manifest()
+    rec = data.setdefault(rid, {})
+    for (k, v) in fields.items():
+        if v is None:
+            rec.pop(k, None)
+        else:
+            rec[k] = v
+    FNAMES.write_text_atomic(manifest_path(),
+                             json.dumps(data, indent=1, sort_keys=True))
+
+
+def _store_lock():
+    os.makedirs(store_dir(), exist_ok=True)
+    return _FileLock(os.path.join(store_dir(), ".lock"))
+
+
+def current_region(rid):
+    """After rid's URL answered 404: the region as Geofabrik's index gives
+    it now, fetching the index again unless it is younger than
+    INDEX_RECHECK days; None when the index cannot be had or no longer has
+    the region.
 
     The index is the one place that names every extract's URL; it was kept
     for INDEX_MAX_AGE (30) days, so a reorganisation of Geofabrik's folders
@@ -593,82 +675,296 @@ def current_url(url):
     redirects failed (#127). Following the index needs no guess about the
     new layout (#128)."""
     global _index_refresh_error
-    rid = next((r.id for r in load_index(download=False) if r.url == url),
-               None)
-    if rid is None:
-        return None
     path = index_path()
     if time.time() - os.path.getmtime(path) > INDEX_RECHECK * 86400:
         if _index_refresh_error:
             return None
-        UI.vprint(1, f"    Fetching Geofabrik's index again ({url} is gone)")
+        UI.vprint(1, f"    Fetching Geofabrik's index again (the URL of {rid} "
+                  "is gone)")
         try:
             _download(INDEX_URL, path, md5=False, check=read_index)
         except (OSError, GeofabrikError) as e:
             _index_refresh_error = str(e)
             UI.vprint(1, f"    Could not fetch the index again ({e}).")
             return None
-    new = next((r.url for r in load_index(download=False) if r.id == rid),
-               None)
-    return new if new and new != url else None
+    return next((r for r in load_index(download=False) if r.id == rid), None)
 
 
-def ensure_file(url):
-    """The local file for url: downloaded if missing, updated if older
-    than geofabrik_max_age days. Locked against other processes. When url
-    answers 404, the URL the index now gives for its region is used
-    (current_url, #128)."""
+def _fetch(region, path):
+    """Download region's extract to path, following the index when its URL
+    is gone (#128), and record it in the manifest."""
+    url = region.url
+    UI.vprint(1, f"    Downloading {url}")
+    start = time.time()
     try:
-        return _ensure_file(url)
+        _download(url, path)
     except GeofabrikNotFound:
-        new = current_url(url)
-        if new is None:
+        new = current_region(region.id)
+        if new is None or new.url == url:
             raise
-    UI.lvprint(1, f"    Geofabrik: {url} is gone; the index now gives {new}.")
+        UI.lvprint(1, f"    Geofabrik: {url} is gone; the index now gives "
+                   f"{new.url}.")
+        url = new.url
+        _download(url, path)
+    UI.lvprint(1, f"    Geofabrik: downloaded {region.id} "
+               f"({os.path.getsize(path) / 1e6:.0f} MB, "
+               f"{time.time() - start:.0f} s).")
+    _record(region.id, url=url, size=os.path.getsize(path),
+            downloaded=_now(), update_failures=None, updated=None,
+            checked=None, moved_from=None, broken=None)
+
+
+def _looks_like_pbf(path):
+    """The start of an .osm.pbf: a 4-byte big-endian BlobHeader size and
+    the blob type "OSMHeader". Checked before pyosmium opens a file: when
+    pyosmium fails on one, Windows keeps it open for the rest of the
+    process, so it could no longer be set aside."""
     try:
-        return _ensure_file(new)
+        with open(path, "rb") as f:
+            head = f.read(64)
+    except OSError:
+        return False
+    n = int.from_bytes(head[:4], "big") if len(head) >= 8 else 0
+    return 0 < n < 65536 and b"OSMHeader" in head[4:4 + min(n, 60)]
+
+
+def _set_aside(rid, path, why):
+    """A file that cannot be read: kept as <name>.broken (the last one
+    only) for a look, out of the way of a new download."""
+    broken = path + ".broken"
+    UI.lvprint(1, f"   WARNING: Geofabrik extract {path} cannot be read "
+               f"({why}); kept as {os.path.basename(broken)}, downloading it "
+               "again.")
+    try:
+        os.replace(path, broken)
+    except OSError as e:
+        raise GeofabrikError(f"{path} cannot be read ({why}) nor set aside "
+                             f"({e})")
+
+
+def _header_server(path):
+    """The replication server the file names, None without one."""
+    import osmium
+    reader = osmium.io.Reader(path, osmium.osm.osm_entity_bits.NOTHING)
+    try:
+        return reader.header().get("osmosis_replication_base_url") or None
+    finally:
+        reader.close()
+
+
+def _bring_up_to_date(region, path, age):
+    """Update (or download anew) region's extract whose data is age days
+    old. The file stays usable as it is when this fails."""
+    rid = region.id
+    failures = read_manifest().get(rid, {}).get("update_failures", 0)
+    if failures >= UPDATE_FAILURES_MAX or age > REFRESH_AGE:
+        why = (f"its updates failed {failures} times in a row"
+               if failures >= UPDATE_FAILURES_MAX
+               else f"its data is {age:.0f} days old")
+        _download_again(region, path, why)
+        return
+    UI.vprint(1, f"    Updating {rid} (data of {data_time(path):%Y-%m-%d %H:%M}"
+              " UTC)")
+    if _update(path):
+        _record(rid, updated=_now(), checked=_now(), update_failures=None)
+    elif region.updates and region.updates != _header_server(path):
+        # The file names the update server Geofabrik gave when it was made
+        # (older files: europe/norway-updates); the index names another
+        # one today. A new download carries today's server. (Not pyosmium's
+        # --server with --ignore-osmosis-headers: it finished the update,
+        # then never exited, 2026-11-24.)
+        _download_again(region, path, "its update server moved to "
+                        f"{region.updates}")
+    else:
+        _failed_updates.add(rid)
+        _record(rid, update_failures=failures + 1)
+    UI.vprint(1, f"    {rid}: data of {data_time(path):%Y-%m-%d %H:%M} UTC")
+
+
+def _download_again(region, path, why):
+    """Replace region's extract by a new download; on failure the old file
+    stays in use (no further try in this preparation)."""
+    rid = region.id
+    UI.lvprint(1, f"    Geofabrik: downloading {rid} again ({why}).")
+    try:
+        _fetch(region, path)
     except (GeofabrikError, OSError) as e:
-        _failed_downloads[url] = str(e)
-        raise
+        UI.lvprint(1, f"   WARNING: could not download {rid} again ({e}); "
+                   "using the file as it is.")
+        _failed_updates.add(rid)
 
 
-def _ensure_file(url):
-    path = local_path(url)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with _FileLock(path + ".lock"):
+def _recently_checked(rid):
+    checked = read_manifest().get(rid, {}).get("checked")
+    if not checked:
+        return False
+    try:
+        t = datetime.datetime.strptime(checked, TIME_FORMAT).replace(
+            tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    age = datetime.datetime.now(datetime.timezone.utc) - t
+    return age.total_seconds() < UPDATE_RECHECK
+
+
+def ensure_extract(region):
+    """The local file of region's extract: downloaded if missing, updated
+    if older than geofabrik_max_age days (or downloaded again, see
+    _bring_up_to_date), set aside and downloaded again if it cannot be
+    read. Locked against other processes."""
+    rid = region.id
+    path = extract_path(rid)
+    with _store_lock():
         _remove_leftover_temps(path)
-        if not os.path.isfile(path):
-            if url in _failed_downloads:
-                raise GeofabrikError(f"{_failed_downloads[url]} (failed "
-                                     "earlier in this run, not asked again)")
-            UI.vprint(1, f"    Downloading {url}")
-            start = time.time()
-            try:
-                _download(url, path)
-            except (GeofabrikError, OSError) as e:
-                _failed_downloads[url] = str(e)
-                raise
-            UI.lvprint(1, f"    Geofabrik: downloaded {os.path.basename(path)}"
-                       f" ({os.path.getsize(path) / 1e6:.0f} MB, "
-                       f"{time.time() - start:.0f} s).")
-            return path
-        age = _age_days(path)
-        checked = _checked_path(path)
-        recently = (os.path.isfile(checked)
-                    and time.time() - os.path.getmtime(checked) < UPDATE_RECHECK)
-        if (age > geofabrik_max_age and not recently
-                and path not in _failed_updates):
-            UI.vprint(1, f"    Updating {os.path.basename(path)} (data of "
-                      f"{data_time(path):%Y-%m-%d %H:%M} UTC)")
-            if _update(path):
-                with open(checked, "w"):
-                    pass
+        age = None
+        if os.path.isfile(path):
+            marked = read_manifest().get(rid, {}).get("broken")
+            if marked or not _looks_like_pbf(path):
+                _set_aside(rid, path, marked or "not an .osm.pbf file")
             else:
-                # The file stays usable as it is (older data).
-                _failed_updates.add(path)
-            UI.vprint(1, f"    {os.path.basename(path)}: data of "
-                      f"{data_time(path):%Y-%m-%d %H:%M} UTC")
+                try:
+                    age = _age_days(path)
+                except (RuntimeError, ValueError) as e:
+                    # pyosmium raises RuntimeError for a broken file; it
+                    # used to escape prepare_tiles and end the preparation.
+                    # The file stays open in this process (see
+                    # _looks_like_pbf): set aside by the next preparation.
+                    _record(rid, broken=str(e))
+                    raise GeofabrikError(f"{path} cannot be read ({e}); it "
+                                         "is set aside next time")
+        if age is None:
+            if rid in _failed_downloads:
+                raise GeofabrikError(f"{_failed_downloads[rid]} (failed "
+                                     "earlier in this run, not asked again)")
+            try:
+                _fetch(region, path)
+            except (GeofabrikError, OSError) as e:
+                _failed_downloads[rid] = str(e)
+                raise
+            return path
+        if age > geofabrik_max_age and not _recently_checked(rid) \
+                and rid not in _failed_updates:
+            _bring_up_to_date(region, path, age)
     return path
+
+
+def unused_extracts(regions):
+    """[(file name, bytes)] of store files whose region the index no longer
+    has (merged or renamed by Geofabrik): never read, for the user to
+    delete."""
+    known = {EXTRACT.store_name(r.id) for r in regions}
+    try:
+        names = os.listdir(store_dir())
+    except OSError:
+        return []
+    return sorted((n, os.path.getsize(os.path.join(store_dir(), n)))
+                  for n in names
+                  if n.endswith(".osm.pbf") and n not in known)
+
+
+def _old_layout_files():
+    """.osm.pbf files below data_dir() outside the store (the layout before
+    #129)."""
+    out = []
+    store = os.path.normcase(store_dir())
+    for (root, dirs, files) in os.walk(data_dir()):
+        if os.path.normcase(root) == store:
+            dirs[:] = []
+            continue
+        out += [os.path.join(root, f) for f in files if f.endswith(".osm.pbf")]
+    return out
+
+
+def migrate_store(regions, dry_run=False):
+    """Move the extracts of the old layout (Geofabrik's URL paths, see
+    local_path) into the store, named by region id: a rename on the same
+    drive, nothing downloaded or deleted. Their .lock and .checked side
+    files go (the store has one lock, the manifest keeps the check time).
+    A file no region of the index matches, or whose region the store has
+    already, stays where it is. The moves are listed in
+    extracts/moved_<time>.csv (undo_migration).
+
+    Returns ([(old, new, region id)], [old files left])."""
+    old_files = _old_layout_files()
+    if not old_files:
+        return ([], [])
+    by_old = {}
+    for r in regions:
+        for u in url_variants(r.url):
+            by_old.setdefault(os.path.normcase(local_path(u)), r)
+    (moves, left) = ([], [])
+    for f in sorted(old_files):
+        r = by_old.get(os.path.normcase(f))
+        if r is None or os.path.exists(extract_path(r.id)) \
+                or any(m[2] == r.id for m in moves):
+            left.append(f)
+            continue
+        moves.append((f, extract_path(r.id), r.id))
+    if dry_run or not moves:
+        return (moves, left)
+    urls = {r.id: r.url for r in regions}
+    with _store_lock():
+        log = os.path.join(store_dir(), "moved_" + datetime.datetime.now()
+                           .strftime("%Y%m%d_%H%M%S") + ".csv")
+        with open(log, "w", encoding="utf-8", newline="") as csv:
+            csv.write("old,new,region\n")
+            for (old, new, rid) in moves:
+                checked = old + ".checked"
+                check_time = (datetime.datetime.fromtimestamp(
+                    os.path.getmtime(checked), datetime.timezone.utc)
+                    .strftime(TIME_FORMAT)
+                    if os.path.isfile(checked) else None)
+                os.replace(old, new)
+                csv.write(f"{old},{new},{rid}\n")
+                csv.flush()
+                _record(rid, url=urls[rid], size=os.path.getsize(new),
+                        moved_from=old, checked=check_time)
+                for side in (checked, old + ".lock"):
+                    try:
+                        os.remove(side)
+                    except FileNotFoundError:
+                        pass
+                    except OSError as e:
+                        UI.vprint(1, f"    Could not remove {side} ({e}).")
+    _remove_empty_dirs(data_dir())
+    UI.lvprint(1, f"    Geofabrik: moved {len(moves)} extract(s) into "
+               f"{store_dir()} (named by region id); list in "
+               f"{os.path.basename(log)}.")
+    if left:
+        UI.lvprint(1, f"    Geofabrik: {len(left)} extract(s) of the old "
+                   "layout match no region of the index (or a region the "
+                   "store has) and stay where they are: "
+                   + ", ".join(os.path.relpath(f, data_dir()) for f in left))
+    return (moves, left)
+
+
+def _remove_empty_dirs(top):
+    """Remove the empty folders below top (the old layout's, after the
+    move); never top or the store."""
+    keep = {os.path.normcase(top), os.path.normcase(store_dir())}
+    for (root, dirs, files) in os.walk(top, topdown=False):
+        if os.path.normcase(root) in keep:
+            continue
+        try:
+            os.rmdir(root)  # only an empty folder
+        except OSError:
+            pass
+
+
+def undo_migration(csv_path):
+    """Move the files listed in a moved_<time>.csv back to the old layout
+    (where the old place is free). Returns the number moved back."""
+    n = 0
+    with _store_lock():
+        with open(csv_path, encoding="utf-8") as f:
+            next(f)
+            for line in f:
+                (old, new, rid) = line.rstrip("\n").rsplit(",", 2)
+                if os.path.isfile(new) and not os.path.exists(old):
+                    os.makedirs(os.path.dirname(old), exist_ok=True)
+                    os.replace(new, old)
+                    n += 1
+    return n
 
 
 class _FileLock:
@@ -751,7 +1047,7 @@ def _sea_answers(layers):
 
 
 def plan_tiles(wanted, regions):
-    """({tile: frozenset(urls)}, {tile: reason left to Overpass}, [sea
+    """({tile: frozenset(region ids)}, {tile: reason left to Overpass}, [sea
     tiles]) for wanted {tile: layers}."""
     (plan, left, sea) = ({}, {}, [])
     for (lat, lon) in wanted:
@@ -779,7 +1075,7 @@ def plan_tiles(wanted, regions):
             UI.vprint(1, f"    Geofabrik: {FNAMES.short_latlon(lat, lon)} "
                       "has land only in " + ", ".join(r.id for r in extra)
                       + ", read as well.")
-        plan[(lat, lon)] = frozenset(r.url for r in chosen + extra)
+        plan[(lat, lon)] = frozenset(r.id for r in chosen + extra)
     return (plan, left, sea)
 
 
@@ -801,6 +1097,8 @@ def prepare_tiles(wanted, write=True):
     global _index_refresh_error
     _index_refresh_error = None
     regions = load_index()
+    migrate_store(regions)
+    by_id = {r.id: r for r in regions}
     (plan, left, sea) = plan_tiles(wanted, regions)
     done = {}
 
@@ -826,7 +1124,7 @@ def prepare_tiles(wanted, write=True):
         (paths, missing) = ({}, {})
         for u in sorted(urls):
             try:
-                paths[u] = ensure_file(u)
+                paths[u] = ensure_extract(by_id[u])
             except (GeofabrikError, OSError) as e:
                 missing[u] = e
         for tile in [t for t in tiles if plan[t] & missing.keys()]:
@@ -837,7 +1135,7 @@ def prepare_tiles(wanted, write=True):
             continue
         needed = sorted(set().union(*(plan[t] for t in tiles)))
         files = [paths[u] for u in needed]
-        names = ", ".join(u.rsplit("/", 1)[-1] for u in needed)
+        names = ", ".join(needed)
         UI.vprint(1, f"    Reading {names} for {len(tiles)} tile(s)")
         start = time.time()
 
