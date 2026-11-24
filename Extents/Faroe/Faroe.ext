@@ -1,0 +1,6 @@
+# Coverage of the FO orthophoto (Providers/Faroe/FO.lay), taken from the
+# transparency of its own WMS answer (EPSG:4326 GetMap, 15 m pixels,
+# 2026-11-24): 255 from 60 m inside the covered area, a linear ramp from
+# 15 m to 60 m inside its edge, 0 outside, so a combined provider never
+# blends in the white of the uncovered parts.
+mask_bounds=-7.75,61.35,-6.2,62.42
