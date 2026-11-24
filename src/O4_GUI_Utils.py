@@ -78,6 +78,22 @@ def make_dir_link(target: str, link: str) -> bool:
 
 
 ################################################################################
+def earth_preview_error(path, e):
+    """The log line for an exception while drawing a map preview square, or
+    None to stay quiet. Only a missing file means the installation lacks it;
+    the message used to say so for any exception (#126). A tk.TclError comes
+    from the window or an older redraw thread's image going away while this
+    thread draws (draw_canvas runs in a thread per map move); the other
+    three squares already ignore it."""
+    if isinstance(e, tk.TclError):
+        return None
+    if isinstance(e, FileNotFoundError):
+        return (f"Could not find Earth preview file {path}, please update "
+                "your installation from a fresh copy.")
+    return (f"ERROR: could not draw Earth preview file {path}: "
+            f"{type(e).__name__}: {e}")
+
+
 class Ortho4XP_GUI(tk.Tk):
 
     # Constants
@@ -2338,13 +2354,10 @@ class Ortho4XP_Earth_Preview(tk.Toplevel):
             )
             self.canvas.tag_lower(self.canv_imgNW)
         except Exception as e:
-            UI.lvprint(
-                0,
-                "Could not find Earth preview file",
-                filepreviewNW,
-                ", please update your installation from a fresh copy.",
-            )
-            _LOGGER.exception(e)
+            message = earth_preview_error(filepreviewNW, e)
+            if message:
+                UI.lvprint(0, message)
+                _LOGGER.exception(e)
             return
         try:
             if nx0 < 2 ** (self.earthzl - 3) - 1:
