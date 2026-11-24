@@ -1,0 +1,6 @@
+# Coverage of Klimadatastyrelsen's spring orthophoto (Providers/Denmark/DF.lay,
+# layer orto_foraar of orto_foraar_DAF), taken from the transparency of its
+# own WMS answer (EPSG:4326, 40 m pixels, 2026-11-24): Danish land and a strip
+# of shore. 255 from ~160 m inside the covered area, a ramp from ~80 m, 0
+# outside, so a combined provider never blends in the white of the rest.
+mask_bounds=7.9,54.4,15.3,57.9

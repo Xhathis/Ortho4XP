@@ -1,0 +1,17 @@
+# Klimadatastyrelsen's spring orthophoto of Denmark (GeoDanmark, 12.5 cm,
+# flown every spring), through Dataforsyningen. Needs a personal token: make
+# a free account on dataforsyningen.dk, create a token, copy this file to
+# DF.lay in this folder and put the token in url_prefix. DF.lay is in
+# .gitignore: a token never goes into git.
+# Transparent beyond Danish land and its shore (white in a JPEG answer):
+# use the combined provider DFA (DF over Extents/Denmark_DF, GO2 under it).
+request_type=wms
+wms_size=1024
+epsg_code=3857
+wms_version=1.1.1
+url_prefix=https://api.dataforsyningen.dk/orto_foraar_DAF?token=YOUR_TOKEN&
+layers=orto_foraar
+max_threads=4
+extent=Denmark_DF
+imagery_dir=code
+in_GUI=False

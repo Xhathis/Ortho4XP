@@ -1,0 +1,8 @@
+# Denmark: Klimadatastyrelsen's spring orthophoto (DF, needs DF.lay with a
+# personal token, see Providers/Denmark/DF.lay.example) wherever it has data
+# (Extents/Denmark_DF), GO2 beyond it (Germany, Sweden, the open sea).
+# Compared with GO2 on 10 sites (2026-11-24): newer (2026), one consistent
+# national flight, sharper at Skagen; spring look (leafless woods, cooler).
+
+DF     Denmark_DF    none    high
+GO2    global        none    high

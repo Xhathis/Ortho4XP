@@ -25,3 +25,6 @@ venv*/
 /Ortho4XP.cfg
 *.lnk
 yOrtho4XP_Airports
+
+# A provider file holding a personal token (see DF.lay.example).
+Providers/Denmark/DF.lay
