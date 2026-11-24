@@ -1141,9 +1141,11 @@ Test results:
   pyosmium-up-to-date with --server and --ignore-osmosis-headers fetched
   the changes in 3 s and then did not exit in 400 s: not used. Scratch
   folder G:\Ortho4XP_tests\geofabrik_store_scratch. `test` @ 76f67c4: 753
-  unit tests, pyflakes 0. NOT on dev: the first preparation with #129
-  moves the user's 164 extracts into the store, and older code would then
-  download all 38 GB again; once on dev, do not go back to older code.
+  unit tests, pyflakes 0. The first preparation with #129 moves the
+  user's 164 extracts into the store, and older code would then download
+  all 38 GB again: do not run code older than #129 from G:\Ortho4XP.
+  -> `dev` fast-forwarded to test (#127-#129, with these notes) on
+  2026-11-24 (not pushed).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2461,11 +2463,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     9287de3 since 2026-11-21 (pushed 22fb48e), the user's pack rewritten;
     Nuuk's buildings back in X-Plane.
 40. ~~#125, #126~~ — on `dev` since 2026-11-24, pushed.
-41. #127, #128 — Geofabrik URLs; on `test` @ 9664414, to `dev` with the
-    user's OK.
-42. #129 — extract store by region id; on `test` @ 76f67c4, to `dev` with
-    the user's OK (with #127/#128). Its first preparation moves the 164
-    extracts; then clean up G:\Ortho4XP_tests\geofabrik_store_scratch.
+41. ~~#127, #128~~ — Geofabrik URLs; on `dev` since 2026-11-24.
+42. #129 — extract store by region id; on `dev` since 2026-11-24 (not
+    pushed). Its first preparation moves the 164 extracts (check the
+    moved_*.csv and the log then).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
