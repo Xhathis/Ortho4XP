@@ -21,7 +21,6 @@ Guidance for Claude Code working in this repository.
 - `src/O4_*.py` — all live code. Largest modules: `O4_Imagery_Utils` (download
   and imagery), `O4_GUI_Utils` (Tkinter GUI), `O4_Config_Utils`,
   `O4_Airport_Utils`, `O4_DSF_Utils`, `O4_Vector_Utils`, `O4_Mask_Utils`.
-- `src/Unused/` — dead code, not imported. Ignore unless asked.
 - `Utils/win/` — bundled Windows tools: `Triangle4XP.exe`, `DSFTool.exe`,
   `nvcompress`, `7z.exe`, `moulinette.exe`, plus the wheels above.
 - `Providers/`, `Filters/`, `Patches/` — data/config, not code.
@@ -1185,6 +1184,40 @@ Test results:
   request now tries DE twice and stops; the GUI's server choice lists
   DE only. `test` @ 114085a: 769 unit tests, pyflakes 0 (the tests and
   sims use their own mock server lists). -> `dev` on 2026-11-24, pushed.
+- Fifth review 2026-11-24 (user remote; the code of #104-#132, the repo
+  for dead files, and the Overpass request): #133
+  `fix/overpass-out-plain` @ 1dd075d, #134 `fix/flatten-ramp-edges` @
+  7491702, #135 `fix/extract-answer-leftover` @ 5100866, #136
+  `fix/overlay-source-check` @ 3692e9d, #137 `fix/remove-unused` @
+  1f73d0c (from dev 6a1669a): 8 new unit tests, pyflakes 0. Overpass
+  dependence of the user's tiles (read only, plan_tiles against the
+  index and the store): only -08+072 (Diego Garcia) still needs it.
+  `test` @ f66f37f: 777 unit tests, regression PASS (DSF, 17/17 masks,
+  app log identical: the frozen inputs have no apt.dat, so #134 does
+  not act there), sims_in_ws all 15/15.
+- Imagery audit 2026-11-24 (user's request: Denmark and the Faroes
+  overall, Greenland at every airport, airstrip and helipad; scratch
+  comparisons 4 x 4 tiles at ZL16 and ZL18 of GO2, Arc, BI and the
+  national sources). Denmark (26 tiles, GO2 ZL16, ZL18 airports): GO2 is
+  the sharpest and nearest to true ortho at 9 of 10 sites (Kastrup,
+  Copenhagen, Billund, Aalborg, Aarhus, Silkeborg, Rønne, Odense,
+  Esbjerg; Skagen hazy); Arc leans and smears in towns, BI is close
+  but softer. The better source is Klimadatastyrelsen's own orthophoto
+  (Dataforsyningen, orto_foraar, 12.5 cm, yearly): it needs a personal
+  token (free account, the user's to create); Providers/Denmark/DK.lay
+  still names the closed kortforsyningen.kms.dk; with the user's token
+  (orto_foraar of orto_foraar_DAF, 2026 spring flight) it is newer and
+  consistent, much better at Skagen, but leafless and cooler than GO2's
+  summer look: the user's choice (a token never goes into git). Faroes (3 tiles, GO2
+  ZL16, Vágar ZL18): #138. Greenland (106 OSM / X-Plane airports,
+  airstrips and helipads): Arc is TerraColor 15 m there; GO2 is best at
+  most sites, BI at 17 (GO2 spring snow around Disko Bay and Maniitsoq,
+  older than a new helipad, or coarse); only the 24 sites at OSM
+  aerodromes with runways have ZL18, the other 82 are ZL15. Proposal: 81
+  ZL18 zones in 43 tile configs (G:\Ortho4XP_tests\imagery_audit_2026-11-24:
+  report, gl_zones.py dry run / --apply with backups, sheets), not applied;
+  those tiles then need steps 1-3 (their .apt files are gone at
+  cleaning_level 3, so step 3 alone would drop the airport covers).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2356,6 +2389,45 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     until the next good update. Its last DSF now stays; a stale DSF that
     cannot be removed is a failure in the WARNING (no stamp) instead of an
     OSError that skipped apt.dat.
+133. **DONE** (`1dd075d`): Overpass requests end in plain `out;` instead of
+    `out meta;`: the reader never kept the meta attributes (ids renumbered,
+    tags, refs and coordinates by name), so the cache bytes are the same
+    and the answer is smaller (DE is the only server and slow). osm_base
+    stays in the header (#83's old-data NOTE).
+134. **FIXED** (`7491702`, CHANGES OUTPUT near airports X-Plane flattens,
+    review of #119): the ramp took only the flatten airports whose
+    boundary reaches into the tile, clipped to it, so a neighbour within
+    100 m got no ramp and a boundary across a tile edge was ramped in
+    each tile against its own part (different elevations on the shared
+    edge). XPAPT.ramp_areas takes every flatten airport within the ramp
+    width of the DEM bounds, unclipped, and measures at the area's own
+    latitude. A user <ICAO>.patch.osm skips the ramp only when it parses
+    (Vector_Map._usable_patch), like include_patches.
+135. **FIXED** (`5100866`, review of #104): needed_layers counted any
+    extract answer on disk as prepared, also a cut one and one older than
+    the cache; step 1 rejected it but left it, so the stale cache was
+    never prepared again and every build repeated the WARNING. Step 1 now
+    removes an answer it rejects or that is older than the cache, and
+    needed_layers counts only an answer not older than the cache.
+136. **FIXED** (`3692e9d`, review of #105): build_overlay took a missing
+    tile DSF for open ocean as soon as any source had Earth nav data, so
+    a misspelt custom_overlay_src next to a valid _alternate passed every
+    tile the alternate lacks without overlay. Any set source without
+    Earth nav data is now an error naming it.
+137. **DONE** (`1f73d0c`): src/Unused removed (48 files of dead upstream
+    code; nothing imported or built them; they stay in git history).
+138. **DONE** (`c7c7455`, data only): Providers/Faroe/FO.lay named
+    kortal.fo's TMS, which now redirects to a web page. FO is now
+    Umhvørvisstovan's public ArcGIS WMS (myndakort_fotm, layer 1,
+    EPSG:3857, no key). It is transparent beyond the islands and their
+    shore (white in a JPEG), so Extents/Faroe holds its coverage from the
+    alpha of its own answer (15 m pixels, full from 60 m inside the edge,
+    ramp from 15 m) and the combined provider FOA puts FO over it, Arc
+    under it. Compared on 6 sites: FO is the sharpest and true-ortho in
+    towns and at Vágar (GO2 has a Google watermark at ZL18), but at ZL16
+    it is a mosaic of flights with strong colour differences (saturated
+    yellow-green village blocks on a brown base). No tile uses FOA (the
+    user's choice).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2535,6 +2607,9 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     when their step 1 runs again (no rebuild needed for it). Not run:
     gui_smoke (user away; no GUI code changed).
 44. ~~FR Overpass server dropped~~ — on `dev` since 2026-11-24 (pushed).
+45. #133-#137 — fifth review 2026-11-24; on `test` @ f66f37f, to `dev`
+    with the user's OK. #138 (Faroe provider) on its branch; the imagery
+    audit's zones and rebuilds need the user's OK.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
