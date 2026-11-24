@@ -793,7 +793,8 @@ def test_answer_older_than_the_cache_is_not_used(fake_files, gf):
     assert OSM.OSM_queries_to_OSM_layer(
         VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
     assert layer.dicosmw == {}
-    assert os.path.isfile(answer)
+    # Never used, and left in place it would block the next refresh.
+    assert not os.path.exists(answer)
     assert not any("refreshed" in line for line in gf)
     assert os.path.getmtime(cache) < time.time() - DAY / 2
 
@@ -1354,3 +1355,43 @@ def test_preparation_clears_the_index_error(gf, monkeypatch):
     monkeypatch.setattr(GEOFABRIK, "load_index", lambda: [])
     GEOFABRIK.prepare_tiles({(55, 12): {"water": "x"}}, write=False)
     assert GEOFABRIK._index_refresh_error is None
+
+
+# --- review 2026-11-24: leftover answers must not block a refresh -------------
+def test_rejected_answer_is_removed_and_prepared_again(gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    for layer in ("coastline", "airports", "big_roads"):
+        _old_cache(55, 12, layer, 1)
+    cache = _old_cache(55, 12, "water", 40)
+    path = EXTRACT.answer_path(55, 12, "water")
+    with open(path, "wb") as f:  # cut: not even bz2
+        f.write(b"BZh9 cut")
+    # A present answer counts as prepared...
+    assert GEOFABRIK.needed_layers(55, 12, 1) == {}
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+    assert any("not used" in line and "keeping the cached layer" in line
+               for line in gf)
+    # ...but step 1 rejected it: gone, so the next preparation asks again.
+    assert not os.path.exists(path)
+    assert set(GEOFABRIK.needed_layers(55, 12, 1)) == {"water"}
+    assert os.path.isfile(cache)
+
+
+def test_answer_older_than_the_cache_does_not_block(gf, monkeypatch):
+    monkeypatch.setattr(GEOFABRIK, "osm_cache_max_age", 30.0)
+    for layer in ("coastline", "airports", "big_roads"):
+        _old_cache(55, 12, layer, 1)
+    statements = EXTRACT.layer_statements(1)["water"]
+    path = EXTRACT.answer_path(55, 12, "water")
+    EXTRACT.write_answer(path, EXTRACT.answer_xml(statements, "x", "2026",
+                                                  {}, {}, {}))
+    t = time.time() - 50 * DAY
+    os.utime(path, (t, t))
+    _old_cache(55, 12, "water", 40)
+    assert set(GEOFABRIK.needed_layers(55, 12, 1)) == {"water"}
+    layer = OSM.OSM_layer()
+    assert OSM.OSM_queries_to_OSM_layer(
+        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+    assert not os.path.exists(path)

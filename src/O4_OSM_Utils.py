@@ -742,6 +742,9 @@ def _refresh_from_extract(queries, osm_layer, lat, lon, input_tags,
     try:
         cache_time = os.path.getmtime(cached_data_filename)
         if os.path.getmtime(path) < cache_time:
+            # Older than the cache: never used; it would only count as
+            # prepared and stop the next refresh (needed_layers).
+            _remove_quietly(path)
             return False
     except OSError:
         return False
@@ -771,6 +774,9 @@ def _layer_from_extract(queries, osm_layer, lat, lon, input_tags, target_tags,
         if source:
             UI.lvprint(1, "   WARNING: local OSM extract answer", path,
                        "not used:", source + f"; {fallback}.")
+            # Left in place it would count as prepared and block the next
+            # preparation for good (needed_layers).
+            _remove_quietly(path)
         return False
     UI.vprint(1, "    * Reading OSM data for", cached_suffix,
               "from the local extract", f"({source})")
@@ -779,6 +785,7 @@ def _layer_from_extract(queries, osm_layer, lat, lon, input_tags, target_tags,
                    f"could not be read; {fallback}.")
         # Drop what was read of it: the download goes into the same layer.
         osm_layer.__init__()
+        _remove_quietly(path)
         return False
     _note_old_data(cached_suffix, lat, lon,
                    [("local extract", osm_base_of(content))])
