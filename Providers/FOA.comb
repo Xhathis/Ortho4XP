@@ -1,0 +1,8 @@
+# Faroe Islands: the FO orthophoto of Umhvørvisstovan wherever it has data
+# (Extents/Faroe), Esri World Imagery (Arc) beyond it, i.e. on the open sea.
+# FO is sharper than GO2, Arc and BI on the islands (compared at ZL16 and
+# ZL18 at Vágar, Tórshavn, Tvøroyri, Eiði, Gásadalur and Slættaratindur,
+# 2026-11-24) and has no watermark.
+
+FO     Faroe     none    high
+Arc    global    none    high
