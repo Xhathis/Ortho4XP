@@ -64,7 +64,9 @@ Guidance for Claude Code working in this repository.
   never on origin) on 2026-11-24, when dev was pushed with them.
   fix/geofabrik-url-variants, fix/geofabrik-index-refresh and
   fix/geofabrik-store (#127-#129, never on origin) on 2026-11-24, when
-  dev 31671af was pushed.
+  dev 31671af was pushed. fix/airstrip-lines, fix/geofabrik-store-
+  hardening and fix/airport-pack-sweep (#130-#132, never on origin) on
+  2026-11-24, when dev was pushed with them.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -1172,6 +1174,8 @@ Test results:
   17/17 masks, app log identical), sims_in_ws all 15/15,
   sim_geofabrik_step1 +28-018 --geofabrik-dir (a scratch store with a
   copy of the user's canary-islands) 0 failures, all 5 layers from it.
+  -> `dev` fast-forwarded to test (with these notes) on 2026-11-24 and
+  pushed; the three fix branches removed.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2517,8 +2521,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 41. ~~#127, #128~~ — Geofabrik URLs; on `dev` since 2026-11-24.
 42. #129 — extract store by region id; on `dev` since 2026-11-24
     (pushed); the 164 extracts moved into the store the same day.
-43. #130-#132 — unattended pass 2026-11-24; on `test` @ c801b49, to `dev`
-    with the user's OK. #130 changes the 27 tiles with airstrip lines
+43. #130-#132 — unattended pass 2026-11-24; on `dev` since 2026-11-24
+    (pushed). #130 changes the 27 tiles with airstrip lines
     when their step 1 runs again (no rebuild needed for it). Not run:
     gui_smoke (user away; no GUI code changed).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
