@@ -74,7 +74,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 753
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 769
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -1155,6 +1155,23 @@ Test results:
   the old .checked time); the old folders and their .checked/.lock files
   are gone (an orphan papua .lock from the 404 of 11-21 removed by hand).
   A dry run of 5 tiles plans only files in the store.
+- Unattended pass 2026-11-24 (user away, no GUI): log scan (the aerodrome
+  WARNING of every batch: #130), a profile of step 2.5 on +55+012 (15 s,
+  numpy correlate in blur_mask; 45 % of the mask rows repeat, but no
+  speedup keeps the mask bytes: left), a review of the code since 11-21
+  (#123-#129: #131, #132). #130 `fix/airstrip-lines` @ 8de0398, #131
+  `fix/geofabrik-store-hardening` @ 875fac0, #132 `fix/airport-pack-sweep`
+  @ fb9f810 (from dev c9abc9c): 16 new unit tests (6 + 8 + 2; 14 fail
+  on dev; the airstrip-area and old-form CSV ones pass there),
+  pyflakes 0. #130: airports of the
+  cached layers, dev vs fix: -36+174 92 -> 94 airports and 4 -> 0
+  WARNINGs, +57-066 0 -> 1, +55+012 unchanged; 27 of the user's 1,474
+  tiles hold 81 airstrip lines (-39+175 22, -39+174 8, ...). #131 against
+  the user's store (read only): nothing left to move, no orphan side file.
+  `test` @ c801b49: 769 unit tests, pyflakes 0, regression PASS (DSF,
+  17/17 masks, app log identical), sims_in_ws all 15/15,
+  sim_geofabrik_step1 +28-018 --geofabrik-dir (a scratch store with a
+  copy of the user's canary-islands) 0 failures, all 5 layers from it.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2301,6 +2318,31 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     file other than the index's (old form europe/norway-updates) mean a
     new download; if it fails the old file is used. pyosmium output goes
     to a temp file, each run is killed after UPDATE_TIMEOUT 2 h.
+130. **FIXED** (`8de0398`, CHANGES OUTPUT where OSM has such lines):
+    discover_airport_names took every way with an "airstrip" value for an
+    airport area; LINZ maps New Zealand's bush strips as two-node
+    aeroway=airstrip lines with a width, so Polygon() raised and the strip
+    was dropped with "A presumably erroneous tag marked aerodrome" (~60
+    WARNINGs per batch), never levelled. An open airstrip way is now a
+    runway (APT.is_airstrip_line): it joins the aerodrome within 3.5 km or
+    makes an airport of its own, like a runway line; closed ones stay
+    airport areas. Built tiles change only when step 1 runs again.
+131. **FIXED** (`875fac0`, review of #129): migrate_store planned its moves
+    before the store lock and called os.replace without a try, so one
+    locked file (or one another process had moved) raised OSError out of
+    prepare_tiles: every tile to Overpass. Now planned under the lock; a
+    file that cannot be moved stays (WARNING, next time again). Also: side
+    files left without an extract go; only folders the move emptied are
+    removed; moved_*.csv through the csv module (a comma in a path broke
+    the undo; the first form still reads); an undo drops the manifest
+    records; _update after UPDATE_RUNS runs that all exited 1 ("more to
+    come") is a failed update, no longer recorded as up to date.
+132. **FIXED** (`fb9f810`, review of #124): write_object_dsfs removed every
+    pack DSF it had not written this time, so a tile whose rewrite failed
+    (X-Plane holding the file: PermissionError) lost its airports' 3D
+    until the next good update. Its last DSF now stays; a stale DSF that
+    cannot be removed is a failure in the WARNING (no stamp) instead of an
+    OSError that skipped apt.dat.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2475,6 +2517,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 41. ~~#127, #128~~ — Geofabrik URLs; on `dev` since 2026-11-24.
 42. #129 — extract store by region id; on `dev` since 2026-11-24
     (pushed); the 164 extracts moved into the store the same day.
+43. #130-#132 — unattended pass 2026-11-24; on `test` @ c801b49, to `dev`
+    with the user's OK. #130 changes the 27 tiles with airstrip lines
+    when their step 1 runs again (no rebuild needed for it). Not run:
+    gui_smoke (user away; no GUI code changed).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
