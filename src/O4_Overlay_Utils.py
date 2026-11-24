@@ -151,11 +151,18 @@ def _extract_overlay(lat, lon):
     existing = [name for name in candidates if os.path.isfile(name)]
     if not existing:
         # A source without an Earth nav data folder is a wrong setting:
-        # that stays an error. Inside a real one a missing tile is not.
-        if not any(os.path.isdir(os.path.join(src, "Earth nav data"))
-                   for src in (custom_overlay_src,
-                               custom_overlay_src_alternate) if src):
-            return "file " + " or ".join(candidates) + " absent."
+        # that stays an error, also when the other source is a real one
+        # (a valid alternate used to hide a misspelt main source, and
+        # every tile it lacks passed as "open ocean"). Inside real ones a
+        # missing tile is not.
+        wrong = [src for src in (custom_overlay_src,
+                                 custom_overlay_src_alternate)
+                 if src and not os.path.isdir(
+                     os.path.join(src, "Earth nav data"))]
+        if wrong:
+            return ("file " + " or ".join(candidates) + " absent ("
+                    + " and ".join(wrong) + " has no Earth nav data folder:"
+                    " check custom_overlay_src / _alternate).")
         raise NoSourceDSF(candidates)
     file_to_sniff = existing[0]
     # Leftovers of an interrupted run must not pass for this run's output.

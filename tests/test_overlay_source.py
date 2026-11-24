@@ -50,3 +50,16 @@ def test_unset_source_stays_an_error(ovl, monkeypatch):
     monkeypatch.setattr(OVL, "custom_overlay_src", "")
     assert OVL.build_overlay(37, -25) == 0
     assert any("custom_overlay_src is not set" in line for line in ovl)
+
+
+def test_misset_main_source_is_not_hidden_by_the_alternate(ovl, tmp_path,
+                                                          monkeypatch):
+    good = tmp_path / "Demo Areas"
+    os.makedirs(good / "Earth nav data" / "+40-130")
+    monkeypatch.setattr(OVL, "custom_overlay_src",
+                        str(tmp_path / "Global Scenry"))  # misspelt
+    monkeypatch.setattr(OVL, "custom_overlay_src_alternate", str(good))
+    assert OVL.build_overlay(37, -25) == 0
+    assert any("not extracted" in line and "Global Scenry has no Earth nav"
+               in line for line in ovl)
+    assert not any("no overlay for tile" in line for line in ovl)
