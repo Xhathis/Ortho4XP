@@ -546,6 +546,7 @@ def write_object_dsfs(apt_dat, airports, icaos, out_dir):
         if apt["icao"] in want:
             tiles |= candidate_tiles(apt)
     written = set()
+    kept = set()
     failures = []
     for (lat, lon) in sorted(tiles):
         src = ga_dsf_path(apt_dat, lat, lon)
@@ -558,13 +559,19 @@ def write_object_dsfs(apt_dat, airports, icaos, out_dir):
                 written.add(os.path.normcase(target))
         except (OSError, ValueError, struct.error, IndexError) as e:
             failures.append(f"{FNAMES.short_latlon(lat, lon)}: {e}")
+            # Its DSF of the last time stays: still right for the airports
+            # it had. (A file X-Plane holds open cannot be replaced; it was
+            # then deleted below, and the airport's 3D with it.)
+            kept.add(os.path.normcase(target))
     # DSFs of tiles no longer in the pack (an airport left it).
     for root, _dirs, files in os.walk(os.path.join(out_dir, "Earth nav data")):
         for f in files:
-            path = os.path.join(root, f)
-            if f.lower().endswith(".dsf") \
-                    and os.path.normcase(path) not in written:
-                os.remove(path)
+            path = os.path.normcase(os.path.join(root, f))
+            if f.lower().endswith(".dsf") and path not in written | kept:
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    failures.append(f"{f} not removed ({e})")
     return (len(written), failures)
 
 
