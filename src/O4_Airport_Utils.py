@@ -16,13 +16,32 @@ chunk_min_size = (
 )
 
 ################################################################################
+def is_airstrip_line(airport_layer, wayid):
+    """An aeroway=airstrip way that is not closed: the strip's centre line
+    (LINZ draws New Zealand's bush strips as two-node lines with a width),
+    so a runway, not an airport area. As an area it cannot make a polygon
+    (two nodes) or only a sliver, and the strip used to be dropped with an
+    "erroneous tag marked aerodrome" WARNING."""
+    tags = airport_layer.dicosmtags["w"].get(wayid, {})
+    nodes = airport_layer.dicosmw.get(wayid)
+    return (
+        tags.get("aeroway") == "airstrip"
+        and bool(nodes)
+        and len(nodes) >= 2
+        and nodes[0] != nodes[-1]
+    )
+
+
 def discover_airport_names(airport_layer, dico_airports):
     for osmtype in ("r", "w", "n"):
         for osmid in (
             x
             for x in airport_layer.dicosmtags[osmtype]
-            if "aerodrome" in airport_layer.dicosmtags[osmtype][x].values()
-            or "airstrip" in airport_layer.dicosmtags[osmtype][x].values()
+            if (
+                "aerodrome" in airport_layer.dicosmtags[osmtype][x].values()
+                or "airstrip" in airport_layer.dicosmtags[osmtype][x].values()
+            )
+            and not (osmtype == "w" and is_airstrip_line(airport_layer, x))
         ):
             key = None
             if "icao" in airport_layer.dicosmtags[osmtype][osmid]:
@@ -182,7 +201,13 @@ def attach_surfaces_to_airports(airport_layer, dico_airports):
             for x in airport_layer.dicosmw
             if x in airport_layer.dicosmtags["w"]
             and "aeroway" in airport_layer.dicosmtags["w"][x]
-            and airport_layer.dicosmtags["w"][x]["aeroway"] == surface_type
+            and (
+                airport_layer.dicosmtags["w"][x]["aeroway"] == surface_type
+                or (
+                    surface_type == "runway"
+                    and is_airstrip_line(airport_layer, x)
+                )
+            )
         ):
             linestring = geometry.LineString(
                 numpy.array(
