@@ -37,6 +37,7 @@ the cache (the cache stays in use when no answer comes). Without it,
 prepare_osm_extracts.py --check (compare_with_cache) shows what changed.
 """
 import bz2
+import csv
 import datetime
 import hashlib
 import json
@@ -601,7 +602,11 @@ def _update(path):
             os.replace(tmp, path)
         if proc.returncode == 0:
             return True
-    return True
+    # Every run applied changes and said more are to come: closer, but not
+    # up to date (counted as a failed update; a new download follows).
+    UI.lvprint(1, f"   WARNING: {path} still not up to date after "
+               f"{UPDATE_RUNS} update runs.")
+    return False
 
 
 def _remove_leftover_temps(path):
@@ -875,19 +880,8 @@ def _old_layout_files():
     return out
 
 
-def migrate_store(regions, dry_run=False):
-    """Move the extracts of the old layout (Geofabrik's URL paths, see
-    local_path) into the store, named by region id: a rename on the same
-    drive, nothing downloaded or deleted. Their .lock and .checked side
-    files go (the store has one lock, the manifest keeps the check time).
-    A file no region of the index matches, or whose region the store has
-    already, stays where it is. The moves are listed in
-    extracts/moved_<time>.csv (undo_migration).
-
-    Returns ([(old, new, region id)], [old files left])."""
-    old_files = _old_layout_files()
-    if not old_files:
-        return ([], [])
+def _plan_moves(regions, old_files):
+    """([(old, new, region id)], [old files left]) of a migration."""
     by_old = {}
     for r in regions:
         for u in url_variants(r.url):
@@ -900,70 +894,151 @@ def migrate_store(regions, dry_run=False):
             left.append(f)
             continue
         moves.append((f, extract_path(r.id), r.id))
-    if dry_run or not moves:
-        return (moves, left)
-    urls = {r.id: r.url for r in regions}
-    with _store_lock():
-        log = os.path.join(store_dir(), "moved_" + datetime.datetime.now()
-                           .strftime("%Y%m%d_%H%M%S") + ".csv")
-        with open(log, "w", encoding="utf-8", newline="") as csv:
-            csv.write("old,new,region\n")
-            for (old, new, rid) in moves:
-                checked = old + ".checked"
-                check_time = (datetime.datetime.fromtimestamp(
-                    os.path.getmtime(checked), datetime.timezone.utc)
-                    .strftime(TIME_FORMAT)
-                    if os.path.isfile(checked) else None)
-                os.replace(old, new)
-                csv.write(f"{old},{new},{rid}\n")
-                csv.flush()
-                _record(rid, url=urls[rid], size=os.path.getsize(new),
-                        moved_from=old, checked=check_time)
-                for side in (checked, old + ".lock"):
-                    try:
-                        os.remove(side)
-                    except FileNotFoundError:
-                        pass
-                    except OSError as e:
-                        UI.vprint(1, f"    Could not remove {side} ({e}).")
-    _remove_empty_dirs(data_dir())
-    UI.lvprint(1, f"    Geofabrik: moved {len(moves)} extract(s) into "
-               f"{store_dir()} (named by region id); list in "
-               f"{os.path.basename(log)}.")
-    if left:
-        UI.lvprint(1, f"    Geofabrik: {len(left)} extract(s) of the old "
-                   "layout match no region of the index (or a region the "
-                   "store has) and stay where they are: "
-                   + ", ".join(os.path.relpath(f, data_dir()) for f in left))
     return (moves, left)
 
 
-def _remove_empty_dirs(top):
-    """Remove the empty folders below top (the old layout's, after the
-    move); never top or the store."""
-    keep = {os.path.normcase(top), os.path.normcase(store_dir())}
-    for (root, dirs, files) in os.walk(top, topdown=False):
-        if os.path.normcase(root) in keep:
+SIDE_SUFFIXES = (".lock", ".checked")
+
+
+def _orphan_side_files():
+    """.osm.pbf.lock / .osm.pbf.checked files of the old layout without
+    their extract (a download that failed, 2026-11-21: papua's 404)."""
+    out = []
+    store = os.path.normcase(store_dir())
+    for (root, dirs, files) in os.walk(data_dir()):
+        if os.path.normcase(root) == store:
+            dirs[:] = []
             continue
-        try:
-            os.rmdir(root)  # only an empty folder
-        except OSError:
-            pass
+        names = set(files)
+        out += [os.path.join(root, f) for f in files
+                for suffix in SIDE_SUFFIXES
+                if f.endswith(".osm.pbf" + suffix)
+                and f[:-len(suffix)] not in names]
+    return out
+
+
+def migrate_store(regions, dry_run=False):
+    """Move the extracts of the old layout (Geofabrik's URL paths, see
+    local_path) into the store, named by region id: a rename on the same
+    drive, nothing downloaded or deleted. Their .lock and .checked side
+    files go (the store has one lock, the manifest keeps the check time),
+    also those left without an extract. A file no region of the index
+    matches, or whose region the store has already, stays where it is, as
+    does one that cannot be moved (logged; the preparation goes on: an
+    error here used to send every tile to Overpass). The moves are listed
+    in extracts/moved_<time>.csv (undo_migration).
+
+    Returns ([(old, new, region id)], [old files left])."""
+    old_files = _old_layout_files()
+    if not old_files and not _orphan_side_files():
+        return ([], [])
+    if dry_run:
+        return _plan_moves(regions, old_files)
+    urls = {r.id: r.url for r in regions}
+    (moved, failed) = ([], [])
+    folders = set()
+    with _store_lock():
+        # Planned under the lock: another process may have moved them.
+        (moves, left) = _plan_moves(regions, _old_layout_files())
+        log = None
+        if moves:
+            log = os.path.join(store_dir(), "moved_" + datetime.datetime.now()
+                               .strftime("%Y%m%d_%H%M%S") + ".csv")
+            with open(log, "w", encoding="utf-8", newline="") as f:
+                out = csv.writer(f)
+                out.writerow(("old", "new", "region"))
+                for (old, new, rid) in moves:
+                    checked = old + ".checked"
+                    try:
+                        check_time = (datetime.datetime.fromtimestamp(
+                            os.path.getmtime(checked), datetime.timezone.utc)
+                            .strftime(TIME_FORMAT)
+                            if os.path.isfile(checked) else None)
+                        os.replace(old, new)
+                    except OSError as e:
+                        failed.append(f"{os.path.relpath(old, data_dir())} "
+                                      f"({e})")
+                        left.append(old)
+                        continue
+                    out.writerow((old, new, rid))
+                    f.flush()
+                    moved.append((old, new, rid))
+                    folders.add(os.path.dirname(old))
+                    _record(rid, url=urls[rid], size=os.path.getsize(new),
+                            moved_from=old, checked=check_time)
+                    for side in (checked, old + ".lock"):
+                        _remove_side_file(side)
+        for side in _orphan_side_files():
+            _remove_side_file(side)
+            folders.add(os.path.dirname(side))
+    _remove_empty_dirs(folders)
+    if moved:
+        UI.lvprint(1, f"    Geofabrik: moved {len(moved)} extract(s) into "
+                   f"{store_dir()} (named by region id); list in "
+                   f"{os.path.basename(log)}.")
+    if failed:
+        UI.lvprint(1, "   WARNING: Geofabrik: could not move into the store: "
+                   + "; ".join(failed) + ". Tried again next time.")
+    unmatched = [f for f in left if f not in {m[0] for m in moves}]
+    if unmatched:
+        UI.lvprint(1, f"    Geofabrik: {len(unmatched)} extract(s) of the old "
+                   "layout match no region of the index (or a region the "
+                   "store has) and stay where they are: "
+                   + ", ".join(os.path.relpath(f, data_dir())
+                               for f in unmatched))
+    return (moved, left)
+
+
+def _remove_side_file(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        UI.vprint(1, f"    Could not remove {path} ({e}).")
+
+
+def _remove_empty_dirs(folders):
+    """Remove the given folders of the old layout and their parents while
+    they are empty, up to (not including) data_dir(); other folders the
+    user keeps there are left alone."""
+    top = os.path.normcase(os.path.abspath(data_dir()))
+    keep = {top, os.path.normcase(os.path.abspath(store_dir()))}
+    for folder in sorted(folders, key=len, reverse=True):
+        d = os.path.abspath(folder)
+        while os.path.normcase(d) not in keep \
+                and os.path.normcase(d).startswith(top + os.sep):
+            try:
+                os.rmdir(d)  # only an empty folder
+            except OSError:
+                break
+            d = os.path.dirname(d)
 
 
 def undo_migration(csv_path):
     """Move the files listed in a moved_<time>.csv back to the old layout
-    (where the old place is free). Returns the number moved back."""
+    (where the old place is free) and drop their manifest records. Returns
+    the number moved back."""
     n = 0
     with _store_lock():
-        with open(csv_path, encoding="utf-8") as f:
-            next(f)
-            for line in f:
-                (old, new, rid) = line.rstrip("\n").rsplit(",", 2)
-                if os.path.isfile(new) and not os.path.exists(old):
-                    os.makedirs(os.path.dirname(old), exist_ok=True)
-                    os.replace(new, old)
-                    n += 1
+        with open(csv_path, encoding="utf-8", newline="") as f:
+            rows = list(csv.reader(f))[1:]
+        for row in rows:
+            if len(row) != 3:
+                continue
+            (old, new, rid) = row
+            if os.path.isfile(new) and not os.path.exists(old):
+                os.makedirs(os.path.dirname(old), exist_ok=True)
+                os.replace(new, old)
+                _record(rid, **{k: None for k in read_manifest().get(rid, {})})
+                n += 1
+        data = read_manifest()
+        empty = [rid for (rid, rec) in data.items() if not rec]
+        if empty:
+            for rid in empty:
+                del data[rid]
+            FNAMES.write_text_atomic(
+                manifest_path(), json.dumps(data, indent=1, sort_keys=True))
     return n
 
 

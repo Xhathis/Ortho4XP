@@ -159,6 +159,104 @@ def test_undo_moves_back(gf):
         assert not os.path.exists(GEOFABRIK.extract_path(rid))
 
 
+def test_undo_drops_the_manifest_records(gf):
+    old_layout()
+    GEOFABRIK.migrate_store(REGIONS)
+    (log,) = [f for f in os.listdir(GEOFABRIK.store_dir())
+              if f.startswith("moved_")]
+    GEOFABRIK.undo_migration(os.path.join(GEOFABRIK.store_dir(), log))
+    assert GEOFABRIK.read_manifest() == {}
+
+
+def test_undo_with_a_comma_in_the_path(gf, tmp_path, monkeypatch):
+    # The CSV used to be split at the last two commas: a comma in the
+    # store's path broke it.
+    monkeypatch.setattr(GEOFABRIK, "geofabrik_dir", str(tmp_path / "a,b"))
+    (paths, _) = old_layout()
+    GEOFABRIK.migrate_store(REGIONS)
+    (log,) = [f for f in os.listdir(GEOFABRIK.store_dir())
+              if f.startswith("moved_")]
+    assert GEOFABRIK.undo_migration(
+        os.path.join(GEOFABRIK.store_dir(), log)) == 3
+    assert all(os.path.isfile(p) for p in paths.values())
+
+
+def test_undo_reads_the_first_csv_form(gf):
+    # moved_20261124_073819.csv (the user's move) was written without the
+    # csv module: plain "old,new,region" lines.
+    (paths, _) = old_layout()
+    GEOFABRIK.migrate_store(REGIONS)
+    log = os.path.join(GEOFABRIK.store_dir(), "moved_old_form.csv")
+    with open(log, "w", encoding="utf-8") as f:
+        f.write("old,new,region\n")
+        for (rid, old) in paths.items():
+            f.write(f"{old},{GEOFABRIK.extract_path(rid)},{rid}\n")
+    assert GEOFABRIK.undo_migration(log) == 3
+
+
+def test_a_file_that_cannot_be_moved_stays(gf, monkeypatch):
+    # One locked file used to end the whole preparation (every tile to
+    # Overpass); now it stays, is named, and the others move.
+    (paths, gone) = old_layout()
+    real = os.replace
+
+    def replace(a, b):
+        if a == paths["alsace"]:
+            raise PermissionError(13, "in use")
+        return real(a, b)
+
+    monkeypatch.setattr(GEOFABRIK.os, "replace", replace)
+    (moves, left) = GEOFABRIK.migrate_store(REGIONS)
+    assert sorted(m[2] for m in moves) == ["georgia", "us/georgia"]
+    assert os.path.isfile(paths["alsace"]) and paths["alsace"] in left
+    assert "alsace" not in GEOFABRIK.read_manifest()
+    assert any("could not move" in line and "in use" in line for line in gf)
+    monkeypatch.setattr(GEOFABRIK.os, "replace", real)
+    (moves, _) = GEOFABRIK.migrate_store(REGIONS)  # the next time
+    assert [m[2] for m in moves] == ["alsace"]
+
+
+def test_moved_by_another_process_meanwhile(gf, monkeypatch):
+    # The list is made again under the lock: what another process moved
+    # in between is not moved twice (os.replace raised FileNotFoundError).
+    (paths, _) = old_layout()
+    real_lock = GEOFABRIK._store_lock
+
+    class Other:
+        def __enter__(self):
+            os.makedirs(GEOFABRIK.store_dir(), exist_ok=True)
+            os.replace(paths["alsace"], GEOFABRIK.extract_path("alsace"))
+            self.lock = real_lock()
+            return self.lock.__enter__()
+
+        def __exit__(self, *a):
+            return self.lock.__exit__(*a)
+
+    monkeypatch.setattr(GEOFABRIK, "_store_lock", Other)
+    (moves, _) = GEOFABRIK.migrate_store(REGIONS)
+    assert sorted(m[2] for m in moves) == ["georgia", "us/georgia"]
+    assert not any("could not move" in line for line in gf)
+
+
+def test_side_files_without_an_extract_go(gf):
+    # papua-latest.osm.pbf.lock was left by a 404 (2026-11-21), no extract.
+    top = GEOFABRIK.data_dir()
+    lock = os.path.join(top, "asia", "indonesia", "papua-latest.osm.pbf.lock")
+    write(lock, b"")
+    write(GEOFABRIK.index_path(), b"{}")
+    GEOFABRIK.migrate_store(REGIONS)
+    assert not os.path.exists(os.path.join(top, "asia"))
+
+
+def test_folders_of_the_user_stay(gf):
+    old_layout()
+    mine = os.path.join(GEOFABRIK.data_dir(), "manual")
+    os.makedirs(mine)
+    GEOFABRIK.migrate_store(REGIONS)
+    assert os.path.isdir(mine)
+    assert not os.path.exists(os.path.join(GEOFABRIK.data_dir(), "north-america"))
+
+
 def test_preparation_moves_first(gf, monkeypatch, fresh):
     calls = []
     monkeypatch.setattr(GEOFABRIK, "load_index", lambda: [])
@@ -363,3 +461,18 @@ def test_hung_update_is_killed(gf, tmp_path, monkeypatch):
     assert GEOFABRIK._update(path) is False
     assert os.listdir(tmp_path) == ["x.osm.pbf"]
     assert any("no end after 1 s" in line and "done" in line for line in gf)
+
+
+def test_update_that_never_catches_up_fails(gf, tmp_path, monkeypatch):
+    # Every run applied changes and exited 1 ("more to come"): the file was
+    # recorded as up to date after UPDATE_RUNS runs.
+    path = str(tmp_path / "x.osm.pbf")
+    write(path, PBF_START + b"old")
+    monkeypatch.setattr(GEOFABRIK, "UPDATE_RUNS", 2)
+    monkeypatch.setattr(GEOFABRIK, "_UPDATE_CODE",
+                        "import sys, shutil; a = sys.argv; "
+                        "shutil.copy(a[-1], a[a.index('-o') + 1]); "
+                        "sys.exit(1)")
+    assert GEOFABRIK._update(path) is False
+    assert os.listdir(tmp_path) == ["x.osm.pbf"]
+    assert any("still not up to date after 2" in line for line in gf)
