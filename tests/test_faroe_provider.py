@@ -13,6 +13,11 @@ def img(monkeypatch):
     monkeypatch.setattr(FNAMES, "Provider_dir", os.path.join(REPO, "Providers"))
     monkeypatch.setattr(FNAMES, "Extent_dir", os.path.join(REPO, "Extents"))
     monkeypatch.setattr(FNAMES, "Filter_dir", os.path.join(REPO, "Filters"))
+    # fresh module dicts, put back after the test: the real providers must
+    # not leak into later tests (fallback providers would be asked)
+    for name in ("providers_dict", "extents_dict", "combined_providers_dict",
+                 "color_filters_dict"):
+        monkeypatch.setattr(IMG, name, dict(getattr(IMG, name)))
     IMG.initialize_color_filters_dict()
     IMG.initialize_extents_dict()
     IMG.initialize_providers_dict()
