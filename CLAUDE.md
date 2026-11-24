@@ -72,6 +72,8 @@ Guidance for Claude Code working in this repository.
   never on origin) on 2026-11-24, when dev fb066b2 was pushed.
   fix/dataforsyningen and fix/faroe-provider (#139, #138, never on
   origin) on 2026-11-24, when dev was pushed with them.
+  fix/zone-overlap (#140, never on origin) on 2026-11-24, when dev
+  dc1e423 was pushed.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -2652,9 +2654,14 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     run_2026-11-24_gl_dk.log there). +62-008 (Vágar FOA zone) after it.
     Done: 66 built, 0 failed (4h21m); +62-008 built after it (all 54
     airport textures FOA18). 6 helipad zones took no block: #140.
-47. #140 — small zones; on `test` @ 5fbd748, to `dev` with the user's
-    OK, then steps 1-3 of +60-044, +60-046, +60-047, +61-049 (the
-    other zone tiles get the wider zones whenever rebuilt).
+47. ~~#140~~ — small zones; on `dev` dc1e423 since 2026-11-24 (pushed).
+    Steps 1-3 + overlay of +60-044, +60-046, +60-047, +61-049 (14m47s)
+    and +59-045 (its helipad zone is cut at the tile edge; on dev it took
+    only a neighbouring block): 5 built, 0 failed. Imagery recheck of all
+    67 tiles rebuilt that day (scratchpad recheck_imagery.py: DSF new,
+    base provider used, no missing texture, each zone's site on its
+    zone's .ter): 82 zones, 84 site points, 0 problems. The other zone
+    tiles get the wider zones whenever rebuilt.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
