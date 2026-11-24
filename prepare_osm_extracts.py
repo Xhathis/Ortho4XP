@@ -4,6 +4,8 @@
 Usage (from the Ortho4XP folder, with Ortho4XP's Python):
     python prepare_osm_extracts.py TILES [options]
     python prepare_osm_extracts.py FILE.osm.pbf [FILE ...] TILES [options]
+    python prepare_osm_extracts.py --store [--dry-run]
+    python prepare_osm_extracts.py --undo-store-move FILE.csv
 TILES:
     --tiles +55+012 +56+010     these tiles
     --tile-file FILE            one +LL+LLL per line (# comments, also
@@ -18,9 +20,16 @@ Options:
                      to the first file)
     --no-coverage    with FILEs: skip the coverage check
     --dry-run        only show what would be done
+    --store          no tiles: move extracts of the old folder layout into
+                     geofabrik_dir/extracts (named by region id, #129; a
+                     build does this by itself), list the files the index
+                     no longer has
+    --undo-store-move FILE.csv
+                     move the files of such a move (its extracts/moved_*.csv)
+                     back
 
 Without FILEs the Geofabrik regions for each tile are chosen, downloaded
-into geofabrik_dir (Ortho4XP.cfg; default OSM_data/Geofabrik) and updated
+into geofabrik_dir/extracts (Ortho4XP.cfg; default OSM_data/Geofabrik) and updated
 with Geofabrik's daily changes when older than geofabrik_max_age days, as
 a build does by itself with osm_source=geofabrik (#101). A tile only a
 continent extract covers is left to Overpass.
@@ -117,8 +126,11 @@ def cached_nodes(lat, lon):
 
 
 def given_areas(files, regions):
-    """Areas of the files (by Geofabrik file name), or the names unknown."""
+    """Areas of the files (by Geofabrik's file name, or the store's name by
+    region id, #129), or the names unknown."""
     by_name = {name: area for (_, name, area) in regions}
+    by_name.update({EXTRACT.store_name(rid): area
+                    for (rid, _, area) in regions})
     unknown = [f for f in files if os.path.basename(f) not in by_name]
     return ([by_name[os.path.basename(f)] for f in files
              if os.path.basename(f) in by_name], unknown)
@@ -155,7 +167,10 @@ def parse_args(argv):
             opts["road_level"] = int(args.pop(0))
         elif a == "--index":
             opts["index"] = args.pop(0)
-        elif a in ("--force", "--no-coverage", "--dry-run", "--check"):
+        elif a == "--undo-store-move":
+            opts["undo-store-move"] = args.pop(0)
+        elif a in ("--force", "--no-coverage", "--dry-run", "--check",
+                   "--store"):
             opts[a[2:]] = True
         elif a.startswith("--"):
             raise ValueError(f"unknown option {a}")
@@ -195,6 +210,8 @@ def main(argv):
     except (ValueError, IndexError, OSError) as e:
         print(f"ERROR: {e}\n\n{__doc__}")
         return 2
+    if opts.get("store") or opts.get("undo-store-move"):
+        return store(opts)
     if not tiles:
         print(__doc__)
         return 2
@@ -207,6 +224,37 @@ def main(argv):
     if not files:
         return prepare_auto(tiles, opts)
     return prepare_files(files, tiles, opts)
+
+
+def store(opts):
+    """--store [--dry-run] and --undo-store-move (#129)."""
+    GEOFABRIK = _geofabrik()
+    if opts.get("undo-store-move"):
+        n = GEOFABRIK.undo_migration(opts["undo-store-move"])
+        print(f"{n} file(s) moved back.")
+        return 0
+    try:
+        regions = GEOFABRIK.load_index()
+    except GEOFABRIK.GeofabrikError as e:
+        print("ERROR:", e)
+        return 1
+    dry = bool(opts.get("dry-run"))
+    (moves, left) = GEOFABRIK.migrate_store(regions, dry_run=dry)
+    top = GEOFABRIK.data_dir()
+    for (old, new, rid) in moves:
+        print(f"  {'would move' if dry else 'moved'} "
+              f"{os.path.relpath(old, top)} -> "
+              f"{os.path.relpath(new, top)}")
+    for f in left:
+        print(f"  left: {os.path.relpath(f, top)} (no region of the index, "
+              "or the store has its region)")
+    size = sum(os.path.getsize(m[1] if not dry else m[0]) for m in moves)
+    print(f"{len(moves)} file(s) ({size / 1e9:.1f} GB) "
+          f"{'to move' if dry else 'moved'}, {len(left)} left.")
+    unused = GEOFABRIK.unused_extracts(regions)
+    for (name, n) in unused:
+        print(f"  not in the index any more: {name} ({n / 1e6:.0f} MB)")
+    return 0
 
 
 def prepare_auto(tiles, opts):
@@ -225,8 +273,8 @@ def prepare_auto(tiles, opts):
         return 1
     if opts.get("dry-run"):
         (plan, left, sea) = GEOFABRIK.plan_tiles(wanted, regions)
-        for (urls, group) in GEOFABRIK.group_tiles(plan):
-            print("  " + ", ".join(u.rsplit("/", 1)[-1] for u in urls) + ": "
+        for (ids, group) in GEOFABRIK.group_tiles(plan):
+            print("  " + ", ".join(ids) + ": "
                   + " ".join(FNAMES.short_latlon(*t) for t in group))
         for t in sea:
             print(f"  {FNAMES.short_latlon(*t)}: open sea (no region)")
