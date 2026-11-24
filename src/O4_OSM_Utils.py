@@ -1248,8 +1248,13 @@ def get_overpass_data(query, bbox: tuple, server_timeout: int = 0) -> bytes:
                 if UI.red_flag:
                     return 0
             UI.vprint(2, f"      Using OSM server {key}")
+            # Plain "out": the reader takes ids, coordinates, refs and tags
+            # only, so version/timestamp/user/changeset ("out meta") never
+            # reached the cache; leaving them out makes the answer smaller
+            # and spares the server its meta lookups. osm_base is in the
+            # header either way.
             full_url = (url + "?data=" + settings + "(" + overpass_query
-                        + ");(._;>>;);out meta;")
+                        + ");(._;>>;);out;")
             UI.vprint(3, full_url)
             (content, kind, reason, wait) = _overpass_request(
                 s, key, full_url, timeout)
