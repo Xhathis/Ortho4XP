@@ -69,7 +69,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 701
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 714
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -1100,6 +1100,21 @@ Test results:
   G:\Ortho4XP_tests\cfg_backups\2026-11-21_airport_pack_123): apt.dat
   unchanged, 48 DSFs byte-identical to the verified scratch pack. After
   an X-Plane restart the user saw Nuuk's buildings back (2026-11-21).
+- 296-tile batch on `dev` 20ddc44 (GUI, 2026-11-21 20:52): the PC shut
+  down 23:29 in phase 1; the user restarted the 279 leftover tiles
+  2026-11-22 09:27 (38h41m): 279 built, 0 failed, no ERROR, only the 60
+  "erroneous tag marked aerodrome" WARNINGs; 144 limit_tris NOTEs, 192
+  tiles with Arc pieces and 1 with BI (#117); airport pack 69 airports,
+  65 DSFs. -10/-09/-08/-07/-03+141 went to Overpass: Geofabrik redirects
+  asia/indonesia/papua-latest.osm.pbf to /indonesia/papua/... (no
+  "asia/", 404; Geofabrik's error), Overpass then answered. The 8 meshes
+  of -55-064..-066, -56-067..-071 (built before the shutdown, 1.9 GB)
+  stayed: the restart cleans only next to tiles it built (#45).
+  #125 `fix/dsf-backup-setting` @ dc94fa8 and #126
+  `fix/earth-preview-message` @ d13dea8 (from dev 20ddc44): 13 new unit
+  tests, pyflakes 0, regression --overlay of #125 PASS. `test` @
+  54f392e: 714 unit tests, pyflakes 0, regression PASS (DSF, 17/17
+  masks, app log identical). Not run: gui_smoke.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2203,6 +2218,20 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     around each airport's boundary; DSFs of tiles that left the pack are
     removed. A failure is a WARNING without stamp (retried next time);
     PACK_VERSION 2 in the stamp redoes #123's pack.
+125. **DONE** (`dc94fa8`, new app setting keep_dsf_backup, default True
+    = unchanged): step 3 moved the previous DSF to <tile>.dsf.bak before
+    writing the new one (110 GB of them deleted by hand on 2026-11-21),
+    so a failed step 3 also left the tile without a DSF. Off: the old DSF
+    stays active until build_tile replaces it with the complete new one,
+    and an older .bak of that tile is removed (DSF.set_aside_old_dsf; an
+    unremovable one is a WARNING).
+126. **FIXED** (`d13dea8`, log only): the map's Earth preview printed
+    "Could not find Earth preview file ..." for any exception while
+    drawing a square (9 times since 2026-11-05, all 64 files present;
+    the cause went to the console only). GUI.earth_preview_error: a
+    missing file keeps the message, tk.TclError (a redraw thread's image
+    or the window gone) is quiet as for the other 3 squares, anything
+    else is an ERROR with type and text.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2373,6 +2402,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 39. ~~#124~~ — the pack's airports get their Global Airports 3D; on `dev`
     9287de3 since 2026-11-21 (pushed 22fb48e), the user's pack rewritten;
     Nuuk's buildings back in X-Plane.
+40. #125, #126 — on `test` @ 54f392e, to `dev` with the user's OK.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
