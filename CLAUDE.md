@@ -71,7 +71,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 714
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 733
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -1119,6 +1119,15 @@ Test results:
   masks, app log identical). Not run: gui_smoke.
   -> `dev` fast-forwarded to test (with these notes) on 2026-11-24
   and pushed; both fix branches removed.
+- #127 `fix/geofabrik-url-variants` @ 05e4420 and #128
+  `fix/geofabrik-index-refresh` @ efb2238 (from #127), 2026-11-24: 19 new
+  unit tests (#127 12, #128 7), 733 pass, pyflakes 0; regression --overlay
+  PASS for both (DSF, 17/17 masks, app log identical), sim_geofabrik_step1
+  +28-018 0 failures for both. Real: papua's new URL downloaded (36 MB, MD5
+  of the dated file); a scratch index 2 days old naming a gone papua URL
+  fetched the live index and downloaded the file from the URL it gives.
+  Geofabrik's papua redirect was fixed again by then (checked 11-24).
+  `test` @ 9664414: 733 unit tests.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2236,6 +2245,18 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     missing file keeps the message, tk.TclError (a redraw thread's image
     or the window gone) is quiet as for the other 3 squares, anything
     else is an ERROR with type and text.
+127. **FIXED** (`05e4420`): the old URL of papua redirected to
+    indonesia/papua/... without "asia/" (404) on 2026-11-21/22, and our
+    index of 11-13 still gave the old URLs, so 5 tiles of the 296-tile batch
+    went to Overpass. GEOFABRIK.url_variants: a -latest extract that answers
+    404 is asked in the other folder layout (flat <-> folder per region);
+    both give the same local_path.
+128. **FIXED** (`efb2238`): the index (the only list of extract URLs) was
+    kept 30 days, so any other change of Geofabrik's layout broke downloads
+    until then. A 404 after #127's variants (GeofabrikNotFound) fetches the
+    index again unless it is younger than INDEX_RECHECK (1 day), and
+    ensure_file retries with the URL it now gives for the same region id;
+    a failed index fetch is not repeated in the preparation.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2407,6 +2428,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     9287de3 since 2026-11-21 (pushed 22fb48e), the user's pack rewritten;
     Nuuk's buildings back in X-Plane.
 40. ~~#125, #126~~ — on `dev` since 2026-11-24, pushed.
+41. #127, #128 — Geofabrik URLs; on `test` @ 9664414, to `dev` with the
+    user's OK. Next: extract storage by region id (proposed 2026-11-24).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
