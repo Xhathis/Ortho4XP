@@ -66,7 +66,8 @@ Guidance for Claude Code working in this repository.
   fix/geofabrik-store (#127-#129, never on origin) on 2026-11-24, when
   dev 31671af was pushed. fix/airstrip-lines, fix/geofabrik-store-
   hardening and fix/airport-pack-sweep (#130-#132, never on origin) on
-  2026-11-24, when dev was pushed with them.
+  2026-11-24, when dev was pushed with them. fix/drop-fr-overpass (never
+  on origin) the same day, when dev was pushed with it.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -215,7 +216,7 @@ an existing tile's mesh read-only and silences UI.logprint, which
 build_tile calls directly).
 `Ortho4XP.cfg` uses `overpass_server_choice=DE`; since #23 tentatives
 5-8 alternate with the other servers in overpass_servers.txt (since
-#78: DE and FR; KU was dead). The failure sims replace the whole server list
+#78: DE and FR; KU was dead; since 2026-11-24 DE only). The failure sims replace the whole server list
 with one closed port, so they still fail without fallback.
 Never run the full-build sims (sim_osm_failure, sim_water_geometry_failure,
 sim_mask_dem_failure, sim_mesh_failure, sim_step3_failures, sim_dem_cli,
@@ -1176,6 +1177,14 @@ Test results:
   copy of the user's canary-islands) 0 failures, all 5 layers from it.
   -> `dev` fast-forwarded to test (with these notes) on 2026-11-24 and
   pushed; the three fix branches removed.
+- Overpass checked again 2026-11-24 (one runway query on Copenhagen,
+  plain requests, no health file): DE HTTP 200 in 55 s with data a
+  minute old (the IP block of 11-13 is gone; the server is slow), FR
+  HTTP 403 "white-listed usages" as since 11-13. `fix/drop-fr-overpass`
+  @ 49cc006 removes FR from overpass_servers.txt (user's choice): a
+  request now tries DE twice and stops; the GUI's server choice lists
+  DE only. `test` @ 114085a: 769 unit tests, pyflakes 0 (the tests and
+  sims use their own mock server lists). -> `dev` on 2026-11-24, pushed.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2525,6 +2534,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     (pushed). #130 changes the 27 tiles with airstrip lines
     when their step 1 runs again (no rebuild needed for it). Not run:
     gui_smoke (user away; no GUI code changed).
+44. ~~FR Overpass server dropped~~ — on `dev` since 2026-11-24 (pushed).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
