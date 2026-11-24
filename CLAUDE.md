@@ -1115,6 +1115,8 @@ Test results:
   tests, pyflakes 0, regression --overlay of #125 PASS. `test` @
   54f392e: 714 unit tests, pyflakes 0, regression PASS (DSF, 17/17
   masks, app log identical). Not run: gui_smoke.
+  -> `dev` fast-forwarded to test (with these notes) on 2026-11-24
+  (not pushed).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2402,7 +2404,7 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
 39. ~~#124~~ — the pack's airports get their Global Airports 3D; on `dev`
     9287de3 since 2026-11-21 (pushed 22fb48e), the user's pack rewritten;
     Nuuk's buildings back in X-Plane.
-40. #125, #126 — on `test` @ 54f392e, to `dev` with the user's OK.
+40. ~~#125, #126~~ — on `dev` since 2026-11-24 (not pushed).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
