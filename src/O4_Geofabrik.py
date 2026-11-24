@@ -1099,13 +1099,25 @@ def needed_layers(lat, lon, road_level, force=False):
     wanted = {}
     for (layer, st) in layers.items():
         answer = EXTRACT.answer_path(lat, lon, layer)
-        if os.path.isfile(answer) and EXTRACT.answer_fits(answer, st):
-            continue
         cache = FNAMES.osm_cached(lat, lon, layer)
+        # An answer counts as done only if step 1 would take it: one older
+        # than the cache is ignored there (_refresh_from_extract), so it
+        # must not stop a stale cache from being prepared again.
+        if (os.path.isfile(answer) and EXTRACT.answer_fits(answer, st)
+                and _not_older(answer, cache)):
+            continue
         if not os.path.isfile(cache) or cache_is_stale(cache) or \
                 EXTRACT.cache_fits(cache, st) is False:
             wanted[layer] = st
     return wanted
+
+
+def _not_older(answer, cache):
+    """True when the answer is not older than the cache (or no cache)."""
+    try:
+        return os.path.getmtime(answer) >= os.path.getmtime(cache)
+    except OSError:
+        return True
 
 
 def _cached(lat, lon, layer):
