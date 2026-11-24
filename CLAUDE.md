@@ -62,6 +62,9 @@ Guidance for Claude Code working in this repository.
   dev 22fb48e was pushed.
   fix/dsf-backup-setting and fix/earth-preview-message (#125, #126,
   never on origin) on 2026-11-24, when dev was pushed with them.
+  fix/geofabrik-url-variants, fix/geofabrik-index-refresh and
+  fix/geofabrik-store (#127-#129, never on origin) on 2026-11-24, when
+  dev 31671af was pushed.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -1145,7 +1148,7 @@ Test results:
   user's 164 extracts into the store, and older code would then download
   all 38 GB again: do not run code older than #129 from G:\Ortho4XP.
   -> `dev` fast-forwarded to test (#127-#129, with these notes) on
-  2026-11-24 (not pushed).
+  2026-11-24 and pushed; the three fix branches removed.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2464,8 +2467,8 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Nuuk's buildings back in X-Plane.
 40. ~~#125, #126~~ — on `dev` since 2026-11-24, pushed.
 41. ~~#127, #128~~ — Geofabrik URLs; on `dev` since 2026-11-24.
-42. #129 — extract store by region id; on `dev` since 2026-11-24 (not
-    pushed). Its first preparation moves the 164 extracts (check the
+42. #129 — extract store by region id; on `dev` since 2026-11-24
+    (pushed). Its first preparation moves the 164 extracts (check the
     moved_*.csv and the log then).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
