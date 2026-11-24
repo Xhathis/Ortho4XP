@@ -112,6 +112,33 @@ class QuadTree(dict):
 ################################################################################
 
 ################################################################################
+def block_zone_index(zone_mask, col_left, col_right, row_top, row_bottom,
+                     x, y):
+    """Index of the zone a texture block takes: the topmost zone drawn on
+    any pixel inside the block.
+
+    zone_mask holds, per pixel, the index of the topmost zone there (higher
+    index = higher priority, 1 = the tile's default). Testing only the
+    block's centre pixel lost any zone narrower than a block: a 1 km
+    helipad zone fits between the centres of ZL18 textures (~1.2 km), so it
+    took no block and changed nothing, silently. The block's edge pixels
+    are left out, so a zone that only touches the block, or reaches it by
+    rounding (a zone drawn along texture edges), does not take it: the
+    polygon's vertices are rounded to whole pixels (up to 0.5 px) and zone
+    rings are often stored to 4 decimals (up to ~0.2 px), so a pixel counts
+    only when it lies a full pixel inside the block edge. A block with no
+    such pixel in the tile keeps the centre pixel (x, y).
+    """
+    (nrows, ncols) = zone_mask.shape
+    c0 = max(ceil(col_left + 1), 0)
+    c1 = min(floor(col_right - 1), ncols - 1)
+    r0 = max(ceil(row_top + 1), 0)
+    r1 = min(floor(row_bottom - 1), nrows - 1)
+    if c0 > c1 or r0 > r1:
+        return int(zone_mask[y, x])
+    return int(zone_mask[r0 : r1 + 1, c0 : c1 + 1].max())
+
+
 def zone_list_to_ortho_dico(tile):
     # tile.zone_list is a list of 3-uples of the form
     # ([(lat0,lat0), ... ,(latN,lonN)], zoomlevel, provider_code)
@@ -208,6 +235,7 @@ def zone_list_to_ortho_dico(tile):
         ]
         masks_draw.polygon(pol, fill=i)
         i += 1
+    zone_mask = numpy.asarray(masks_im)
     for til_x in range(til_x_min, til_x_max + 1, 16):
         for til_y in range(til_y_min, til_y_max + 1, 16):
             (latp, lonp) = GEO.gtile_to_wgs84(
@@ -217,7 +245,20 @@ def zone_list_to_ortho_dico(tile):
             latp = max(min(latp, tile.lat + 1), tile.lat)
             x = round((lonp - tile.lon) * 4095)
             y = round((tile.lat + 1 - latp) * 4095)
-            (zoomlevel, provider_code) = dico_tmp[masks_im.getpixel((x, y))]
+            (lat_top, lon_left) = GEO.gtile_to_wgs84(til_x, til_y, tile.mesh_zl)
+            (lat_bot, lon_right) = GEO.gtile_to_wgs84(
+                til_x + 16, til_y + 16, tile.mesh_zl
+            )
+            zone_index = block_zone_index(
+                zone_mask,
+                (lon_left - tile.lon) * 4095,
+                (lon_right - tile.lon) * 4095,
+                (tile.lat + 1 - lat_top) * 4095,
+                (tile.lat + 1 - lat_bot) * 4095,
+                x,
+                y,
+            )
+            (zoomlevel, provider_code) = dico_tmp[zone_index]
             if airport_array[y, x]:
                 zoomlevel = max(zoomlevel, tile.cover_zl)
             til_x_text = 16 * (
