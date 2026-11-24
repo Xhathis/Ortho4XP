@@ -32,6 +32,12 @@ cfg_app_vars = {
         "values": (0, 1, 2, 3),
         "hint": "Determines which temporary files are removed. Level 3 erases everything except the config and what is needed for X-Plane; Level 2 erases everything except what is needed to redo the current step only; Level 1 allows you to redo any prior step; Level 0 keeps every single file.",
     },
+    "keep_dsf_backup": {
+        "module": "UI",
+        "type": bool,
+        "default": True,
+        "hint": "When step 3 rebuilds a tile, its previous DSF is kept as <tile>.dsf.bak (a large file per tile). When unset, no backup is made: the previous DSF stays in use until the new one is complete and replaces it (so a failed rebuild leaves the old tile in place), and a .bak left by an earlier build of that tile is removed.",
+    },
     "overpass_server_choice": {
         "module": "OSM",
         "type": str,
@@ -409,6 +415,7 @@ cfg_vars = {**cfg_app_vars, **cfg_tile_vars, **cfg_global_tile_vars}
 list_app_vars = [
     "verbosity",
     "cleaning_level",
+    "keep_dsf_backup",
     "overpass_server_choice",
     "osm_source",
     "geofabrik_max_age",

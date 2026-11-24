@@ -13,6 +13,8 @@ red_flag = False
 stop_requested = False
 is_working = False
 cleaning_level = 1
+# Step 3 keeps the previous DSF of a tile as .dsf.bak (upstream behaviour).
+keep_dsf_backup = True
 gui = None
 log = True
 

@@ -566,6 +566,28 @@ def _cross_pool_triangle_cmds(pairs, new_pool_idx):
 
 
 ################################################################################
+def set_aside_old_dsf(dsf_file_name):
+    """Before step 3 writes a tile's DSF. With UI.keep_dsf_backup (default,
+    as upstream) the previous DSF becomes <name>.bak. Without it nothing is
+    moved: the previous DSF stays active until build_tile replaces it with
+    the complete new one, and a .bak of an earlier build is removed (it is
+    an older copy still, and those files are as large as the DSF)."""
+    backup = dsf_file_name + ".bak"
+    if UI.keep_dsf_backup:
+        if os.path.exists(dsf_file_name):
+            os.replace(dsf_file_name, backup)
+        return
+    try:
+        os.remove(backup)
+        UI.vprint(1, "   Removed the old DSF backup", backup)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        # Only disk space is at stake: the new DSF is written regardless.
+        UI.lvprint(1, "   WARNING: could not remove the old DSF backup",
+                   backup, f"({e}).")
+
+
 def build_dsf(tile, download_queue):
 
     
@@ -1162,8 +1184,7 @@ def build_dsf(tile, download_queue):
         FNAMES.long_latlon(tile.lat, tile.lon) + ".dsf",
     )
     
-    if os.path.exists(dsf_file_name):
-        os.replace(dsf_file_name, dsf_file_name + ".bak")
+    set_aside_old_dsf(dsf_file_name)
 
     # Note: present code should always choose the first branch.
     if bPROP == b"":
