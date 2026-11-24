@@ -227,7 +227,7 @@ def test_ramp_flat_inside_linear_around_untouched_beyond():
     # check by distance: one row north is 111 m, beyond the ramp).
     assert sample(dem, 0.5, 0.601) == pytest.approx(40.0)
     # East: one column is 0.001 deg = ~48.8 m at 64 N, inside the ramp.
-    d = 0.001 * GEO.lon_to_m(64)
+    d = 0.001 * GEO.lon_to_m(64.5)  # the area's latitude
     assert sample(dem, 0.601, 0.5) == pytest.approx(86 + (40 - 86) * d / 100,
                                                      abs=0.01)
     assert sample(dem, 0.603, 0.5) == pytest.approx(40.0)
@@ -264,3 +264,54 @@ def test_areas_without_user_patch(tmp_path):
     assert XPAPT.areas_without_user_patch(areas, str(tmp_path)) == areas[1:]
     assert XPAPT.areas_without_user_patch(
         areas, str(tmp_path / "missing")) == areas
+
+
+# --- review 2026-11-24: ramp edges and unreadable user patches -----------
+
+def _apt(icao, elev, ring):
+    return {"icao": icao, "elev_m": elev, "polygons": [[ring]]}
+
+
+def test_ramp_areas_include_an_airport_just_across_the_edge():
+    # Boundary 0.0003 deg (~33 m) south of tile +64-052's south edge: the
+    # tile's own areas miss it, the ramp must not.
+    ring = [[-51.7, 63.99], [-51.6, 63.99], [-51.6, 63.9997],
+            [-51.7, 63.9997]]
+    apts = [_apt("XXXX", 20.0, ring)]
+    assert XPAPT.tile_flatten_areas(apts, 64, -52) == []
+    got = XPAPT.ramp_areas(apts, 64, -52, (0, 0, 1, 1))
+    assert [a[0] for a in got] == ["XXXX"]
+    # Unclipped, in tile coordinates.
+    assert got[0][2].bounds[1] == pytest.approx(-0.01)
+    far = [_apt("FAR", 20.0, [[-51.7, 63.5], [-51.6, 63.5], [-51.6, 63.6],
+                              [-51.7, 63.6]])]
+    assert XPAPT.ramp_areas(far, 64, -52, (0, 0, 1, 1)) == []
+
+
+def test_neighbour_tiles_ramp_their_shared_edge_alike():
+    import numpy
+    n = 1001
+    # Straddles the edge lat 64 between +63-052 and +64-052.
+    ring = [[-51.65, 63.998], [-51.60, 63.998], [-51.60, 64.0015],
+            [-51.65, 64.0015]]
+    apts = [_apt("EDGE", 86.0, ring)]
+    north = numpy.full((n, n), 40.0, dtype=numpy.float32)
+    south = numpy.full((n, n), 40.0, dtype=numpy.float32)
+    XPAPT.ramp_dem_around_areas(
+        north, (0, 0, 1, 1), XPAPT.ramp_areas(apts, 64, -52, (0, 0, 1, 1)),
+        64)
+    XPAPT.ramp_dem_around_areas(
+        south, (0, 0, 1, 1), XPAPT.ramp_areas(apts, 63, -52, (0, 0, 1, 1)),
+        63)
+    # North's bottom row and south's top row are the same samples.
+    assert numpy.allclose(north[-1], south[0])
+    assert north[-1].max() == pytest.approx(86.0)
+
+
+def test_unreadable_user_patch_does_not_count(tmp_path):
+    area = geometry.MultiPolygon([geometry.box(0.3, 0.18, 0.33, 0.2)])
+    areas = [("BGGH", 85.95, area)]
+    (tmp_path / "BGGH.patch.osm").write_text("<osm>")  # cut file
+    assert XPAPT.areas_without_user_patch(areas, str(tmp_path)) == []
+    assert XPAPT.areas_without_user_patch(
+        areas, str(tmp_path), usable=lambda p: False) == areas

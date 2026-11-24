@@ -338,11 +338,17 @@ def include_airports(vector_map, tile):
     )
     # Before the airport smoothing, which writes the elevation file step 2
     # meshes from: the ramp around X-Plane's flat areas must be in it (#119).
+    # Also around those just across the tile edge, so neighbours agree.
+    dem_bounds = (tile.dem.x0, tile.dem.y0, tile.dem.x1, tile.dem.y1)
     ramped = XPAPT.ramp_dem_around_areas(
         tile.dem.alt_dem,
-        (tile.dem.x0, tile.dem.y0, tile.dem.x1, tile.dem.y1),
+        dem_bounds,
         XPAPT.areas_without_user_patch(
-            xp_areas, FNAMES.patch_dir(tile.lat, tile.lon)
+            XPAPT.ramp_areas_for_tile(
+                tile, (OVL.custom_overlay_src,
+                       OVL.custom_overlay_src_alternate), dem_bounds),
+            FNAMES.patch_dir(tile.lat, tile.lon),
+            usable=_usable_patch,
         ),
         tile.lat,
     )
@@ -825,6 +831,18 @@ def include_xp_flatten_areas(
                if inside else "") + ".",
         )
     return patches_area
+
+
+def _usable_patch(path):
+    """Whether include_patches will apply this patch file: it exists and
+    reads (a broken one is skipped there, #54)."""
+    if not os.path.isfile(path):
+        return False
+    try:
+        return bool(OSM.OSM_layer().update_dicosm(
+            path, input_tags=None, target_tags=None))
+    except Exception:  # user-made file: as include_patches, any error
+        return False
 
 
 ################################################################################
