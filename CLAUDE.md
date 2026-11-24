@@ -70,6 +70,8 @@ Guidance for Claude Code working in this repository.
   fix/overpass-out-plain, fix/remove-unused, fix/flatten-ramp-edges,
   fix/extract-answer-leftover and fix/overlay-source-check (#133-#137,
   never on origin) on 2026-11-24, when dev fb066b2 was pushed.
+  fix/dataforsyningen and fix/faroe-provider (#139, #138, never on
+  origin) on 2026-11-24, when dev was pushed with them.
   Only `master`, `dev`, `test`, `docs/claude-md` and open fix branches
   should exist.
 - One logical change per commit so a regression can be bisected.
@@ -1211,14 +1213,16 @@ Test results:
   still names the closed kortforsyningen.kms.dk; with the user's token
   (orto_foraar of orto_foraar_DAF, 2026 spring flight) it is newer and
   consistent, much better at Skagen, but leafless and cooler than GO2's
-  summer look: the user's choice (a token never goes into git). Faroes (3 tiles, GO2
+  summer look: the user's choice (a token never goes into git); the
+  user chose it: #139, 23 tile configs on DFA. Faroes (3 tiles, GO2
   ZL16, Vágar ZL18): #138. Greenland (106 OSM / X-Plane airports,
   airstrips and helipads): Arc is TerraColor 15 m there; GO2 is best at
   most sites, BI at 17 (GO2 spring snow around Disko Bay and Maniitsoq,
   older than a new helipad, or coarse); only the 24 sites at OSM
   aerodromes with runways have ZL18, the other 82 are ZL15. Proposal: 81
   ZL18 zones in 43 tile configs (G:\Ortho4XP_tests\imagery_audit_2026-11-24:
-  report, gl_zones.py dry run / --apply with backups, sheets), not applied;
+  report, gl_zones.py dry run / --apply with backups, sheets), applied
+  2026-11-24 with the user's OK (backup cfg_backups\2026-11-24_gl_zones);
   those tiles then need steps 1-3 (their .apt files are gone at
   cleaning_level 3, so step 3 alone would drop the airport covers).
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
@@ -2429,8 +2433,23 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     under it. Compared on 6 sites: FO is the sharpest and true-ortho in
     towns and at Vágar (GO2 has a Google watermark at ZL18), but at ZL16
     it is a mosaic of flights with strong colour differences (saturated
-    yellow-green village blocks on a brown base). No tile uses FOA (the
-    user's choice).
+    yellow-green village blocks on a brown base). The user's choice
+    (2026-11-24): +62-008 stays GO2 ZL16 with one ZL18 FOA zone over the
+    54 textures of Vágar's airport cover (62.0318-62.1039 N, 7.1850-7.3609
+    W; backup cfg_backups\2026-11-24_vagar_foa_zone); FOA, not FO, so the
+    fjord beyond FO's coverage gets Arc, not white. Needs steps 1-3.
+139. **DONE** (`fda935a`, data only): Denmark from Klimadatastyrelsen's
+    orthophoto. Providers/Denmark/DF.lay.example (WMS
+    api.dataforsyningen.dk/orto_foraar_DAF, layer orto_foraar, EPSG:3857,
+    token=YOUR_TOKEN); the real DF.lay holds the user's personal token
+    and is in .gitignore (never commit it; never use credentials that
+    Dataforsyningen's capabilities embed). Extents/Denmark_DF (40 m
+    pixels, outline smoothed and faded so the water shows no blocky
+    seam) and the combined provider DFA: DF over it, GO2 under it.
+    Without DF.lay, DFA does not load (its test is skipped). The user's
+    23 Danish tile configs with DF coverage set to DFA on 2026-11-24
+    (backup cfg_backups\2026-11-24_dk_dfa); +54+013, +55+013 and +57+012
+    (no DF coverage) stay GO2.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2611,8 +2630,13 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     gui_smoke (user away; no GUI code changed).
 44. ~~FR Overpass server dropped~~ — on `dev` since 2026-11-24 (pushed).
 45. ~~#133-#137~~ — fifth review 2026-11-24; on `dev` since 2026-11-24
-    (pushed). #138 (Faroe provider) on its branch; the imagery
-    audit's zones and rebuilds need the user's OK.
+    (pushed).
+46. ~~#138, #139~~ — Faroe and Denmark providers; on `dev` since
+    2026-11-24 (pushed). The 66-tile rebuild (43 Greenland tiles with
+    the audit's zones, 23 Danish tiles on DFA; steps 1-3 + overlays,
+    tile configs, no override) started 2026-11-24 12:47 from
+    G:\Ortho4XP_tests\batches\batch_run.py (log
+    run_2026-11-24_gl_dk.log there). +62-008 (Vágar FOA zone) after it.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
