@@ -71,7 +71,7 @@ Guidance for Claude Code working in this repository.
 
 ## Testing method
 
-Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 733
+Unit tests: `venv\Scripts\python.exe -m pytest` (repo root, ~25 s, 753
 tests; pytest 9.2.0 from requirements-dev.txt, installed in the venv
 2026-11-04). They cover O4_Geo_Utils, O4_File_Names, tile config
 read/write, the helpers of #23/#28/#32 and the Viewfinder downloads of
@@ -1128,6 +1128,22 @@ Test results:
   fetched the live index and downloaded the file from the URL it gives.
   Geofabrik's papua redirect was fixed again by then (checked 11-24).
   `test` @ 9664414: 733 unit tests.
+- #129 `fix/geofabrik-store` @ adef5de (from #128), 2026-11-24: 20 new
+  unit tests (tests/test_geofabrik_store.py), 753 pass, pyflakes 0;
+  regression --overlay PASS (DSF, 17/17 masks, app log identical).
+  sim_geofabrik_step1.py has --geofabrik-dir <dir> (from #129 on, a
+  preparation moves old-layout files: never let the sim use the user's
+  folder): +28-018 on a scratch copy of canary-islands in the old layout
+  moved it into extracts\ and read all 5 layers from it. `--store
+  --dry-run` on the user's folder: 164 files (38.0 GB) would move, 0 left,
+  nothing written. Real updates of the scratch extract through its header
+  server (80 s, then 1 s with nothing new) recorded in the manifest.
+  pyosmium-up-to-date with --server and --ignore-osmosis-headers fetched
+  the changes in 3 s and then did not exit in 400 s: not used. Scratch
+  folder G:\Ortho4XP_tests\geofabrik_store_scratch. `test` @ 76f67c4: 753
+  unit tests, pyflakes 0. NOT on dev: the first preparation with #129
+  moves the user's 164 extracts into the store, and older code would then
+  download all 38 GB again; once on dev, do not go back to older code.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2257,6 +2273,23 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     index again unless it is younger than INDEX_RECHECK (1 day), and
     ensure_file retries with the URL it now gives for the same region id;
     a failed index fetch is not repeated in the preparation.
+129. **DONE** (`adef5de`): extracts were stored at a path made from the
+    download URL, so each layout change of Geofabrik (#118, #127, #128)
+    hid files on disk. Now geofabrik_dir\extracts\<region id>.osm.pbf
+    (us/georgia -> us__georgia.osm.pbf, EXTRACT.store_name) with
+    extracts.json (per region: url, size, downloaded, updated, checked,
+    update_failures, broken, moved_from; replaces the .checked files) and
+    one .lock. GEOFABRIK.ensure_extract(region) replaces ensure_file. The
+    first preparation moves old-layout files there (migrate_store,
+    extracts\moved_<time>.csv; prepare_osm_extracts.py --store [--dry-run],
+    --undo-store-move FILE.csv; also lists files no longer in the index).
+    A file without the PBF start (checked before pyosmium opens it: a
+    failed open keeps the handle on Windows) or that pyosmium cannot read
+    is set aside as .broken and downloaded again. 3 failed updates in a
+    row, data over 30 days old (REFRESH_AGE), or an update server in the
+    file other than the index's (old form europe/norway-updates) mean a
+    new download; if it fails the old file is used. pyosmium output goes
+    to a temp file, each run is killed after UPDATE_TIMEOUT 2 h.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2429,7 +2462,10 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     Nuuk's buildings back in X-Plane.
 40. ~~#125, #126~~ — on `dev` since 2026-11-24, pushed.
 41. #127, #128 — Geofabrik URLs; on `test` @ 9664414, to `dev` with the
-    user's OK. Next: extract storage by region id (proposed 2026-11-24).
+    user's OK.
+42. #129 — extract store by region id; on `test` @ 76f67c4, to `dev` with
+    the user's OK (with #127/#128). Its first preparation moves the 164
+    extracts; then clean up G:\Ortho4XP_tests\geofabrik_store_scratch.
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
