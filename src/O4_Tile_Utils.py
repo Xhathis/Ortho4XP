@@ -488,6 +488,16 @@ def _remove_mesh_files(build_dir, lat, lon):
     remove_if_exists(
         os.path.join(build_dir, "Data" + FNAMES.short_latlon(lat, lon) + ".apt")
     )
+    # The tile's masks go with its mesh (#142): only step 3 reads them, and
+    # step 3 cannot run without the mesh; step 2.5 makes them anew. They
+    # were kept for good (17.7 GB for the user's 1,598 tiles).
+    try:
+        shutil.rmtree(FNAMES.mask_dir(lat, lon))
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        UI.lvprint(1, "WARNING: could not delete the masks of",
+                   FNAMES.short_latlon(lat, lon), f"({e.strerror}).")
 
 
 def _remove_meshes_after_batch(tile, built, not_built, do_dsf):

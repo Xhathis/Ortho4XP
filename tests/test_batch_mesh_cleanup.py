@@ -22,6 +22,7 @@ class FakeTile:
 def env(monkeypatch, tmp_path):
     monkeypatch.setattr(UI, "log", False)
     monkeypatch.setattr(UI, "cleaning_level", 3)
+    monkeypatch.setattr(FNAMES, "Mask_dir", str(tmp_path / "Masks"))
     lines = []
     monkeypatch.setattr(
         UI, "lvprint", lambda level, *a: lines.append(" ".join(map(str, a))))
@@ -43,10 +44,16 @@ def apt(tile, lat, lon):
         build_dir(tile, lat, lon), "Data" + FNAMES.short_latlon(lat, lon) + ".apt")
 
 
+def mask(lat, lon):
+    return os.path.join(FNAMES.mask_dir(lat, lon), "123_456.png")
+
+
 def make_mesh(tile, lat, lon):
     os.makedirs(build_dir(tile, lat, lon), exist_ok=True)
     for p in (mesh(tile, lat, lon), apt(tile, lat, lon)):
         open(p, "w").close()
+    os.makedirs(FNAMES.mask_dir(lat, lon), exist_ok=True)
+    open(mask(lat, lon), "w").close()
 
 
 GRID = [(lat, lon) for lat in (10, 11, 12) for lon in (20, 21, 22)]
@@ -65,6 +72,38 @@ def test_removes_mesh_and_apt_of_built_tiles(env):
         assert os.path.exists(mesh(tile, *t))
 
 
+
+def test_masks_go_with_the_mesh(env):
+    # Only step 3 reads a tile's masks, and it needs the mesh (#142).
+    tile, _ = env
+    for t in GRID:
+        make_mesh(tile, *t)
+    TILE._remove_meshes_after_batch(tile, GRID[:4], [], True)
+    for t in GRID[:4]:
+        assert not os.path.exists(FNAMES.mask_dir(*t))
+    for t in GRID[4:]:
+        assert os.path.exists(mask(*t))
+
+
+def test_masks_kept_with_a_kept_mesh(env):
+    tile, _ = env
+    for t in GRID:
+        make_mesh(tile, *t)
+    built = [t for t in GRID if t != (12, 22)]
+    TILE._remove_meshes_after_batch(
+        tile, built, [("+12+022", TILE.BATCH_STEPS[2])], True)
+    for t in built:
+        assert os.path.exists(mask(*t)) == os.path.exists(mesh(tile, *t)), t
+
+
+def test_no_masks_folder_is_fine(env):
+    tile, lines = env
+    make_mesh(tile, 10, 20)
+    import shutil
+    shutil.rmtree(FNAMES.mask_dir(10, 20))
+    TILE._remove_mesh_files(build_dir(tile, 10, 20), 10, 20)
+    assert not os.path.exists(mesh(tile, 10, 20))
+    assert not any("WARNING" in l for l in lines)
 def test_keeps_meshes_next_to_a_failed_tile(env):
     tile, lines = env
     for t in GRID:
