@@ -1187,6 +1187,11 @@ Test results:
   those tiles then need steps 1-3 (their .apt files are gone at
   cleaning_level 3, so step 3 alone would drop the airport covers).
 
+- #141 `fix/tile-list-bom` @ 82f364c (from dev d08d0fe), 2026-11-25: 2 new
+  unit tests (both fail on dev: first tile dropped / ValueError), 796
+  (795 + the DFA test skipped without DF.lay in a worktree), pyflakes 0,
+  regression PASS (DSF, 17/17 masks, app log identical). `test` @
+  e2fd834: 795 passed, 1 skipped.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2426,6 +2431,16 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     covers (the user's 45 zone tiles: 605 -> 899 blocks; Nuuk +30).
     5 new unit tests (3 fail on dev), 793 pass, pyflakes 0, regression
     --overlay PASS (DSF, 17/17 masks, app log identical: no zones).
+141. **FIXED** (`82f364c`): a tile list file starting with a UTF-8 BOM
+    (PowerShell 5.1 `Out-File -Encoding utf8`, editors' "UTF-8 with BOM")
+    glued U+FEFF to its first tile: TILE.read_leftover_tiles skipped that
+    line silently (the tile window did not select the first leftover
+    tile), prepare_osm_extracts.py --tile-file stopped with "not a tile
+    name". Found when batch_run.py (test tool) read 0 tiles from a list
+    written by PowerShell. Both read utf-8-sig; files without a BOM read
+    as before. Not changed: Ortho4XP.cfg and tile configs are read in the
+    ANSI code page (written so by Ortho4XP); a BOM there would make the
+    first line an unknown key (ignored).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
