@@ -40,6 +40,61 @@ scaly = 1
 # Sean Gillies.
 
 ################################################################################
+# Margins of surely_not_encroached, relative to the segments' size: far
+# above the error are_encroached can make, so a pair it answers is one
+# are_encroached returns False for too (the mesh stays the same).
+APART_MARGIN = 1e-3
+FOLD_MARGIN = 1e-4
+
+
+def surely_not_encroached(a, b, c, d):
+    """True only when are_encroached(a, b, c, d) is False, for segments
+    with overlapping bounding boxes (what insert_edge passes); False means
+    "ask are_encroached". Plain floats: about 20 times faster than the
+    numpy arrays and linalg calls of are_encroached.
+
+    Shared end point (the way's previous edge): are_encroached is False
+    unless the segments fold back onto each other (cos of their angle
+    within 1e-4 of the fold); this test keeps FOLD_MARGIN = 1e-4 off its
+    0.9999 threshold.
+
+    Otherwise True when c-d lies wholly on one side of the line through
+    a-b, or a-b wholly on one side of the line through c-d, each end at
+    least APART_MARGIN * (|ab| + |cd|) from that line. Not parallel (sin
+    of the angle > 1e-8, are_encroached's own test): the crossing point of
+    the two lines lies off the segment by at least that much, and the 2x2
+    solve errs by less than 4.4e-8 * (|ab| + |cd|) there, since the points
+    are within |ab| + |cd| of each other. Parallel: its colinear test needs
+    |ab x ac| <= 1e-8 |ab| |ac|, here it is near 1e-3 |ab| (|ab| + |cd|),
+    which is at least 1e-3 |ab| |ac|.
+    """
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = a, b, c, d
+    abx, aby = bx - ax, by - ay
+    cdx, cdy = dx - cx, dy - cy
+    len_ab = sqrt(abx * abx + aby * aby)
+    len_cd = sqrt(cdx * cdx + cdy * cdy)
+    # ab . dc, with dc = c - d as in are_encroached
+    dot = -(abx * cdx + aby * cdy)
+    pnorm = len_ab * len_cd
+    if (a == d or b == c) and dot < (0.9999 - FOLD_MARGIN) * pnorm:
+        return True
+    if (a == c or b == d) and dot > -(0.9999 - FOLD_MARGIN) * pnorm:
+        return True
+    span = APART_MARGIN * (len_ab + len_cd)
+    # c and d against the line through a and b
+    o1 = abx * (cy - ay) - aby * (cx - ax)
+    o2 = abx * (dy - ay) - aby * (dx - ax)
+    limit = span * len_ab
+    if (o1 > limit and o2 > limit) or (o1 < -limit and o2 < -limit):
+        return True
+    # a and b against the line through c and d
+    p1 = cdx * (ay - cy) - cdy * (ax - cx)
+    p2 = cdx * (by - cy) - cdy * (bx - cx)
+    limit = span * len_cd
+    return (p1 > limit and p2 > limit) or (p1 < -limit and p2 < -limit)
+
+
+################################################################################
 class Vector_Map:
 
     dico_attributes = {
@@ -126,14 +181,23 @@ class Vector_Map:
         # affine coordinates of points in between pts id0 and id1 that belong
         # to existing edges
         id_list = []  # ids of these points
+        # Ids only: fetching each hit's object costs more than the query.
+        # An edge's bbox is the one create_edge stored (its nodes never
+        # move), so it is computed again where the edge is deleted.
         task = self.ebbox.intersection(
-            self.bbox_from_node_ids(id0, id1), objects=True
+            self.bbox_from_node_ids(id0, id1), objects=False
         )  # which other edges to search for instersection
-        for hits in task:
-            edge_id = hits.id
-            edge_bbox = hits.bbox
+        for edge_id in task:
             (id2, id3) = self.edges_dico[edge_id]
             c_marker = self.data_edges[edge_id]
+            # Most edges the bbox index returns are the way's previous edge
+            # or far from crossing this one: a plain-float test answers
+            # them before the numpy checks.
+            if surely_not_encroached(
+                self.nodes_dico[id0], self.nodes_dico[id1],
+                self.nodes_dico[id2], self.nodes_dico[id3],
+            ):
+                continue
             # check for encroachment, slightly different than intersection, see
             # the details below in the function definition
             coeffs = self.are_encroached(
@@ -163,7 +227,8 @@ class Vector_Map:
                     del self.dico_edges[(id2, id3)]
                     del self.edges_dico[edge_id]
                     del self.data_edges[edge_id]
-                    self.ebbox.delete(edge_id, edge_bbox)
+                    self.ebbox.delete(
+                        edge_id, self.bbox_from_node_ids(id2, id3))
                     # and create two new ones
                     self.create_edge(id2, c_id, c_marker)
                     self.create_edge(c_id, id3, c_marker)
@@ -184,7 +249,8 @@ class Vector_Map:
                         del self.dico_edges[(id2, id3)]
                         del self.edges_dico[edge_id]
                         del self.data_edges[edge_id]
-                        self.ebbox.delete(edge_id, edge_bbox)
+                        self.ebbox.delete(
+                            edge_id, self.bbox_from_node_ids(id2, id3))
                         # create new ones as needed
                         self.create_edge(
                             ordered_data[i - 1][1], ordered_data[i][1], c_marker
