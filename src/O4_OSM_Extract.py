@@ -79,10 +79,6 @@ def layer_statements(road_level):
 
 
 # --- geometry -----------------------------------------------------------------
-def tile_of(lat, lon):
-    return FNAMES.short_latlon(lat, lon)
-
-
 def _floor(v):
     return v // SCALE  # Python floors negative values too
 

@@ -412,6 +412,7 @@ def extract_mesh_to_obj(
     mtl_file_name = FNAMES.mtl_file(
         til_x_left, til_y_top, zoomlevel, provider_code
     )
+    # Closed on every return, also the early ones (Stop).
     f_mesh = open(mesh_file, "r")
     for i in range(4):
         f_mesh.readline()
@@ -431,6 +432,7 @@ def extract_mesh_to_obj(
     for i in range(0, 2):  # skip 2 lines
         f_mesh.readline()
     if UI.red_flag:
+        f_mesh.close()
         UI.exit_message_and_bottom_line()
         return 0
     UI.vprint(1, "    Reading triangles...")
@@ -480,6 +482,7 @@ def extract_mesh_to_obj(
             n3new = textured_nodes_inv[n3]
             dico_new_tri[len_dico_new_tri] = (n1new, n2new, n3new)
             len_dico_new_tri += 1
+    f_mesh.close()
     nbr_vert = len_textured_nodes
     nbr_tri = len_dico_new_tri
     if UI.red_flag:
@@ -487,69 +490,67 @@ def extract_mesh_to_obj(
         return 0
     UI.vprint(1, "    Writing the obj file.")
     # first the obj file
-    f = open(obj_file_name, "w")
-    for i in range(1, nbr_vert + 1):
-        j = textured_nodes[i]
-        f.write(
-            "v "
-            + "{:.9f}".format(pt_in[5 * j] - lonmin)
-            + " "
-            + "{:.9f}".format(pt_in[5 * j + 1] - latmin)
-            + " "
-            + "{:.9f}".format(pt_in[5 * j + 2])
-            + "\n"
-        )
-    f.write("\n")
-    for i in range(1, nbr_vert + 1):
-        j = textured_nodes[i]
-        f.write(
-            "vn "
-            + "{:.9f}".format(pt_in[5 * j + 3])
-            + " "
-            + "{:.9f}".format(pt_in[5 * j + 4])
-            + " "
-            + "{:.9f}".format(
-                sqrt(max(1 - pt_in[5 * j + 3] ** 2 - pt_in[5 * j + 4] ** 2, 0))
+    with open(obj_file_name, "w") as f:
+        for i in range(1, nbr_vert + 1):
+            j = textured_nodes[i]
+            f.write(
+                "v "
+                + "{:.9f}".format(pt_in[5 * j] - lonmin)
+                + " "
+                + "{:.9f}".format(pt_in[5 * j + 1] - latmin)
+                + " "
+                + "{:.9f}".format(pt_in[5 * j + 2])
+                + "\n"
             )
-            + "\n"
-        )
-    f.write("\n")
-    for i in range(1, nbr_vert + 1):
-        j = textured_nodes[i]
-        f.write(
-            "vt "
-            + "{:.9f}".format(nodes_st_coord[i][0])
-            + " "
-            + "{:.9f}".format(nodes_st_coord[i][1])
-            + "\n"
-        )
-    f.write("\n")
-    f.write("usemtl orthophoto\n\n")
-    for i in range(0, nbr_tri):
-        (one, two, three) = dico_new_tri[i]
-        f.write(
-            "f "
-            + str(one)
-            + "/"
-            + str(one)
-            + "/"
-            + str(one)
-            + " "
-            + str(two)
-            + "/"
-            + str(two)
-            + "/"
-            + str(two)
-            + " "
-            + str(three)
-+ "/"
-            + str(three)
-            + "/"
-            + str(three)
-            + "\n"
-        )
-    f_mesh.close()
-    f.close()
+        f.write("\n")
+        for i in range(1, nbr_vert + 1):
+            j = textured_nodes[i]
+            f.write(
+                "vn "
+                + "{:.9f}".format(pt_in[5 * j + 3])
+                + " "
+                + "{:.9f}".format(pt_in[5 * j + 4])
+                + " "
+                + "{:.9f}".format(
+                    sqrt(max(1 - pt_in[5 * j + 3] ** 2 - pt_in[5 * j + 4] ** 2, 0))
+                )
+                + "\n"
+            )
+        f.write("\n")
+        for i in range(1, nbr_vert + 1):
+            j = textured_nodes[i]
+            f.write(
+                "vt "
+                + "{:.9f}".format(nodes_st_coord[i][0])
+                + " "
+                + "{:.9f}".format(nodes_st_coord[i][1])
+                + "\n"
+            )
+        f.write("\n")
+        f.write("usemtl orthophoto\n\n")
+        for i in range(0, nbr_tri):
+            (one, two, three) = dico_new_tri[i]
+            f.write(
+                "f "
+                + str(one)
+                + "/"
+                + str(one)
+                + "/"
+                + str(one)
+                + " "
+                + str(two)
+                + "/"
+                + str(two)
+                + "/"
+                + str(two)
+                + " "
+                + str(three)
+                + "/"
+                + str(three)
+                + "/"
+                + str(three)
+                + "\n"
+            )
     # then the mtl file
     with open(mtl_file_name, "w") as f:
         f.write(

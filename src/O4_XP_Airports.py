@@ -364,7 +364,6 @@ PACK_VERSION = 2
 # from the override pack its buildings were gone (Nuuk, 2026-11-21). The
 # pack therefore carries, per tile, a DSF with only its airports' blocks
 # (the others stay with Global Airports, so nothing is drawn twice).
-GA_DSF_DIR = os.path.join("Global Airports", "Earth nav data")
 APTID_PROPERTY = "sim/filter/aptid"
 
 
