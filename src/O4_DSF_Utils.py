@@ -1376,7 +1376,6 @@ def build_dsf(tile, download_queue):
         for terrain_idx in textured_tris:
             if len(textured_tris[terrain_idx]) == 0:
                 continue
-            # print("terrain_idx = "+str(terrain_idx))
             f.write(struct.pack("<B", 4))  # SET DEFINITION 16
             f.write(struct.pack("<H", terrain_idx))  # TERRAIN INDEX
             flag = (

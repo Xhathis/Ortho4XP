@@ -2108,58 +2108,6 @@ def build_geotiffs(tile, texture_attributes_list):
 ################################################################################
 
 ################################################################################
-def build_texture_region(
-    dest_dir, latmin, latmax, lonmin, lonmax, zoomlevel, provider_code
-):
-    [til_xmin, til_ymin] = GEO.wgs84_to_orthogrid(latmax, lonmin, zoomlevel)
-    [til_xmax, til_ymax] = GEO.wgs84_to_orthogrid(latmin, lonmax, zoomlevel)
-    nbr_to_do = ((til_ymax - til_ymin) / 16 + 1) * (
-        (til_xmax - til_xmin) / 16 + 1
-    )
-    print("Number of tiles to download at most : ", nbr_to_do)
-    for til_y_top in range(til_ymin, til_ymax + 1, 16):
-        for til_x_left in range(til_xmin, til_xmax + 1, 16):
-            (y0, x0) = GEO.gtile_to_wgs84(til_x_left, til_y_top, zoomlevel)
-            (y1, x1) = GEO.gtile_to_wgs84(
-                til_x_left + 16, til_y_top + 16, zoomlevel
-            )
-            bbox_4326 = (x0, y0, x1, y1)
-            if has_data(
-                bbox_4326,
-                providers_dict[provider_code]["extent"],
-                return_mask=False,
-                mask_size=(4096, 4096),
-            ):
-                file_name = FNAMES.jpeg_file_name_from_attributes(
-                    til_x_left, til_y_top, zoomlevel, provider_code
-                )
-                if os.path.isfile(os.path.join(dest_dir, file_name)):
-                    print("recycling one")
-                    nbr_to_do -= 1
-                    continue
-                print("building one")
-                download_jpeg_ortho(
-                    dest_dir,
-                    file_name,
-                    til_x_left,
-                    til_y_top,
-                    zoomlevel,
-                    provider_code,
-                    super_resol_factor=1,
-                )
-            else:
-                print("skipping one")
-            nbr_to_do -= 1
-            print(nbr_to_do)
-    return
-
-
-################################################################################
-
-
-################################################################################
-
-################################################################################
 def create_tile_preview(lat, lon, zoomlevel, provider_code):
     UI.red_flag = False
     if not os.path.exists(FNAMES.Preview_dir):

@@ -1048,40 +1048,6 @@ def least_square_fit_altitude_along_way(way, steps, dem, weights=False):
 
 
 ################################################################################
-# def spline_fit_altitude_along_way(way, steps, dem, weights=False):
-#     linestring = affinity.affine_transform(
-#         geometry.LineString(way), [scalx, 0, 0, 1, 0, 0]
-#     )
-#     tmp = dem.alt_vec(
-#         numpy.array(
-#             geometry.LineString(
-#                 [
-#                     linestring.interpolate(x, normalized=True)
-#                     for x in numpy.arange(steps + 1) / steps
-#                 ]
-#             )
-#             * numpy.array([1 / scalx, 1])
-#         )
-#     )
-#     if not weights:
-#         return (
-#             linestring,
-#             scipy.interpolate.splrep(numpy.arange(steps + 1) / steps, tmp, s=0),
-#         )
-#     else:
-#         w = (
-#             numpy.maximum(
-#                 numpy.arange(steps + 1), steps - numpy.arange(steps + 1)
-#             )
-#             + steps // 2
-#         ) ** 2
-#         w /= numpy.sum(w)
-#         return (
-#             linestring,
-#             scipy.interpolate.splrep(numpy.arange(steps + 1) / steps, tmp, w=w),
-#         )
-
-################################################################################
 def weighted_alt(node, alt_idx, alt_dico, dem):
     eps1 = 0.003
     eps2 = 0.0003
