@@ -910,7 +910,7 @@ def triangulate(name, path_to_Ortho4XP_dir):
     fingers_crossed.stdout.close()  # read to its end; close the pipe
     fingers_crossed.wait()
     if fingers_crossed.returncode:
-        print("\nERROR: triangle crashed, check osm mask data.\n")
+        UI.lvprint(0, "\nERROR: triangle crashed, check osm mask data.\n")
         return 0
     return 1
 

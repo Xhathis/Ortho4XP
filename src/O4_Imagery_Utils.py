@@ -40,7 +40,8 @@ except Exception:
         has_URL = True
     except Exception as e:
         # User-editable code: any error in it must not stop Ortho4XP.
-        print(
+        UI.lvprint(
+            0,
             "ERROR: Providers/O4_Custom_URL.py contains invalid code",
             f"({type(e).__name__}: {e}).",
             "The corresponding providers won't probably work.",
@@ -213,13 +214,14 @@ def initialize_extents_dict():
                             if int(value) == 102060:
                                 GEO.record_epsg(3912)
                             else:
-                                print("Error in epsg code for extent", extent_code)
+                                UI.lvprint(0, "Error in epsg code for extent", extent_code)
                                 valid_extent = False
                     elif key == "mask_bounds":
                         try:
                             extent[key] = [float(x) for x in value.split(",")]
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading mask bounds for extent",
                                 extent_code,
                             )
@@ -228,7 +230,8 @@ def initialize_extents_dict():
                         try:
                             extent[key] = float(value)
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading mask buffer width for extent",
                                 extent_code,
                             )
@@ -237,7 +240,8 @@ def initialize_extents_dict():
                         try:
                             extent[key] = float(value)
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading mask width for extent",
                                 extent_code,
                             )
@@ -247,7 +251,7 @@ def initialize_extents_dict():
                     extent["dir"] = dir_name
                     extents_dict[extent_code] = extent
                 else:
-                    print("Error in reading extent definition file for", file_name)
+                    UI.lvprint(0, "Error in reading extent definition file for", file_name)
                     pass
 
 
@@ -276,7 +280,8 @@ def initialize_color_filters_dict():
             if valid_color_filters:
                 color_filters_dict[color_code] = color_filters
             else:
-                print(
+                UI.lvprint(
+                    0,
                     "Could not understand color filter ",
                     color_code,
                     ", skipping it.",
@@ -348,14 +353,16 @@ def initialize_providers_dict():
                                 value, {"user_agent_generic": user_agent_generic}
                             )
                             if type(provider[key]) is not dict:
-                                print(
+                                UI.lvprint(
+                                    0,
                                     "Definition of fake headers for provider",
                                     provider_code,
                                     "not valid.",
                                 )
                                 valid_provider = False
                         except Exception:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Definition of fake headers for provider",
                                 provider_code,
                                 "not valid.",
@@ -402,20 +409,23 @@ def initialize_providers_dict():
                         try:
                             provider[key] = int(value)
                             if provider[key] < 100 or provider[key] > 10000:
-                                print(
+                                UI.lvprint(
+                                    0,
                                     "Wm(t)s size for provider ",
                                     provider_code,
                                     "seems off limits, provider skipped.",
                                 )
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading wms size for provider",
                                 provider_code,
                             )
                             valid_provider = False
                     elif key in ["wms_version", "wmts_version"]:
                         if len(value.split(".")) < 2:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading wms version for provider",
                                 provider_code,
                             )
@@ -427,7 +437,8 @@ def initialize_providers_dict():
                                 for _ in range(40)
                             ]
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading top left corner for provider",
                                 provider_code,
                             )
@@ -438,7 +449,8 @@ def initialize_providers_dict():
                                 [float(x) for x in value.split()]
                             )
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading scaledenominator for provider",
                                 provider_code,
                             )
@@ -451,7 +463,8 @@ def initialize_providers_dict():
                                 [float(x) for x in value.split()]
                             )
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading resolutions for provider",
                                 provider_code,
                             )
@@ -465,7 +478,8 @@ def initialize_providers_dict():
                             if provider[key] < 1:
                                 raise ValueError
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading max_threads for provider",
                                 provider_code,
                                 ": not a positive integer, using the default.",
@@ -475,7 +489,8 @@ def initialize_providers_dict():
                         pass
                     elif key == "color_filters":
                         if value not in color_filters_dict:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading color_filter for provider",
                                 provider_code,
                                 ". Assuming none.",
@@ -483,7 +498,8 @@ def initialize_providers_dict():
                             provider[key] = "none"
                     elif key == "imagery_dir":
                         if value not in ("grouped", "normal", "code"):
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading imagery_dir for provider",
                                 provider_code,
                                 ". Assuming grouped.",
@@ -510,7 +526,8 @@ def initialize_providers_dict():
                                 )
                             )
                         except Exception:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading capabilities for provider",
                                 provider_code,
                             )
@@ -542,10 +559,11 @@ def initialize_providers_dict():
                                     ]
                                 ]
                             else:
-                                print("no tilematrixset found")
+                                UI.lvprint(0, "no tilematrixset found")
                                 valid_provider = False
                         except Exception:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Error in reading capabilities for provider",
                                 provider_code,
                             )
@@ -621,7 +639,8 @@ def initialize_combined_providers_dict():
                         :-1
                     ].split()
                     if layer_code not in providers_dict:
-                        print(
+                        UI.lvprint(
+                            0,
                             "Unknown provider in combined provider",
                             provider_code,
                             ":",
@@ -634,7 +653,8 @@ def initialize_combined_providers_dict():
                         extent_code[0] == "!"
                         and (extent_code[1:] not in extents_dict)
                     ):
-                        print(
+                        UI.lvprint(
+                            0,
                             "Unknown extent in combined provider",
                             provider_code,
                             ":",
@@ -645,7 +665,8 @@ def initialize_combined_providers_dict():
                         try:
                             color_code = providers_dict[layer_code]["color_filters"]
                         except KeyError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Unknown color filter in combined provider",
                                 provider_code,
                                 ":",
@@ -675,7 +696,8 @@ def initialize_combined_providers_dict():
                                     ["saturation", saturation]
                                 )
                         except ValueError:
-                            print(
+                            UI.lvprint(
+                                0,
                                 "Unknown color filter in combined provider",
                                 provider_code,
                                 ":",
@@ -683,7 +705,8 @@ def initialize_combined_providers_dict():
                             )
                             continue
                     if priority not in ["low", "medium", "high", "mask"]:
-                        print(
+                        UI.lvprint(
+                            0,
                             "Unknown priority in combined provider",
                             provider_code,
                             ":",
@@ -701,13 +724,15 @@ def initialize_combined_providers_dict():
             if comb_list:
                 combined_providers_dict[provider_code] = comb_list
             else:
-                print(
+                UI.lvprint(
+                    0,
                     "Combined provider",
                     provider_code,
                     "did not contained valid providers, skipped.",
                 )
         except Exception:
-            print(
+            UI.lvprint(
+                0,
                 "Error reading definition of combined provider", provider_code
             )
 
