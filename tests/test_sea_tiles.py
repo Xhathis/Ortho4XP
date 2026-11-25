@@ -89,6 +89,48 @@ def test_download_failure_is_not_sea(monkeypatch):
     assert not DEM.default_source_has_no_land(15, -61)
 
 
+
+def put_grid(lat, lon, side=1201, value=0, voids=0):
+    path = FNAMES.viewfinderpanorama(lat, lon)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = numpy.full(side * side, value, dtype=">i2")
+    data[:voids] = -32768
+    data.tofile(path)
+    return data
+
+
+def test_flat_zero_file_is_sea(monkeypatch):
+    # S45E166.hgt of the user's library: only zeros; built as flat water
+    # instead of being skipped (#143).
+    world(monkeypatch)
+    calls = no_download(monkeypatch)
+    put_grid(-45, 166, voids=1000)
+    assert DEM.default_source_has_no_land(-45, 166)
+    assert calls == []
+
+
+def test_one_land_sample_is_land(monkeypatch):
+    world(monkeypatch)
+    no_download(monkeypatch)
+    data = put_grid(-45, 166)
+    data[600 * 1201 + 600] = 3
+    data.tofile(FNAMES.viewfinderpanorama(-45, 166))
+    assert not DEM.default_source_has_no_land(-45, 166)
+
+
+def test_below_sea_level_is_land(monkeypatch):
+    # The Caspian lowland: every sample below 0 m, still land.
+    world(monkeypatch, (46, 48))
+    no_download(monkeypatch)
+    put_grid(46, 48, value=-25)
+    assert not DEM.default_source_has_no_land(46, 48)
+
+
+def test_flat_zero_1s_file_is_sea(monkeypatch):
+    world(monkeypatch, (-45, 166))
+    no_download(monkeypatch)
+    put_grid(-45, 166, side=3601)
+    assert DEM.default_source_has_no_land(-45, 166)
 def test_generic_tif_is_not_sea(monkeypatch):
     world(monkeypatch)
     tif = FNAMES.generic_tif(-7, 72)
