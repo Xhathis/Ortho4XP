@@ -92,7 +92,7 @@ something.
 ## Testing method
 
 1. **Unit tests:** `venv\Scripts\python.exe -m pytest` (repo root, ~30 s,
-   794 tests on dev d08d0fe). `tests/conftest.py` switches to an empty
+   806 tests on test 7912d6a). `tests/conftest.py` switches to an empty
    temp folder before any O4 module is imported, so tests never touch the
    user's data. Run them before every commit; add a test before changing
    a pure function; new tests should fail on dev where testable.
@@ -127,7 +127,9 @@ something.
    <src> --geofabrik-dir <scratch>` (never the user's Geofabrik folder),
    `sim_custom_dem_gap.py`, `sim_batch_cleaning.py`, `check_overpass_slot.py`,
    `check_step3_provider.py`, `probe_mesh.py`, `pe_stack.py`,
-   `fetch_osm_api.py`, `fix_dem_folders.py`, `verify_copy.py`.
+   `fetch_osm_api.py`, `fix_dem_folders.py`, `verify_copy.py`,
+   `profile_steps.py 1|2.5 [src] [--verify-encroach]` (cProfile of
+   step 1 or 2.5 in the regression ws, after a regression run).
 6. **In `G:\Ortho4XP`** (the user's folder, other tiles): `gui_smoke.py
    [src_dir]` (7 checks; hash-check `.last_gui_params.txt`, `Ortho4XP.cfg`
    and `Ortho4XP.log` before and after, the GUI must be closed),
@@ -187,9 +189,10 @@ something.
 
 ## Current state (2026-11-25)
 
-- `dev` c21fa6e, pushed: issues #1-#141. `test` 37e8ff8 adds #142,
-  #143 and the dead-code removal (802 unit tests, regression PASS,
-  sims 15/15); waiting for the user's OK to go to `dev`.
+- `dev` c21fa6e, pushed: issues #1-#141. `test` 7912d6a adds #142,
+  #143, dead code and unused data removed, provider errors logged and
+  step 1 ~17% faster (806 unit tests, regression PASS, sims 15/15);
+  waiting for the user's OK to go to `dev`.
 - Last batches: E (121 wilderness tiles, ZL16) and 4 ZL15 holes, 124
   built, 0 failed (2026-11-25); then +69-052 for the Qeqertaq zone (#140):
   both zones on GO218, so every zone tile is on its zone's imagery.
