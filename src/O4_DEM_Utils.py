@@ -857,10 +857,33 @@ def world_tile_has_land(lat, lon):
     return bool(world_tiles[89 - lat, (180 + lon) % 360])
 
 
+def hgt_is_flat_sea(path):
+    """True when an .hgt holds only 0 m and voids: sea, no land at all.
+
+    Some library files are such (S45E166.hgt of 2022: 3601 x 3601 zeros),
+    so a tile of open sea was built as flat water (#143). Exactly zero, not
+    "at most zero": land below sea level (the Caspian lowland, polders) has
+    real negative heights. A file that is not a square 1", 3" or finer grid
+    counts as land (doubt)."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return False
+    side = int(round((size // 2) ** 0.5))
+    if size != 2 * side * side or (side - 1) % 1200 or side < 1201:
+        return False
+    try:
+        data = numpy.fromfile(path, dtype=">i2")
+    except (OSError, ValueError):
+        return False
+    return not numpy.any((data != 0) & (data != -32768))
+
+
 def default_source_has_no_land(lat, lon):
     """True when the default elevation source gives the tile zero altitude
     everywhere because it has no land: sea in world_tiles.png and no
-    Viewfinder file in the library, or in no Viewfinder archive (#40).
+    Viewfinder file in the library, or in no Viewfinder archive (#40), or
+    a library file with only 0 m and voids in it (#143).
 
     May download the tile's Viewfinder zone (as step 1 would anyway). False
     when in doubt, e.g. when that download fails.
@@ -868,7 +891,7 @@ def default_source_has_no_land(lat, lon):
     if os.path.exists(FNAMES.generic_tif(lat, lon)):
         return False  # a user's own GeoTIFF is the default source then
     if os.path.exists(FNAMES.viewfinderpanorama(lat, lon)):
-        return False
+        return hgt_is_flat_sea(FNAMES.viewfinderpanorama(lat, lon))
     if not world_tile_has_land(lat, lon):
         return True
     if _ensure_viewfinder(lat, lon):
