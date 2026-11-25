@@ -85,7 +85,7 @@ something.
   `os.name`) or the bundled `.exe` tools, and "CHANGES OUTPUT" when a
   normal build's DSF or masks change (needs a new baseline).
 - Commit or push only when the user asks.
-- New issues are numbered on (next: #142). An open one is listed under
+- New issues are numbered on (next: #144). An open one is listed under
   "Open issues" here; once fixed, its entry and test results move to
   `docs/claude-history.md` (Known issues, Test results).
 
@@ -182,20 +182,25 @@ something.
   for fresh tiles), `then_run.ps1` chains one after another; lists, logs
   and pre-check reports in that folder. `.last_batch_tiles.txt` holds a
   running batch's unfinished tiles (the GUI's tile window selects them).
-- `keep_dsf_backup` is on (default): 67 `.dsf.bak` (7.5 GB) of the
-  rebuilds of 11-15..11-24 exist; the user decides about them.
+- `keep_dsf_backup` is on (default); the old `.dsf.bak` files were
+  deleted in the 2026-11-25 cleanup.
 
 ## Current state (2026-11-25)
 
-- `dev` d08d0fe, pushed: issues #1-#140 fixed or done, 794
-  unit tests, regression PASS, sims 15/15, gui_smoke 7/7.
+- `dev` c21fa6e, pushed: issues #1-#141. `test` 37e8ff8 adds #142,
+  #143 and the dead-code removal (802 unit tests, regression PASS,
+  sims 15/15); waiting for the user's OK to go to `dev`.
 - Last batches: E (121 wilderness tiles, ZL16) and 4 ZL15 holes, 124
   built, 0 failed (2026-11-25); then +69-052 for the Qeqertaq zone (#140):
   both zones on GO218, so every zone tile is on its zone's imagery.
 - OSM caches pass 30 days from 2026-12-08 (most 12-14..12-24); a refresh
   happens only when a tile's step 1 runs. All 167 extracts a refresh of
   every tile needs are in the store (36.4 GB).
-- #141 (BOM in tile list files) fixed on `test` e2fd834.
+- Full audit and cleanup 2026-11-25 (log
+  `G:\Ortho4XP_tests\cleanup_2026-11-25.log`): 1,358.9 GB freed (JPGs of
+  built tiles, all masks, .dsf.bak/.cfg.bak, old sims and baselines).
+  All 1,598 tiles complete (one DSF, all textures). Only the
+  d74d672_frozen baseline is left.
 
 ## Open issues
 
