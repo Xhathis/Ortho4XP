@@ -349,6 +349,18 @@ def test_gate_counts_answers_as_cached(osm_dir):
 
 
 # --- the tool ----------------------------------------------------------------
+
+def test_tool_tile_file_with_bom(tmp_path):
+    # A list saved with a BOM stopped the tool at its first tile (#141).
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "prepare_osm_extracts",
+        os.path.join(os.path.dirname(__file__), "..", "prepare_osm_extracts.py"))
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    lst = tmp_path / "tiles.txt"
+    lst.write_text("+69-052  # Qeqertaq\n-08+072\n", encoding="utf-8-sig")
+    assert tool.read_tile_file(str(lst)) == [(69, -52), (-8, 72)]
 def test_prepare_tool(tmp_path, osm_dir, monkeypatch, capsys):
     import importlib.util
     spec = importlib.util.spec_from_file_location(

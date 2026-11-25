@@ -75,7 +75,8 @@ def read_tile_file(path):
     """Tiles of a list file: one per line, # starts a comment (also after
     the tile, as in "+63-152  # Denali", #108)."""
     tiles = []
-    with open(path, encoding="utf-8") as f:
+    # utf-8-sig: a list saved with a BOM stopped at its first tile (#141).
+    with open(path, encoding="utf-8-sig") as f:
         for line in f:
             text = line.split("#", 1)[0].strip()
             if text:

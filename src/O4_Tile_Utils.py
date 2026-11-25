@@ -1328,7 +1328,9 @@ def read_leftover_tiles():
     """
     tiles = []
     try:
-        with open(leftover_tiles_path(), encoding="utf-8",
+        # utf-8-sig: a list saved with a BOM (PowerShell 5.1, editors'
+        # "UTF-8 with BOM") lost its first tile (#141).
+        with open(leftover_tiles_path(), encoding="utf-8-sig",
                   errors="replace") as f:
             for line in f:
                 tile = _parse_short_latlon(line.split("#", 1)[0].strip())

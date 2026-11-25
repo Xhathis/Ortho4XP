@@ -56,6 +56,15 @@ def test_read_tiles_with_comments():
     os.remove(path())
 
 
+def test_read_file_with_bom():
+    # PowerShell 5.1's Out-File -Encoding utf8 and editors' "UTF-8 with
+    # BOM" put U+FEFF before the first tile; it was dropped silently (#141).
+    with open(path(), "w", encoding="utf-8-sig") as f:
+        f.write("+69-052  # Qeqertaq\n+70-052\n")
+    assert TILE.read_leftover_tiles() == [(69, -52), (70, -52)]
+    os.remove(path())
+
+
 def fake_build(calls, fail=(), sea=()):
     def one(tile, lat, lon, *flags):
         calls.append((lat, lon))
