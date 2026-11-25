@@ -1739,7 +1739,7 @@ def remove_unwanted_textures(tile):
         if f[-4:] != ".dds":
             continue
         if f not in texture_list:
-            print("Removing obsolete texture", f)
+            UI.lvprint(1, "Removing obsolete texture", f)
             remove_if_exists(os.path.join(tile.build_dir, "textures", f))
 
 def _delete_white_files(tile, file_names):
