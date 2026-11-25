@@ -195,21 +195,7 @@ something.
 - OSM caches pass 30 days from 2026-12-08 (most 12-14..12-24); a refresh
   happens only when a tile's step 1 runs. All 167 extracts a refresh of
   every tile needs are in the store (36.4 GB).
-- Open: #141 (below).
-
-## Open issues
-
-141. A tile list file that starts with a UTF-8 BOM (PowerShell 5.1
-    `Out-File -Encoding utf8`, editors' "UTF-8 with BOM"):
-    TILE.read_leftover_tiles silently drops its first tile (the GUI's
-    tile window does not select it); prepare_osm_extracts.py
-    read_tile_file stops with "not a tile name: '﻿+LL+LLL'". Fix:
-    read with utf-8-sig, a unit test for each. (batch_run.py in the
-    test tools already reads utf-8-sig since 2026-11-25.)
-- Not done (measured or judged not worth it, see the history): speedups of
-  insert_edge and blur_mask (would change mesh/mask bytes), repairing
-  invalid OSM water polygons, one Overpass request per tile, the
-  Linux/macOS Triangle4XP rebuild.
+- No open issue. #141 (BOM in tile list files) fixed on `test` e2fd834.
 
 ## Coding style
 
