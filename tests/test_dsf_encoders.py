@@ -83,11 +83,32 @@ def test_cross_pool_triangles(n):
     assert DSF._cross_pool_triangle_cmds(pairs, new_idx) == _old_cross(pairs, new_idx)
 
 
-def test_float2qquad_same_as_binary_repr():
+def test_float2qquad_prefix_same_as_binary_repr():
+    # The first 24 bits (which pick a node's pool) are what they were.
     rnd = random.Random(1)
-    xs = [0.0, 1e-12, -1e-12, -1e-7, -0.25, 0.5, 0.999999999, 1.0, 1.5]
+    xs = [0.0, 1e-12, 0.5, 0.999999999, 1.0, 1.5]
     xs += [rnd.random() for _ in range(20000)]
     for x in xs:
         old = ("111111111111111111111111" if x >= 1
                else numpy.binary_repr(int(16777216 * x)).zfill(24))
-        assert DSF.float2qquad(x) == old, x
+        assert DSF.float2qquad(x)[:24] == old, x
+
+
+def test_float2qquad_negative_clamped():
+    assert DSF.float2qquad(-1e-7) == "0" * DSF.QQUAD_BITS
+
+
+def test_float2qquad_vertex_position_at_every_pool_depth():
+    # build_dsf: a pool at depth `level` has corner int(bits[:level]) /
+    # 2**level and scale 2**-level; the vertex is bits[level:level + 16]
+    # / 65536 of it. Must be within one step of the true position (#146:
+    # deeper than 8 it was 2**(level - 8) times too close to the corner).
+    rnd = random.Random(2)
+    for level in range(0, 15):
+        for _ in range(500):
+            x = rnd.random()
+            b = DSF.float2qquad(x)
+            corner = int(b[:level], 2) / 2 ** level if level else 0.0
+            pos = corner + int(b[level:level + 16], 2) / 65536 / 2 ** level
+            assert len(b[level:level + 16]) == 16, level
+            assert abs(pos - x) <= 2 ** -(level + 16), (level, x, pos)
