@@ -1014,13 +1014,6 @@ def refine_way(way, max_length):  # max_length assumed in meter
 
 
 ################################################################################
-def projcoords(way, A, B):
-    return numpy.sum(
-        (way - A) * (B - A) * numpy.array([scalx ** 2, 1]), axis=1
-    ) / numpy.sum((B - A) * (B - A) * numpy.array([scalx ** 2, 1]))
-
-
-################################################################################
 def least_square_fit_altitude_along_way(way, steps, dem, weights=False):
     linestring = affinity.affine_transform(
         geometry.LineString(way), [scalx, 0, 0, 1, 0, 0]
