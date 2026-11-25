@@ -1345,27 +1345,79 @@ def OSM_to_MultiPolygon(osm_layer, lat, lon, filter=None):
     todo = len(osm_layer.dicosmfirst["w"]) + len(osm_layer.dicosmfirst["r"])
     step = int(todo / 100) + 1
     done = 0
+
+    def ring(nodelist):
+        return geometry.Polygon(
+            numpy.round(
+                numpy.array(
+                    [osm_layer.dicosmn[nodeid] for nodeid in nodelist],
+                    dtype=numpy.float64,
+                )
+                - numpy.array([lon, lat], dtype=numpy.float64),
+                7,
+            )
+        )
+
+    # Relations are built first, but added after the ways as before (the
+    # order of the polygons decides node numbering further down). A closed
+    # way that is also an outer member of a relation built here is the old
+    # style of tagging a multipolygon (tags on the outer way as well): as an
+    # area of its own it has no holes, and its union with the relation
+    # turned every island of such a lake into water (#145).
+    rel_results = []
+    covered_ways = set()
+    for relid in osm_layer.dicosmfirst["r"]:
+        if done % step == 0:
+            UI.progress_bar(1, int(100 * done / todo))
+        done += 1
+        try:
+            multiout = [ring(nodelist)
+                        for nodelist in osm_layer.dicosmr[relid]["outer"]]
+            multiout = ops.unary_union([geom for geom in multiout if geom.is_valid])
+            multiin = [ring(nodelist)
+                       for nodelist in osm_layer.dicosmr[relid]["inner"]]
+            multiin = ops.unary_union([geom for geom in multiin if geom.is_valid])
+        except Exception as e:
+            UI.logprint(e)
+            continue
+        multipol = multiout.difference(multiin)
+        excluded = bool(
+            filter and filter(multipol, relid, osm_layer.dicosmtags["r"]))
+        pols = []
+        for pol in (
+            multipol.geoms
+            if ("Multi" in multipol.geom_type or "Collection" in multipol.geom_type)
+            else [multipol]
+        ):
+            if not pol.area:
+                continue
+            if not pol.is_valid:
+                UI.logprint(
+                    "Relation",
+                    relid,
+                    "contains an invalid polygon which was discarded",
+                )
+                continue
+            pols.append(pol)
+        rel_results.append((excluded, pols))
+        if pols:
+            covered_ways.update(
+                osm_layer.dicosmrorig.get(relid, {}).get("outer", ()))
     for wayid in osm_layer.dicosmfirst["w"]:
         if done % step == 0:
             UI.progress_bar(1, int(100 * done / todo))
+        done += 1
+        if wayid in covered_ways:
+            continue
         if osm_layer.dicosmw[wayid][0] != osm_layer.dicosmw[wayid][-1]:
             UI.logprint(
                 "Non closed way starting at",
                 osm_layer.dicosmn[osm_layer.dicosmw[wayid][0]],
                 ", skipped.",
             )
-            done += 1
             continue
-        way = numpy.round(
-            numpy.array(
-                [osm_layer.dicosmn[nodeid] for nodeid in osm_layer.dicosmw[wayid]],
-                dtype=numpy.float64,
-            )
-            - numpy.array([[lon, lat]], dtype=numpy.float64),
-            7,
-        )
         try:
-            pol = geometry.Polygon(way)
+            pol = ring(osm_layer.dicosmw[wayid])
             if not pol.area:
                 continue
             if not pol.is_valid:
@@ -1374,76 +1426,16 @@ def OSM_to_MultiPolygon(osm_layer, lat, lon, filter=None):
                     osm_layer.dicosmn[osm_layer.dicosmw[wayid][0]],
                     ", skipped.",
                 )
-                done += 1
                 continue
         except Exception as e:
             UI.vprint(2, e)
-            done += 1
             continue
         if filter and filter(pol, wayid, osm_layer.dicosmtags["w"]):
             excludelist.append(pol)
         else:
             multilist.append(pol)
-        done += 1
-    for relid in osm_layer.dicosmfirst["r"]:
-        if done % step == 0:
-            UI.progress_bar(1, int(100 * done / todo))
-        try:
-            multiout = [
-                geometry.Polygon(
-                    numpy.round(
-                        numpy.array(
-                            [osm_layer.dicosmn[nodeid] for nodeid in nodelist],
-                            dtype=numpy.float64,
-                        )
-                        - numpy.array([lon, lat], dtype=numpy.float64),
-                        7,
-                    )
-                )
-                for nodelist in osm_layer.dicosmr[relid]["outer"]
-            ]
-            multiout = ops.unary_union([geom for geom in multiout if geom.is_valid])
-            multiin = [
-                geometry.Polygon(
-                    numpy.round(
-                        numpy.array(
-                            [osm_layer.dicosmn[nodeid] for nodeid in nodelist],
-                            dtype=numpy.float64,
-                        )
-                        - numpy.array([lon, lat], dtype=numpy.float64),
-                        7,
-                    )
-                )
-                for nodelist in osm_layer.dicosmr[relid]["inner"]
-            ]
-            multiin = ops.unary_union([geom for geom in multiin if geom.is_valid])
-        except Exception as e:
-            UI.logprint(e)
-            done += 1
-            continue
-        multipol = multiout.difference(multiin)
-        if filter and filter(multipol, relid, osm_layer.dicosmtags["r"]):
-            targetlist = excludelist
-        else:
-            targetlist = multilist
-        for pol in (
-            multipol.geoms
-            if ("Multi" in multipol.geom_type or "Collection" in multipol.geom_type)
-            else [multipol]
-        ):
-            if not pol.area:
-                done += 1
-                continue
-            if not pol.is_valid:
-                UI.logprint(
-                    "Relation",
-                    relid,
-                    "contains an invalid polygon which was discarded",
-                )
-                done += 1
-                continue
-            targetlist.append(pol)
-        done += 1
+    for (excluded, pols) in rel_results:
+        (excludelist if excluded else multilist).extend(pols)
     if filter:
         ret_val = (
             geometry.MultiPolygon(multilist),
