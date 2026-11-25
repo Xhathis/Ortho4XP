@@ -1192,6 +1192,24 @@ Test results:
   (795 + the DFA test skipped without DF.lay in a worktree), pyflakes 0,
   regression PASS (DSF, 17/17 masks, app log identical). `test` @
   e2fd834: 795 passed, 1 skipped.
+
+- Full audit 2026-11-25 (dev c21fa6e): all 1,598 tiles have one DSF,
+  every terrain and texture it names, no odd DDS sizes; 1,508 overlays
+  (the 90 tiles without one have no X-Plane DSF); all 69 providers, 3
+  combined, 8 filters and 38 extents load; no compile or deprecation
+  warnings. Cleanup with the user's OK (log
+  G:\Ortho4XP_tests\cleanup_2026-11-25.log, 0 failures, 1,358.9 GB):
+  Orthophotos JPGs of built tiles (1,331 GB; 12.2 GB for unbuilt tiles
+  kept), all Masks (17.66 GB), 67 .dsf.bak (7.5 GB), 734 tile .cfg.bak,
+  zOrtho4XP_-45+166 (#143), extract answers of +59-146/+72-073/+72-074,
+  6 root cfg backups, 11 Previews JPGs, 30 old sims_* folders, a stray
+  NED1 tif, baselines dev-c85e958, test-4fa5e9f, test-702e768.
+  Junctions, 21,494 .hgt files and the extract store checked after.
+- #142 `fix/masks-cleanup` @ 8ece8d0, #143 `fix/zero-hgt-sea` @ e620608,
+  dead code `fix/remove-dead-code` @ cab5ad1 + dca4df4 (OBJ export
+  byte-identical on a synthetic mesh, old vs new), each from dev
+  c21fa6e. `test` @ 37e8ff8: 802 passed, 1 skipped, pyflakes 0,
+  regression PASS (DSF, 17/17 masks, app log identical), sims 15/15.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2441,6 +2459,22 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     as before. Not changed: Ortho4XP.cfg and tile configs are read in the
     ANSI code page (written so by Ortho4XP); a BOM there would make the
     first line an unknown key (ignored).
+142. **FIXED** (`8ece8d0`): at cleaning_level 3 the mesh and .apt files
+    went but the tile's Masks folder stayed for good (17.7 GB for 1,598
+    tiles). Only step 3 reads masks and it needs the mesh; step 2.5 makes
+    them anew. `_remove_mesh_files` now removes the mask folder too, so
+    batches keep them exactly as long as the mesh (#42, #45). 3 tests.
+143. **FIXED** (`e620608`): `DEM.default_source_has_no_land` said "land"
+    whenever the library had the tile's .hgt, but some library files are
+    all zero/void (S45E166): -45+166 was built as a flat sea tile instead
+    of being skipped as open sea (#41). `DEM.hgt_is_flat_sea` reads the
+    grid (numpy, ~0.03 s) and calls it sea only when every sample is 0 or
+    void; below-sea land (Caspian) stays land. 4 tests.
+- Dead code removed 2026-11-25 (`cab5ad1`): O4_Scenery_Utils.py,
+    DEM.create_normal_map, IMG.build_combined_ortho/build_provider_texture,
+    EXTRACT.tile_of, VECT.projcoords, FNAMES.input_ele_file/
+    output_poly_file/SRTM_1sec, XPAPT.GA_DSF_DIR. `dca4df4`: the GUI OBJ
+    export closes its files on every path (Stop, exceptions).
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
