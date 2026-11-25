@@ -1210,6 +1210,15 @@ Test results:
   byte-identical on a synthetic mesh, old vs new), each from dev
   c21fa6e. `test` @ 37e8ff8: 802 passed, 1 skipped, pyflakes 0,
   regression PASS (DSF, 17/17 masks, app log identical), sims 15/15.
+- Improvements 2026-11-25, each from dev c21fa6e (print-to-ui from
+  fix/remove-dead-code): `fix/unused-data` @ 3649cd3, `fix/print-to-ui`
+  @ 888bd00 + ddffb66, `fix/encroach-prefilter` @ 17d5f38 (4 tests;
+  checked on all 309,161 pairs of +55+012 with profile_steps.py
+  --verify-encroach: 275,409 answered, all consistent). `test` @
+  7912d6a: 806 passed, 1 skipped, pyflakes 0, regression PASS (DSF and
+  17/17 masks byte-identical, step 1 33.1 -> 27.6 s); app log +1 line
+  "Unknown provider in combined provider DFA : DF" (the ws has no DF.lay,
+  the message was console-only before), sims 15/15.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2475,6 +2484,14 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     EXTRACT.tile_of, VECT.projcoords, FNAMES.input_ele_file/
     output_poly_file/SRTM_1sec, XPAPT.GA_DSF_DIR. `dca4df4`: the GUI OBJ
     export closes its files on every path (Stop, exceptions).
+- More removed 2026-11-25: IMG.build_texture_region (only caller gone),
+    commented-out include_buildings / spline_fit_altitude_along_way,
+    the filters AltoAdige1415, Itris, PCN06_N46E011, SP_2015 (no
+    provider names them), Patches/+39-078 (wrong level, never read;
+    Patches/README.txt now says where patches go). Provider, extent,
+    filter and O4_Custom_URL errors go through UI.lvprint (GUI console and
+    log) instead of print. Kept: _run_batch_phase and dsf_airport_ids,
+    small helpers the tests use.
 13. **FIXED** (`c456e36`, also rejects 0 and negatives).
     **`max_threads` in a .lay file is not validated:** when `int()`
     fails (e.g. `max_threads=many`), the raw string stays in the
@@ -2495,6 +2512,16 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
   batch tiles (#27, 3 cached Nova Scotia tiles: 115 s vs 169 s; fresh
   tiles gain more, they wait on servers).
 - Ideas not done: algorithmic work in insert_edge, blur_mask.
+  2026-11-25: insert_edge done without output change (see Test
+  results, fix/encroach-prefilter): 89% of bbox hits are answered in
+  plain floats, the index returns ids only. Left: rtree insert/delete
+  (~9 + 6.6 s profiled; libspatialindex R* rebalancing). A cheaper
+  variant returns hits in another order: other node ids, other mesh.
+  blur_mask: numpy.convolve is SIMD-fast (6144x6144, both passes:
+  0.8 s at width 18, 1.2 s at width 73); an exact O(n) running-sum
+  version took ~1.0 s at both and moves ~0.1% of mask pixels by 2-4
+  levels (the float version rounds some exact integers down), so not
+  done. Skipping repeated rows would save at most 1-2 s of step 2.5.
 - 2026-11-11 (#88, #93): step 3 of the regression 28.3 s -> 20.5 s,
   same DSF. Profile of a cached build: insert_edge/rtree ~21 s,
   blur_mask ~17 s; both left (they would change mesh/mask bytes).
