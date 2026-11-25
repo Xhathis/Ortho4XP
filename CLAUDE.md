@@ -195,7 +195,11 @@ something.
 - OSM caches pass 30 days from 2026-12-08 (most 12-14..12-24); a refresh
   happens only when a tile's step 1 runs. All 167 extracts a refresh of
   every tile needs are in the store (36.4 GB).
-- No open issue. #141 (BOM in tile list files) fixed on `test` e2fd834.
+- #141 (BOM in tile list files) fixed on `test` e2fd834.
+
+## Open issues
+
+None.
 
 ## Coding style
 
