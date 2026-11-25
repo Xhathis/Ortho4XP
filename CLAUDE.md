@@ -189,10 +189,9 @@ something.
 
 ## Current state (2026-11-25)
 
-- `dev` c21fa6e, pushed: issues #1-#141. `test` 7912d6a adds #142,
-  #143, dead code and unused data removed, provider errors logged and
-  step 1 ~17% faster (806 unit tests, regression PASS, sims 15/15);
-  waiting for the user's OK to go to `dev`.
+- `dev` 08036b3, pushed: issues #1-#143 fixed, dead code and unused
+  data removed, provider errors logged, step 1 ~17% faster (806 unit
+  tests, regression PASS, sims 15/15).
 - Last batches: E (121 wilderness tiles, ZL16) and 4 ZL15 holes, 124
   built, 0 failed (2026-11-25); then +69-052 for the Qeqertaq zone (#140):
   both zones on GO218, so every zone tile is on its zone's imagery.
