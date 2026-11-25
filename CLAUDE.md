@@ -2662,6 +2662,36 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     base provider used, no missing texture, each zone's site on its
     zone's .ter): 82 zones, 84 site points, 0 problems. The other zone
     tiles get the wider zones whenever rebuilt.
+48. ~~Batch E~~ — wilderness tiles on `dev` 4b35907 (batch_run.py,
+    G:\Ortho4XP_tests\batches; pre-check precheck_2026-11-24_wild.md).
+    batch_e_zl16_wild.txt (121 tiles, GO2 ZL16: Alaska, BC/Yukon,
+    Patagonia, Scandes, NZ South Island; 2026-11-24 19:34 to 11-25 15:18,
+    19h26m): 120 built, +59-146 open sea, 0 failed; then
+    batch_e_zl15_holes.txt (+62-051, +64-053, +79-067, +79-073, GO2 ZL15,
+    11 min; started by then_run.ps1 after the first): 4 built. No ERROR;
+    4 WARNINGs, all +79-067/+79-073 without X-Plane DSF (rasters,
+    overlay); NOTEs: 79 tiles with Arc/BI pieces (#117; GO2 drops 1-2
+    levels in interior Alaska, Arc has ZL16 there), 63 limit_tris, 4
+    mask_zl at ZL15. Check (scratchpad recheck_batch_e.py): 124 new DSFs,
+    base provider used, no missing texture, 0 problems; DSFs median 138
+    MB, max 167 MB (-46-075), 14.1 GB. Airport pack 73 airports, 71 DSFs
+    (new: PANC, NZRC, XEH000F, XED002S, ...). Small-zone scan of all
+    1,474 tiles (83 zones in 45): only +69-052's Qeqertaq zone partly
+    off its imagery (built before #140): rebuild it with the next list.
+    gui_smoke 7/7 on dev 4b35907 (126 tiles in the map's view, 0
+    callback errors; .last_gui_params.txt, cfg and log hash-checked,
+    copies in cfg_backups\2026-11-25_gui_smoke).
+    OSM refresh dry run 2026-11-25 (prepare_osm_extracts.py --tile-file
+    <all 1,598 tiles> --force --dry-run, 40 s, nothing written): no cache
+    over osm_cache_max_age 30 yet; the oldest layer of each tile passes
+    it 12-08..12-13 (39 tiles), 12-14 (378), 12-15..12-18 (713),
+    12-19..12-25 (468). A refresh happens only when a tile's step 1
+    runs. 1,596 tiles in 81 groups from 167 extracts, 160 on disk (34.4
+    GB); 7 would be downloaded for 15 tiles whose caches came from
+    Overpass: spain (+36-006), papua (-03/-07/-08/-09/-10+141),
+    karlovarsky, plzensky, stredocesky (+48+013, +49+012, +49+013),
+    unterfranken (+49+009, +49+010), franche-comte (+48+006).
+    +16-170 (no region) and -08+072 (asia only) keep their caches (#104).
 13. ~~#64-#74~~ — second review, 2026-11-08; #73 and #74 were the two
     items left for the user, done the same day (#73 with a new
     baseline). The inline water smoothing's dependence on set order
