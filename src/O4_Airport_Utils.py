@@ -192,6 +192,12 @@ def discover_airport_names(airport_layer, dico_airports):
                 )
                 dico_airports.pop(key, None)
 
+# The aeroway values of each surface type: a taxilane (the lane to the
+# stands across an apron or between hangars) is levelled as a taxiway (#152).
+SURFACE_AEROWAYS = {"runway": ("runway",), "taxiway": ("taxiway", "taxilane"),
+                    "apron": ("apron",), "hangar": ("hangar",)}
+
+
 ################################################################################
 def attach_surfaces_to_airports(airport_layer, dico_airports):
     # We link surfaces to airports (this information is not in OSM)
@@ -202,7 +208,8 @@ def attach_surfaces_to_airports(airport_layer, dico_airports):
             if x in airport_layer.dicosmtags["w"]
             and "aeroway" in airport_layer.dicosmtags["w"][x]
             and (
-                airport_layer.dicosmtags["w"][x]["aeroway"] == surface_type
+                airport_layer.dicosmtags["w"][x]["aeroway"]
+                in SURFACE_AEROWAYS[surface_type]
                 or (
                     surface_type == "runway"
                     and is_airstrip_line(airport_layer, x)

@@ -21,23 +21,27 @@ def test_parse_tile():
 
 
 def test_queries_unchanged_by_refactor():
-    # The lists include_* used inline before they became constants.
-    assert list(VMAP.small_road_queries(2)) == ['way["highway"="tertiary"]']
+    # The lists include_* used inline before they became constants, with
+    # the link roads, living streets and light rail of #152.
+    assert list(VMAP.small_road_queries(2)) == [
+        'way["highway"="tertiary"]', 'way["highway"="tertiary_link"]']
     assert VMAP.small_road_queries(5) == [
         'way["highway"="tertiary"]',
+        'way["highway"="tertiary_link"]',
         'way["highway"="unclassified"]',
         'way["highway"="residential"]',
+        'way["highway"="living_street"]',
         'way["highway"="service"]',
         'way["highway"="track"]',
     ]
-    assert len(VMAP.BIG_ROAD_QUERIES) == 6
+    assert len(VMAP.BIG_ROAD_QUERIES) == 11
     assert FRESH.layer_statements("airports", 4) == [
         'node["aeroway"]', 'way["aeroway"]', 'rel["aeroway"]'
     ]
     assert FRESH.layer_statements("water", 4)[0] == 'rel["natural"="water"]'
-    assert len(FRESH.layer_statements("small_roads", 4)) == 4
+    assert len(FRESH.layer_statements("small_roads", 4)) == 6
     assert FRESH.layer_statements("small_roads", None) == [
-        'way["highway"="tertiary"]'
+        'way["highway"="tertiary"]', 'way["highway"="tertiary_link"]'
     ]
 
 

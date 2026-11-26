@@ -178,7 +178,7 @@ cfg_tile_vars = {
         "type": int,
         "default": 1,
         "values": (0, 1, 2, 3, 4, 5),
-        "hint": 'Allows to level the mesh along roads and railways. Zero means nothing such is included; "1" looks for banking ways among motorways, primary and secondary roads and railway tracks; "2" adds tertiary roads; "3" brings residential and unclassified roads; "4" takes service roads, and 5 finishes with tracks. Purge the small_roads.osm cached data if you change your mind in between the levels 2-5.',
+        "hint": 'Allows to level the mesh along roads and railways. Zero means nothing such is included; "1" looks for banking ways among motorways, trunk, primary and secondary roads (with their link roads), railway tracks and light rail; "2" adds tertiary roads (and links); "3" brings residential, unclassified roads and living streets; "4" takes service roads, and 5 finishes with tracks. Purge the small_roads.osm cached data if you change your mind in between the levels 2-5.',
     },
     "road_banking_limit": {
         "type": float,
