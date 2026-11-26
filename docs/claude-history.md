@@ -1239,6 +1239,45 @@ Test results:
   New baseline test-4ada1bc_frozen (inputs copied, 15 hashes checked):
   1,056,452 triangles, no WARNING; repeat run PASS (DSF, 17/17 masks,
   app log identical); sims 15/15.
+- Batch r01 (2026-11-26, the 31 #146 tiles, dev 4573fc7 + #146 from
+  test): 25 built, 6 failed in step 3 with OverflowError (array "H"):
+  +39-108, +43-066, +50-120, +61+008, +60+006, +45-064; they keep their
+  old DSF. Cause: slivers 0.01-3 mm wide between near-coincident OSM
+  boundaries, refined by Triangle4XP into ~557,000 nodes in 42 x 18 m
+  at +39-108 (39.4217,-107.2382) and a cluster at +43-066
+  (43.6251,-65.2967); the quadtree stops at depth 14, so one bucket's
+  pool got > 65536 points. Before #146 the 24-bit grid merged them.
+  Found #153, #154. Log: batches\run_2026-11-26_r01_146.log.
+- #150-#154 (2026-11-26, branched from dev 4573fc7). Test builds in
+  G:\Ortho4XP_tests\fixes150_154\ws (all five over dev): +39-108 steps
+  1-3 exit 0, cluster box 556,946 -> 4 nodes, all 256 pool buckets depth
+  4 (max 37,667 points), DSF decodes (2,170 patches); +43-066 with #153
+  only (old mesh): 2 pools overflowed, DSFTool decodes, 0 vertices
+  outside the tile. Regression (`--overlay` needs the worktree's src
+  folder, not its root, else "no difference"): #150 and #153 each
+  byte-identical; #154 alone = all three: 1,056,452 -> 858,845
+  triangles, 44 fewer input vertices, 99% of 53,530 fewer DSF vertices
+  in 10 cells, the top 4 in Copenhagen harbour (Christianshavns and
+  Wilders Kanal water 0.3-3.6 mm from the coastline); 5 coast masks.
+  `test` @ 000880d (#150, #153, #154 merged): 848 passed, pyflakes 0,
+  new baseline test-000880d_frozen (inputs copied, 15 hashes checked),
+  repeat run PASS, sims 15/15.
+- #151/#152 A/B (tools\osm_ab.py, root G:\Ortho4XP_tests\osm151): the
+  frozen caches no longer fit their queries/tags, so both sides were
+  built from the same copies of the denmark (data 2026-11-13) and
+  sweden extracts, geofabrik_max_age 99999, no Overpass call, extracts
+  re-hashed (only a .lock added). A = test 000880d: 251,615 input
+  vertices (old caches 251,576), 858,939 triangles. B = + #151, #152:
+  225 intermittent water areas left out, 169 lakes levelled (170),
+  262,902 input vertices, 879,155 triangles; caches: big_roads +1,660
+  link and +1,279 light-rail ways, water same ways + intermittent tag,
+  airports and coastline same ways (new stamp only). DSF: +12,575
+  vertices along the new roads, -3,380 where intermittent areas were
+  (each of the 6 largest drops holds intermittent=yes water); 5 coast
+  masks. `test` @ f361e0c (#151, #152 merged; src identical to B):
+  867 passed, pyflakes 0. New baseline test-f361e0c_frozen = B's 4
+  caches + the old DEM/Global Scenery/cfg: DSF and masks identical to
+  B, repeat run PASS, sims 15/15.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2559,6 +2598,38 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     at +55, 530 at +64, 310 at +75. `VMAP.km2_to_tile_area` converts at
     the tile's latitude. 7 tests. CHANGES OUTPUT (+55+012 with #145-#149: 1,094,356 ->
     1,056,452 triangles).
+150. **FIXED** (`25a8e64`): once max_levelled_segs road segments were
+    checked for levelling, the other roads followed the terrain with no
+    message. `VMAP.RoadBankingFilter` counts them; include_roads logs a
+    NOTE. (The cap counts nodes, not segments, and restarts for small
+    roads: left as is.) 4 tests. Output unchanged.
+151. **FIXED** (`6b4946b`): water areas tagged intermittent/seasonal (dry
+    ponds, flood basins) were built as permanent water: ~70 built tiles
+    with > 1 km2 of them (OSM census 2026-11-26). include_water leaves
+    them out (`VMAP.drop_intermittent_water`). The caches only kept the
+    queried keys + name, so the stamp now records the tags kept
+    (`<o4xp_cache statements=".." tags=".."/>`, `GEOFABRIK.TAGS_OF_INTEREST`)
+    and `EXTRACT.cache_fits` checks them: old water caches do not fit
+    (TAGS_SINCE_151) and are made again from the store on the tile's
+    next step 1. 12 tests. CHANGES OUTPUT.
+152. **FIXED** (`8f5e705`): no *_link roads (483 km missing in Puerto
+    Rico), no light rail, living_street or taxilanes. big_roads adds
+    motorway/trunk/primary/secondary_link and railway=light_rail; small
+    roads tertiary_link (road_level >= 2) and living_street (>= 3);
+    `AIRPORT.SURFACE_AEROWAYS` treats taxilane as taxiway. Old big_roads
+    caches no longer fit. 7 tests. CHANGES OUTPUT.
+153. **FIXED** (`acd1270`): step 3 OverflowError when a DSF point pool
+    got more than 65536 points (6 tiles of batch r01). `DSF.PointPools`
+    continues a full pool in an overflow pool (same planes, scale of its
+    base pool); cross-pool triangles were already handled. 3 tests.
+    Output unchanged where pools fit.
+154. **FIXED** (`b9b59d6`): OSM boundaries mapped apart came within
+    0.01-3 mm of each other and Triangle4XP refined the sliver into up
+    to ~550,000 points in a few metres. `Vector_Map.insert_edge` joins a
+    vertex within `VECT.SNAP_TOL` (2e-7 degree, ~2 cm) of another
+    segment's inside (`_join_near`): the segment is split there, or the
+    new edge goes through the vertex. 5 tests (4 fail on dev). CHANGES
+    OUTPUT (+55+012: 1,056,452 -> 858,845 triangles, Copenhagen harbour).
 - Dead code removed 2026-11-25 (`cab5ad1`): O4_Scenery_Utils.py,
     DEM.create_normal_map, IMG.build_combined_ortho/build_provider_texture,
     EXTRACT.tile_of, VECT.projcoords, FNAMES.input_ele_file/
