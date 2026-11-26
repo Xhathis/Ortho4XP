@@ -45,6 +45,33 @@ scaly = 1
 # are_encroached returns False for too (the mesh stays the same).
 APART_MARGIN = 1e-3
 FOLD_MARGIN = 1e-4
+# A vertex this close (tile degrees, ~2 cm) to the inside of another
+# segment is put on it (#154). OSM stores 1e-7 degree: two boundaries
+# mapped apart (a lake along the coast, two water areas side by side)
+# came within 0.01-0.03 mm of each other, and Triangle4XP refined the
+# sliver between them into ~500,000 points in a few metres (+39-108,
+# +43-066), which then overflowed a DSF point pool (#153).
+SNAP_TOL = 2e-7
+
+
+def near_inside(p, a, b, tol=SNAP_TOL):
+    """The position t (0 < t < 1) along segment a-b of point p when p lies
+    within tol of it and more than tol from both ends; None otherwise."""
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    abx, aby = bx - ax, by - ay
+    len2 = abx * abx + aby * aby
+    if len2 <= 4 * tol * tol:
+        return None
+    t = ((px - ax) * abx + (py - ay) * aby) / len2
+    if t <= 0 or t >= 1:
+        return None
+    # distance to the line, then to both ends
+    if abs(abx * (py - ay) - aby * (px - ax)) > tol * sqrt(len2):
+        return None
+    if (px - ax) ** 2 + (py - ay) ** 2 <= tol * tol or \
+            (px - bx) ** 2 + (py - by) ** 2 <= tol * tol:
+        return None
+    return t
 
 
 def surely_not_encroached(a, b, c, d):
@@ -184,12 +211,16 @@ class Vector_Map:
         # Ids only: fetching each hit's object costs more than the query.
         # An edge's bbox is the one create_edge stored (its nodes never
         # move), so it is computed again where the edge is deleted.
+        (xmin, ymin, xmax, ymax) = self.bbox_from_node_ids(id0, id1)
         task = self.ebbox.intersection(
-            self.bbox_from_node_ids(id0, id1), objects=False
-        )  # which other edges to search for instersection
+            (xmin - SNAP_TOL, ymin - SNAP_TOL, xmax + SNAP_TOL, ymax + SNAP_TOL),
+            objects=False
+        )  # which other edges to search for instersection (or near, #154)
         for edge_id in task:
             (id2, id3) = self.edges_dico[edge_id]
             c_marker = self.data_edges[edge_id]
+            if self._join_near(id0, id1, edge_id, weight_list, id_list):
+                continue
             # Most edges the bbox index returns are the way's previous edge
             # or far from crossing this one: a plain-float test answers
             # them before the numpy checks.
@@ -292,6 +323,43 @@ class Vector_Map:
                 self.data_edges[edge_id] = self.data_edges[edge_id] | marker
             else:
                 self.create_edge(id_list[i], id_list[i + 1], marker)
+
+    def _join_near(self, id0, id1, edge_id, weight_list, id_list):
+        """#154: an end of the new edge id0-id1 within SNAP_TOL of the
+        inside of the existing edge splits that edge there; an end of the
+        existing edge within SNAP_TOL of the inside of the new edge is a
+        point the new edge goes through (weight_list, id_list, as for a
+        crossing). True when either happened: the pair is then done."""
+        (id2, id3) = self.edges_dico[edge_id]
+        (p0, p1) = (self.nodes_dico[id0], self.nodes_dico[id1])
+        (p2, p3) = (self.nodes_dico[id2], self.nodes_dico[id3])
+        splits = []
+        for (v, p) in ((id0, p0), (id1, p1)):
+            if v not in (id2, id3):
+                t = near_inside(p, p2, p3)
+                if t is not None:
+                    splits.append((t, v))
+        through = []
+        for (w, p) in ((id2, p2), (id3, p3)):
+            if w not in (id0, id1):
+                t = near_inside(p, p0, p1)
+                if t is not None:
+                    through.append((t, w))
+        if not splits and not through:
+            return False
+        if splits:
+            c_marker = self.data_edges[edge_id]
+            del self.dico_edges[(id2, id3)]
+            del self.edges_dico[edge_id]
+            del self.data_edges[edge_id]
+            self.ebbox.delete(edge_id, self.bbox_from_node_ids(id2, id3))
+            chain = [id2] + [v for (_, v) in sorted(splits)] + [id3]
+            for (a, b) in zip(chain, chain[1:]):
+                self.create_edge(a, b, c_marker)
+        for (t, w) in through:
+            weight_list.append(t)
+            id_list.append(w)
+        return True
 
     def insert_way(self, way, marker, check=True):
         if isinstance(marker, str):
