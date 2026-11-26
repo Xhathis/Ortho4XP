@@ -157,7 +157,8 @@ something.
 - `Ortho4XP.cfg` (gitignored, the user's): curvature_tol 0.25,
   limit_tris 10 (40 made X-Plane hang loading 650 MB DSFs), mesh_zl 18,
   min_angle 10, mask_zl 16, road_level 5, airport cover ZL18 for all
-  airports (3 km, apt_smoothing_pix 8), XP12 water, use_decal_on_terrain,
+  airports (3 km, apt_smoothing_pix 8), XP12 water with
+  imprint_masks_to_dds (since 2026-11-26), use_decal_on_terrain,
   distance_masks_too, batch_parallel_tiles 3, cleaning_level 3,
   max_download_slots 2, osm_source geofabrik, osm_cache_max_age 30,
   imagery_fallback Arc, BI (default), custom_overlay_src = X-Plane 12
@@ -199,18 +200,24 @@ something.
 
 ## Current state (2026-11-26)
 
-- `test` f361e0c, not on `dev` yet: #144-#149 from the evaluation of
-  how data are processed, #150-#154 (867 unit tests, regression PASS,
-  sims 15/15). #146 hit 31 built tiles
-  (`G:\Ortho4XP_tests\eval\scan146_tiles.txt`), rebuilt in batch r01
-  with #146 over dev: 25 built, 6 failed in step 3 (#153/#154; they keep their old DSF:
-  +39-108, +43-066, +50-120, +61+008, +60+006, +45-064) and need steps
-  1-3 once `test` is on `dev`. After #151/#152 every tile's water and
-  big_roads caches are made again from the store at its next step 1.
-
-- `dev` 08036b3, pushed: issues #1-#143 fixed, dead code and unused
-  data removed, provider errors logged, step 1 ~17% faster (806 unit
-  tests, regression PASS, sims 15/15).
+- `dev` = `test` fdf7628 (2026-11-26), not pushed: issues #1-#154
+  fixed (867 unit tests, regression PASS, sims 15/15). After #151/#152
+  every tile's water and big_roads caches are made again from the store
+  at its next step 1.
+- XP12 water switched on 2026-11-26 (the user viewed test tile
+  +18-065): `imprint_masks_to_dds=True` in Ortho4XP.cfg and all 1,597
+  tile configs (only that line; backup
+  `cfg_backups\2026-11-26_imprint_masks`). A tile gets it when step 3
+  runs: every masked texture under 20 MB (DXT1) is downloaded again and
+  written as DXT5 (`O4_DSF_Utils`, "Maybe target_tex was a DXT1"), ~1 TB
+  in all. Tiles not rebuilt yet keep overlay water.
+- Full rebuild: batch r01 (the 31 #146 tiles, 2026-11-26): 25 built, 6
+  failed in step 3 (#153/#154), rebuilt in r01b
+  (`batches\rebuild_2026-11-26_r01b.txt`) on dev fdf7628 with XP12
+  water: 6 built, 0 failed, 19 min; largest pool 37,817 (+39-108) and
+  46,030 (+43-066), no overflow pool needed; 54-89 DXT5 textures on
+  the 4 coastal tiles. The 25 tiles r01 built are still on overlay
+  water (step 3 again). Lists r02-r09 (1,567 tiles) not started.
 - Last batches: E (121 wilderness tiles, ZL16) and 4 ZL15 holes, 124
   built, 0 failed (2026-11-25); then +69-052 for the Qeqertaq zone (#140):
   both zones on GO218, so every zone tile is on its zone's imagery.
