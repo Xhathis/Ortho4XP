@@ -27,12 +27,20 @@ quad_capacity_low = 35000
 use_test_texture = False
 
 ################################################################################
+# Bits of a node's position within the tile (0 <= x < 1) as a string. A
+# pool at quadtree depth `level` (at most 14, see QuadTree.insert) keys on
+# the first `level` bits and stores the next 16 as the vertex coordinate,
+# so up to 30 bits are read. With 24 bits a pool deeper than 8 got short
+# slices and its vertices were written at 1/2**(level-8) of their offset
+# from the pool corner, up to ~100 m off their UVs (#146).
+QQUAD_BITS = 32
+
+
 def float2qquad(x):
     if x >= 1:
-        return "111111111111111111111111"
-    # format(n, "024b") gives the same string as numpy.binary_repr(n)
-    # .zfill(24), also for negatives, ~4x faster (1.3 M calls a tile, #93).
-    return format(int(16777216 * x), "024b")  # 2**24 == 16777216
+        return "1" * QQUAD_BITS
+    # A negative offset would give "-..." and no pool key; clamp it.
+    return format(max(int((1 << QQUAD_BITS) * x), 0), "0%db" % QQUAD_BITS)
 
 
 ################################################################################
