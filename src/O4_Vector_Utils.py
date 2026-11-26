@@ -1230,3 +1230,42 @@ def point_in_polygon(point, polygon):
 ################################################################################
 def dummy_alt(way):
     return numpy.zeros(way.shape[0])
+
+
+################################################################################
+# DEM samples inside a polygon (island peaks #147, lake levels #148).
+# At most this many points a polygon: a 1 km2 island at 1" is ~2,000; a
+# lake of 100 km2 is sampled on a coarser grid.
+MAX_POLYGON_SAMPLES = 40000
+
+
+def dem_step(dem):
+    """(dx, dy) of the DEM grid in tile-relative degrees; 1" when the DEM
+    is a composite of several sources (no single grid)."""
+    try:
+        return ((dem.x1 - dem.x0) / (dem.nxdem - 1),
+                (dem.y1 - dem.y0) / (dem.nydem - 1))
+    except (AttributeError, ZeroDivisionError):
+        return (1 / 3600, 1 / 3600)
+
+
+def grid_points_inside(polygon, step):
+    """(N, 2) points of the grid of spacing step=(dx, dy) inside polygon
+    (tile-relative degrees); the grid is coarsened to keep N at most
+    MAX_POLYGON_SAMPLES."""
+    import shapely
+    (dx, dy) = step
+    (xmin, ymin, xmax, ymax) = polygon.bounds
+    nx = int((xmax - xmin) / dx) + 1
+    ny = int((ymax - ymin) / dy) + 1
+    if nx * ny > MAX_POLYGON_SAMPLES:
+        k = sqrt(nx * ny / MAX_POLYGON_SAMPLES)
+        (dx, dy) = (dx * k, dy * k)
+    xs = numpy.arange(xmin + dx / 2, xmax, dx)
+    ys = numpy.arange(ymin + dy / 2, ymax, dy)
+    if not len(xs) or not len(ys):
+        return numpy.zeros((0, 2))
+    (gx, gy) = numpy.meshgrid(xs, ys)
+    (gx, gy) = (gx.ravel(), gy.ravel())
+    inside = shapely.contains_xy(polygon, gx, gy)
+    return numpy.column_stack([gx[inside], gy[inside]])
