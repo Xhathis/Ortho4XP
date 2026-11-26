@@ -8,6 +8,7 @@ import pytest
 osmium = pytest.importorskip("osmium")
 
 import O4_File_Names as FNAMES  # noqa: E402
+import O4_Geofabrik as GEOFABRIK  # noqa: E402
 import O4_OSM_Extract as EXTRACT  # noqa: E402
 import O4_OSM_Utils as OSM  # noqa: E402
 import O4_UI_Utils as UI  # noqa: E402
@@ -456,7 +457,13 @@ def test_prepare_tool_tile_file_comments(tmp_path):
 def _cache(layer, values, days=1, statements=()):
     path = FNAMES.osm_cached(*T, layer)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    stamp = (EXTRACT.cache_stamp(statements) + "\n") if statements else ""
+    tags = GEOFABRIK.TAGS_OF_INTEREST[layer]
+    if layer == "water" and not statements:
+        # As written since #151: an unstamped water cache lacks the tags
+        # that tell intermittent water, and is prepared again.
+        statements = EXTRACT.flat_statements(VMAP.WATER_QUERIES)
+    stamp = (EXTRACT.cache_stamp(statements, tags) + "\n") if statements \
+        else ""
     ways = "".join(f'  <way id="{i}">\n    <tag k="highway" v="{v}"/>\n'
                    "  </way>\n" for (i, v) in enumerate(values, 1))
     with bz2.open(path, "wt", encoding="utf-8") as f:

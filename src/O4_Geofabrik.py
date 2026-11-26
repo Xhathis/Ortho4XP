@@ -1107,7 +1107,8 @@ def needed_layers(lat, lon, road_level, force=False):
                 and _not_older(answer, cache)):
             continue
         if not os.path.isfile(cache) or cache_is_stale(cache) or \
-                EXTRACT.cache_fits(cache, st) is False:
+                EXTRACT.cache_fits(cache, st,
+                                   TAGS_OF_INTEREST[layer]) is False:
             wanted[layer] = st
     return wanted
 
@@ -1305,7 +1306,11 @@ def prepare_batch(wanted):
 
 
 # --- freshness of cached layers ------------------------------------------------------
-TAGS_OF_INTEREST = {"coastline": [], "airports": ["all"], "water": ["name"],
+# The tags each cached layer keeps besides the queried ones; step 1
+# (Vector_Map) asks with the same. Water: intermittent and seasonal mark
+# water that is often dry, built as land (#151).
+TAGS_OF_INTEREST = {"coastline": [], "airports": ["all"],
+                    "water": ["name", "intermittent", "seasonal"],
                     "big_roads": ["bridge", "tunnel"],
                     "small_roads": ["bridge", "tunnel"]}
 
@@ -1319,7 +1324,7 @@ def cache_bytes(layer, statements, answer):
         raise GeofabrikError(f"{layer}: answer not readable")
     tmp = FNAMES.temp_path_for(os.path.join(FNAMES.Tmp_dir, layer + ".osm.bz2"))
     try:
-        osm_layer.write_to_file(tmp, statements)
+        osm_layer.write_to_file(tmp, statements, TAGS_OF_INTEREST[layer])
         with bz2.open(tmp, "rb") as f:
             return f.read()
     finally:

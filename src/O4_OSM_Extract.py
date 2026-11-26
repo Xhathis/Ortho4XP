@@ -38,7 +38,13 @@ GENERATOR = "Ortho4XP extract"
 SCALE = 10_000_000  # osmium's fixed-point coordinates: 1e-7 degree
 _STMT = re.compile(r'^(node|way|rel)\["([^"]+)"(?:="([^"]*)")?\]$')
 _HEADER = re.compile(rb'<o4xp_extract statements="([^"]*)" source="([^"]*)"/>')
-_CACHE_STAMP = re.compile(rb'<o4xp_cache statements="([^"]*)"/>')
+_CACHE_STAMP = re.compile(
+    rb'<o4xp_cache statements="([^"]*)"(?: tags="[^"]*")?/>')
+_CACHE_TAGS = re.compile(rb'<o4xp_cache statements="[^"]*" tags="([^"]*)"/>')
+# Tags a cache keeps since #151 (intermittent water). A cache stamped
+# before has no tags in its stamp and kept the tags of that time, which
+# were all the asked ones but these.
+TAGS_SINCE_151 = frozenset({"intermittent", "seasonal"})
 _HIGHWAY_VALUE = re.compile(rb'<tag k="highway" v="([^"]*)"/>')
 _HEAD_BYTES = 4000  # the header lines of an answer or a cache
 
@@ -308,11 +314,18 @@ def read_answer(path, statements):
 
 
 # --- which statements made a file (#107) ------------------------------------------
-def cache_stamp(statements):
+def cache_stamp(statements, tags=()):
     """The line OSM_layer.write_to_file puts after <osm> in a cache: the
-    statements it was made for. The cache reader skips unknown lines."""
+    statements it was made for and the tags it kept besides theirs (#151).
+    The cache reader skips unknown lines."""
     return ('<o4xp_cache statements="' + xml_escape("\n".join(statements))
-            + '"/>')
+            + '" tags="' + xml_escape("\n".join(_tag_names(tags))) + '"/>')
+
+
+def _tag_names(tags):
+    """The kept tags named in a stamp: the keys (tags_of_interest may also
+    hold (key, value) pairs, kept for one value only: not named)."""
+    return sorted({t for t in tags if isinstance(t, str)})
 
 
 def _head(path):
@@ -345,10 +358,15 @@ def small_road_values(road_level):
             for st in flat_statements(VMAP.small_road_queries(road_level))}
 
 
-def cache_fits(path, statements):
+def cache_fits(path, statements, tags=()):
     """Whether the cached layer at path holds what these statements ask
-    for: True, False, or None when that cannot be told (no file,
-    unreadable).
+    for, with these tags kept (tags_of_interest): True, False, or None when
+    that cannot be told (no file, unreadable).
+
+    A cache stamped with its tags fits when it kept all the asked ones
+    ("all" keeps every tag). One stamped before #151 does not name them:
+    it fits unless a tag kept only since then is asked (its water areas
+    would all look permanent). The same for an unstamped one.
 
     A cache written since #107 names its statements. An older one does
     not: small_roads is the layer whose statements change (road_level), so
@@ -360,9 +378,17 @@ def cache_fits(path, statements):
     head = _head(path)
     if head is None:
         return None
+    asked_tags = set(_tag_names(tags))
     stored = _stamped(_CACHE_STAMP, head)
     if stored is not None:
-        return stored == sorted(statements)
+        if stored != sorted(statements):
+            return False
+        kept = _stamped(_CACHE_TAGS, head)
+        if kept is None:
+            return not (asked_tags & TAGS_SINCE_151)
+        return "all" in kept or asked_tags <= set(kept) - {""}
+    if asked_tags & TAGS_SINCE_151:
+        return False
     try:
         asked = [parse_statement(st) for st in statements]
     except ValueError:

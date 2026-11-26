@@ -292,7 +292,7 @@ def include_airports(vector_map, tile):
     UI.vprint(0, "-> Dealing with airports")
     airport_layer = OSM.OSM_layer()
     queries = AIRPORT_QUERIES
-    tags_of_interest = ["all"]
+    tags_of_interest = GEOFABRIK.TAGS_OF_INTEREST["airports"]
     if not OSM.OSM_queries_to_OSM_layer(
         queries,
         airport_layer,
@@ -419,7 +419,7 @@ def include_roads(vector_map, tile, apt_array, apt_area):
     if not tile.road_level:
         return
     UI.vprint(0, "-> Dealing with roads")
-    tags_of_interest = ["bridge", "tunnel"]
+    tags_of_interest = GEOFABRIK.TAGS_OF_INTEREST["big_roads"]
     # Need to evaluate if including bridges is better or worse
     tags_for_exclusion = set(["bridge", "tunnel"])
     # tags_for_exclusion=set(["tunnel"])
@@ -518,6 +518,28 @@ def include_roads(vector_map, tile, apt_array, apt_area):
 
 
 ################################################################################
+def is_intermittent_water(tags):
+    """Water often dry (a pan, a seasonal lake, a dam that empties): OSM
+    intermittent=yes or seasonal=* (#151). As water it was flat, with
+    X-Plane's water over the photo, where the photo mostly shows land."""
+    return any(tags.get(k, "no") != "no" for k in ("intermittent", "seasonal"))
+
+
+def drop_intermittent_water(water_layer):
+    """Leave the intermittent water areas out of the layer (the ways and
+    relations queried as water; the member ways of a relation are not
+    built on their own). Returns how many were left out."""
+    dropped = 0
+    for otype in ("w", "r"):
+        tags = water_layer.dicosmtags[otype]
+        gone = {oid for oid in water_layer.dicosmfirst[otype]
+                if is_intermittent_water(tags.get(oid, {}))}
+        water_layer.dicosmfirst[otype] -= gone
+        dropped += len(gone)
+    return dropped
+
+
+################################################################################
 def include_sea(vector_map, tile):
     UI.vprint(0, "-> Dealing with coastline")
     sea_layer = OSM.OSM_layer()
@@ -543,7 +565,7 @@ def include_sea(vector_map, tile):
         custom_source = True
     else:
         queries = COASTLINE_QUERIES
-        tags_of_interest = []
+        tags_of_interest = GEOFABRIK.TAGS_OF_INTEREST["coastline"]
         if not OSM.OSM_queries_to_OSM_layer(
             queries,
             sea_layer,
@@ -757,7 +779,7 @@ def include_water(vector_map, tile):
             return 0
     else:
         queries = WATER_QUERIES
-        tags_of_interest = ["name"]
+        tags_of_interest = GEOFABRIK.TAGS_OF_INTEREST["water"]
         if not OSM.OSM_queries_to_OSM_layer(
             queries,
             water_layer,
@@ -767,6 +789,10 @@ def include_water(vector_map, tile):
             cached_suffix="water",
         ):
             return 0
+    dropped = drop_intermittent_water(water_layer)
+    if dropped:
+        UI.vprint(1, f"    * {dropped} intermittent or seasonal water "
+                  "area(s) left out (built as land).")
     UI.vprint(1, "    * Building water multipolygon.")
     (water_area, sea_equiv_area) = OSM.OSM_to_MultiPolygon(
         water_layer, tile.lat, tile.lon, filter_large_lakes
