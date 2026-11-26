@@ -266,6 +266,38 @@ def smooth_water_altitudes(vertices, water_tris, passes):
         z[used] = sums[used] / count[used]
 
 
+# level_lakes raises a vertex by at most this much (m): one lower than the
+# lake is the river leaving it, which keeps its slope.
+LAKE_MAX_RAISE = 2.0
+
+
+def level_lakes(vertices, water_tris, lakes, tolerance):
+    """Set the water vertices (vertices[6 * i + 2]) in or on a lake of
+    lakes [(level, polygon)] to its level; returns how many.
+
+    Smoothing alone left lakes up to 36 m from flat along steep shores,
+    whose DEM altitude is the bank's (#148). tolerance (degrees) catches
+    shore nodes the simplification moved off the polygon. A vertex on two
+    lakes takes the lower level; one more than LAKE_MAX_RAISE below it is
+    left as it is (an outflow, where a lake's region reaches into it).
+    """
+    import shapely
+    if not lakes or not water_tris:
+        return 0
+    idx = numpy.unique(numpy.array(sorted(water_tris), dtype=numpy.int64))
+    points = shapely.points(vertices[6 * idx], vertices[6 * idx + 1])
+    tree = shapely.STRtree([polygon.buffer(tolerance) for (_, polygon) in lakes])
+    (pi_, li) = tree.query(points, predicate="intersects")
+    if not len(pi_):
+        return 0
+    levels = numpy.array([level for (level, _) in lakes])
+    z = numpy.full(len(idx), numpy.inf)
+    numpy.minimum.at(z, pi_, levels[li])
+    hit = numpy.isfinite(z) & (vertices[6 * idx + 2] >= z - LAKE_MAX_RAISE)
+    vertices[6 * idx[hit] + 2] = z[hit]
+    return int(hit.sum())
+
+
 def classify_triangles(ele_lines):
     """(water, sea, interp_alt) vertex triples (0-based) from the triangle
     lines of a Triangle .ele file ("index v1 v2 v3 attribute").
@@ -318,6 +350,14 @@ def post_process_nodes_altitudes(tile):
     if tile.water_smoothing:
         UI.vprint(1, "   Smoothing inland water.")
         smooth_water_altitudes(vertices, water_tris, tile.water_smoothing)
+        lakes = VECT.read_lake_levels(FNAMES.lake_file(tile))
+        if lakes:
+            levelled = level_lakes(
+                vertices, water_tris, lakes,
+                (tile.water_simplification + 0.5) * GEO.m_to_lat,
+            )
+            UI.vprint(1, "   Levelled", len(lakes), "lake(s),", levelled,
+                      "vertices.")
     UI.vprint(1, "   Smoothing of sea water.")
     for v1, v2, v3 in sea_tris:
         if tile.sea_smoothing_mode == "zero":
@@ -814,6 +854,7 @@ def build_mesh(tile):
             FNAMES.alt_file(tile),
             FNAMES.input_node_file(tile),
             FNAMES.input_poly_file(tile),
+            FNAMES.lake_file(tile),
         ]
     for file_name in to_delete:
         # Cleanup only: a missing file is fine, other failures (file locked,

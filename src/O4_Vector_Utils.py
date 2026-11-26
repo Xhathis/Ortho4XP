@@ -1269,3 +1269,74 @@ def grid_points_inside(polygon, step):
     (gx, gy) = (gx.ravel(), gy.ravel())
     inside = shapely.contains_xy(polygon, gx, gy)
     return numpy.column_stack([gx[inside], gy[inside]])
+
+
+# The wide parts of a water polygon are lakes, each levelled at one altitude,
+# when the DEM inside is flat: DEMs flatten lakes, while rivers slope (#148).
+# Below this spread (m, 5th to 95th percentile) a part is flat.
+LAKE_FLAT_SPREAD = 1.0
+LAKE_MIN_SAMPLES = 8
+# A part flat at 0 m is left to smoothing: it is the DEM's no-data filled
+# with zeros (lakes in Greenland lie at 20 m there), or water at sea level,
+# which smoothing keeps near 0 anyway.
+LAKE_MIN_LEVEL = 0.5
+
+
+def lake_levels(polygons, dem, area_limit):
+    """[(level, region)] for the flat wide parts of the water polygons
+    (tile-relative); level is the median DEM altitude inside.
+
+    Merged water polygons often hold a lake and the river leaving it.
+    Shrinking a polygon by 1.5 DEM cells keeps its wide parts and leaves
+    out the shore cells, whose DEM steep banks raise; each part left is
+    tested on its own, and its region (the part grown back, within the
+    polygon) is what gets levelled. Narrow rivers keep their slope.
+    """
+    step = dem_step(dem)
+    margin = 1.5 * max(step)
+    lakes = []
+    for pol in polygons:
+        for polygon in ensure_MultiPolygon(pol).geoms:
+            if polygon.area <= area_limit:
+                continue
+            inner = polygon.buffer(-margin)
+            if inner.is_empty:
+                continue
+            for part in ensure_MultiPolygon(inner).geoms:
+                points = grid_points_inside(part, step)
+                if len(points) < LAKE_MIN_SAMPLES:
+                    continue
+                z = numpy.asarray(dem.alt_vec(points), dtype=numpy.float64)
+                (low, level, high) = numpy.percentile(z, (5, 50, 95))
+                if high - low > LAKE_FLAT_SPREAD or abs(level) < LAKE_MIN_LEVEL:
+                    continue
+                region = part.buffer(1.5 * margin).intersection(polygon)
+                for piece in ensure_MultiPolygon(region).geoms:
+                    if piece.intersects(part):
+                        lakes.append((float(level), piece))
+    return lakes
+
+
+def write_lake_levels(path, lakes):
+    import json
+    import os
+    import shapely
+    import O4_File_Names as FNAMES
+    tmp = FNAMES.temp_path_for(path)
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump([[level, shapely.to_wkb(polygon, hex=True)]
+                   for (level, polygon) in lakes], f)
+    os.replace(tmp, path)
+
+
+def read_lake_levels(path):
+    """[(level, polygon)] written by write_lake_levels; [] when there is
+    no such file (a step 1 of an older version) or it cannot be read."""
+    import json
+    import shapely
+    try:
+        with open(path, encoding="utf-8") as f:
+            return [(float(level), shapely.from_wkb(wkb))
+                    for (level, wkb) in json.load(f)]
+    except (OSError, ValueError, TypeError, shapely.errors.ShapelyError):
+        return []

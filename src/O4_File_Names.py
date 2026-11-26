@@ -262,6 +262,13 @@ def weight_file(tile):
     )
 
 
+def lake_file(tile):
+    """Step 1's flat lake levels for step 2 (#148)."""
+    return os.path.join(
+        tile.build_dir, "Data" + short_latlon(tile.lat, tile.lon) + ".lakes"
+    )
+
+
 def mesh_file(build_dir, lat, lon):
     return os.path.join(build_dir, "Data" + short_latlon(lat, lon) + ".mesh")
 

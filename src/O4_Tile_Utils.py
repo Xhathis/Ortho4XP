@@ -443,6 +443,7 @@ def build_tile(tile, white_retry_follows=False):
         remove_if_exists(FNAMES.alt_file(tile))
         remove_if_exists(FNAMES.input_node_file(tile))
         remove_if_exists(FNAMES.input_poly_file(tile))
+        remove_if_exists(FNAMES.lake_file(tile))
     if UI.cleaning_level > 2 and not keep_mesh_after_step3:
         _remove_mesh_files(tile.build_dir, tile.lat, tile.lon)
     if UI.cleaning_level > 1 and not tile.grouped:

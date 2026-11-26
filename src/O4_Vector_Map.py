@@ -736,6 +736,7 @@ def include_water(vector_map, tile):
     (water_area, sea_equiv_area) = OSM.OSM_to_MultiPolygon(
         water_layer, tile.lat, tile.lon, filter_large_lakes
     )
+    lake_candidates = []
     if not water_area.is_empty:
         UI.vprint(1, "      Cleaning it.")
         try:
@@ -754,6 +755,7 @@ def include_water(vector_map, tile):
         UI.vprint(
             2, "      Number of water Multipolygons : " + str(len(dico_water))
         )
+        lake_candidates += list(dico_water.values())
         UI.vprint(1, "      Encoding it.")
         vector_map.encode_MultiPolygon(
             dico_water,
@@ -782,6 +784,7 @@ def include_water(vector_map, tile):
         UI.vprint(
             2, "      Number of water Multipolygons : " + str(len(dico_water))
         )
+        lake_candidates += list(dico_water.values())
         UI.vprint(1, "      Encoding them.")
         vector_map.encode_MultiPolygon(
             dico_water,
@@ -791,6 +794,19 @@ def include_water(vector_map, tile):
             simplify=tile.water_simplification * GEO.m_to_lat,
             check=True,
         )
+    # Written also when empty, so that step 2 never reads the lakes of an
+    # earlier step 1 (#148).
+    lakes = VECT.lake_levels(
+        (VECT.cut_to_tile(pol) for pol in lake_candidates),
+        tile.dem,
+        tile.min_area / 10000,
+    )
+    UI.vprint(1, "      Lakes levelled flat:", len(lakes))
+    try:
+        VECT.write_lake_levels(FNAMES.lake_file(tile), lakes)
+    except OSError as e:
+        UI.lvprint(1, "   WARNING: the lake levels were not written",
+                   f"({e}); step 2 smooths lakes as before.")
     return 1
 
 
