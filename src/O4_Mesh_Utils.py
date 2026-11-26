@@ -266,8 +266,39 @@ def smooth_water_altitudes(vertices, water_tris, passes):
         z[used] = sums[used] / count[used]
 
 
-def post_process_nodes_altitudes(tile):
+def classify_triangles(ele_lines):
+    """(water, sea, interp_alt) vertex triples (0-based) from the triangle
+    lines of a Triangle .ele file ("index v1 v2 v3 attribute").
+
+    Attributes are sums of the powers of two in Vector_Map.dico_attributes;
+    0 (DUMMY) needs no post-treatment. The test used to be the attribute's
+    last digit being "0", which also skipped 10, 20, 40, 80, ...: SEA +
+    INTERP_ALT (airport or levelled road reaching the sea), on every coast
+    tile, kept their raw DEM altitudes (#144).
+    """
     dico_attributes = VECT.Vector_Map.dico_attributes
+    water_tris = set()
+    sea_tris = set()
+    interp_alt_tris = set()
+    for line in ele_lines:
+        (v1, v2, v3, attr) = [int(x) for x in line.split()[1:5]]
+        if not attr:
+            continue
+        (v1, v2, v3) = (v1 - 1, v2 - 1, v3 - 1)
+        if attr >= dico_attributes["INTERP_ALT"]:
+            interp_alt_tris.add((v1, v2, v3))
+        elif attr & dico_attributes["SEA"]:
+            sea_tris.add((v1, v2, v3))
+        elif (
+            attr & dico_attributes["WATER"]
+            or attr & dico_attributes["SEA_EQUIV"]
+        ):
+            water_tris.add((v1, v2, v3))
+    return (water_tris, sea_tris, interp_alt_tris)
+
+
+################################################################################
+def post_process_nodes_altitudes(tile):
     with open(FNAMES.output_node_file(tile), "r") as f_node:
         init_line_f_node = f_node.readline()
         nbr_pt = int(init_line_f_node.split()[0])
@@ -279,29 +310,11 @@ def post_process_nodes_altitudes(tile):
             ]
         end_line_f_node = f_node.readline()
     UI.vprint(1, "-> Post processing of altitudes according to vector data")
-    f_ele = open(FNAMES.output_ele_file(tile), "r")
-    nbr_tri = int(f_ele.readline().split()[0])
-    water_tris = set()
-    sea_tris = set()
-    interp_alt_tris = set()
-    for i in range(nbr_tri):
-        line = f_ele.readline()
-        # triangle attributes are powers of 2, except for the dummy attributed
-        # which doesn't require post-treatment
-        if line[-2] == "0":
-            continue
-        (v1, v2, v3, attr) = [int(x) - 1 for x in line.split()[1:5]]
-        attr += 1
-        if attr >= dico_attributes["INTERP_ALT"]:
-            interp_alt_tris.add((v1, v2, v3))
-        elif attr & dico_attributes["SEA"]:
-            sea_tris.add((v1, v2, v3))
-        elif (
-            attr & dico_attributes["WATER"]
-            or attr & dico_attributes["SEA_EQUIV"]
-        ):
-            water_tris.add((v1, v2, v3))
-    f_ele.close()  # was never closed
+    with open(FNAMES.output_ele_file(tile), "r") as f_ele:
+        nbr_tri = int(f_ele.readline().split()[0])
+        (water_tris, sea_tris, interp_alt_tris) = classify_triangles(
+            f_ele.readline() for _ in range(nbr_tri)
+        )
     if tile.water_smoothing:
         UI.vprint(1, "   Smoothing inland water.")
         smooth_water_altitudes(vertices, water_tris, tile.water_smoothing)
