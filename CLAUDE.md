@@ -85,14 +85,14 @@ something.
   `os.name`) or the bundled `.exe` tools, and "CHANGES OUTPUT" when a
   normal build's DSF or masks change (needs a new baseline).
 - Commit or push only when the user asks.
-- New issues are numbered on (next: #144). An open one is listed under
+- New issues are numbered on (next: #150). An open one is listed under
   "Open issues" here; once fixed, its entry and test results move to
   `docs/claude-history.md` (Known issues, Test results).
 
 ## Testing method
 
 1. **Unit tests:** `venv\Scripts\python.exe -m pytest` (repo root, ~30 s,
-   806 tests on test 7912d6a). `tests/conftest.py` switches to an empty
+   836 tests on test 4ada1bc). `tests/conftest.py` switches to an empty
    temp folder before any O4 module is imported, so tests never touch the
    user's data. Run them before every commit; add a test before changing
    a pure function; new tests should fail on dev where testable.
@@ -104,8 +104,8 @@ something.
    <commit> [--label name] [--overlay <src_dir>]` — builds +55+012 (Arc
    ZL17) in the worktree `G:\Ortho4XP_tests\regression\ws` from frozen
    inputs and compares DSF, 17 masks and app log with the baseline
-   `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-d74d672_frozen\` (since
-   #103; mesh 1,094,356 triangles, no WARNING). `--overlay` builds a
+   `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-4ada1bc_frozen\` (since
+   #149; mesh 1,056,452 triangles, no WARNING). `--overlay` builds a
    commit with a fix worktree's uncommitted O4_*.py over it. Every input
    is re-hashed afterwards (a download fails the run). Results in
    `G:\Ortho4XP_tests\+55+012_Arc_ZL17_<label>-<sha>\`. Explain every
@@ -128,6 +128,9 @@ something.
    `sim_custom_dem_gap.py`, `sim_batch_cleaning.py`, `check_overpass_slot.py`,
    `check_step3_provider.py`, `probe_mesh.py`, `pe_stack.py`,
    `fetch_osm_api.py`, `fix_dem_folders.py`, `verify_copy.py`,
+   `scan_dsf_pools.py <Tiles dir>` (#146 check, read only), the
+   data-processing evaluation `eval_*.py`, `trace_lake.py`,
+   `probe_point.py` (ws `G:\Ortho4XP_tests\eval\ws`, see the history),
    `profile_steps.py 1|2.5 [src] [--verify-encroach]` (cProfile of
    step 1 or 2.5 in the regression ws, after a regression run).
 6. **In `G:\Ortho4XP`** (the user's folder, other tiles): `gui_smoke.py
@@ -187,7 +190,13 @@ something.
 - `keep_dsf_backup` is on (default); the old `.dsf.bak` files were
   deleted in the 2026-11-25 cleanup.
 
-## Current state (2026-11-25)
+## Current state (2026-11-26)
+
+- `test` 4ada1bc, not on `dev` yet: #144-#149 from the evaluation of
+  how data are processed (836 unit tests, new baseline, regression
+  PASS, sims 15/15). #146 (DSF vertices of deep pools misplaced) hits
+  31 built tiles (`G:\Ortho4XP_tests\eval\scan146_tiles.txt`): they
+  need steps 1-3 once it is on `dev`.
 
 - `dev` 08036b3, pushed: issues #1-#143 fixed, dead code and unused
   data removed, provider errors logged, step 1 ~17% faster (806 unit
@@ -201,8 +210,8 @@ something.
 - Full audit and cleanup 2026-11-25 (log
   `G:\Ortho4XP_tests\cleanup_2026-11-25.log`): 1,358.9 GB freed (JPGs of
   built tiles, all masks, .dsf.bak/.cfg.bak, old sims and baselines).
-  All 1,598 tiles complete (one DSF, all textures). Only the
-  d74d672_frozen baseline is left.
+  All 1,598 tiles complete (one DSF, all textures). Baselines:
+  d74d672_frozen (old) and 4ada1bc_frozen (current).
 
 ## Open issues
 

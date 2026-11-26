@@ -1219,6 +1219,26 @@ Test results:
   17/17 masks byte-identical, step 1 33.1 -> 27.6 s); app log +1 line
   "Unknown provider in combined provider DFA : DF" (the ws has no DF.lay,
   the message was console-only before), sims 15/15.
+- Evaluation of how data are processed, 2026-11-25/26 (eval ws
+  G:\Ortho4XP_tests\eval\ws, a detached worktree with the fixes over it;
+  offline builds with tools\eval_build.py of +61+006, +62-075, +64-052,
+  +69+018 from copies of their caches): OSM water vs mesh within 0.2%
+  (eval_water.py); masks code reviewed; land RMSE 0.35-1.44 m, no bias
+  (eval_mesh_dem.py); imagery shift 0-5 m (eval_align.py); colour jumps
+  at texture edges > 20 on 0.3% of 2,200 edges (eval_seams.py, all
+  +69+018 acquisitions); DSF checked against Web Mercator
+  (eval_dsf.py; its mask-square check is wrong, ignore it): found #146.
+  Water at -41.9 m near 55.32,12.44 and 55.57,12.92 is quarry lakes
+  (Sigerslev, Limhamn). Found #144-#149.
+- `test` @ 7deee6f: #144-#146 merged; @ 4ada1bc: `fix/water-levels`
+  (#147 d4d5603, #148 71b4c88, #149 7917e67, branched from test
+  7deee6f as it builds on #144). 836 passed, 1 skipped, pyflakes 0.
+  Regression vs d74d672_frozen: DSF changed (all six), 5 masks differ by
+  250-2,611 px (4 px > 60 levels, all on the coast: sea triangulated
+  differently, rasterized triangle by triangle; #147 alone changes 2).
+  New baseline test-4ada1bc_frozen (inputs copied, 15 hashes checked):
+  1,056,452 triangles, no WARNING; repeat run PASS (DSF, 17/17 masks,
+  app log identical); sims 15/15.
 Drives (2026-11-04): G: is a 13 TB USB hard disk (repo, Tiles,
 yOrtho4XP_Overlays, test folders); F: "ortho" is an NVMe SSD. The
 download caches `G:\Ortho4XP\OSM_data`, `Orthophotos` and
@@ -2479,6 +2499,66 @@ Items 1–6 come from static analysis, 7–9 from the baseline builds.
     of being skipped as open sea (#41). `DEM.hgt_is_flat_sea` reads the
     grid (numpy, ~0.03 s) and calls it sea only when every sample is 0 or
     void; below-sea land (Caspian) stays land. 4 tests.
+144. **FIXED** (`4ae69c2`): step 2 skipped the altitude post-treatment
+    of triangles whose attribute ended in the digit 0 (`line[-2] ==
+    "0"`), meant for DUMMY (0) but also hitting 10, 20, 40, 80, ...:
+    SEA + INTERP_ALT (airports and levelled roads reaching the sea) kept
+    their raw DEM altitudes on every coast tile (spread within such
+    triangles 21.5 m -> 5.1 m at +61+006). `MESH.classify_triangles`
+    tests the attribute value. 4 tests. Output unchanged at +55+012.
+145. **FIXED** (`3de75d5`): an old-style multipolygon (the outer way
+    tagged like its relation) was built twice, the way as an area of its
+    own without holes, and the union filled every island of such a lake
+    with water (Nuuk: 8 islands). `OSM_to_MultiPolygon` builds relations
+    first and skips the outer ways of relations that gave polygons; the
+    order of the result is unchanged. 3 tests. CHANGES OUTPUT (+55+012:
+    Minebådsgraven, 34 fewer triangles, water raster identical).
+146. **FIXED** (`669a45c`, upstream bug): `DSF.float2qquad` gave 24 bits,
+    but a point pool at quadtree depth L stores bits L..L+16 and pools go
+    down to 14. In pools deeper than 8 every vertex was written at
+    1/2**(L-8) of its offset from the pool corner while its UV came from
+    the true position (imagery up to ~100 m off, distorted geometry), and
+    the coarser grid merged vertices, so collapsed triangles were dropped.
+    Now 32 bits (pool assignment unchanged); negative offsets clamp to 0.
+    +55+012: 12 depth-9 pools (9.3% of points), 5% of patch vertices
+    120-160 px off -> max 0.35 px, 46,376 triangles back. 31 of the
+    user's 1,597 DSFs are affected (scan_dsf_pools.py,
+    eval\scan146_tiles.txt; worst +21-072 32%, +13+100 28%, +61+008
+    12.5%, +55+012 3.2%). CHANGES OUTPUT.
+147. **FIXED** (`d4d5603`): an islet whose only nodes are its coast nodes
+    ended at 0 m (step 2 zeroes every node of a sea triangle; Triangle4XP
+    refines by DEM curvature and does not split its short triangles).
+    `VMAP.add_island_peaks`: islands (holes of the sea polygons) up to
+    1 km2 with no node inside get one at their DEM top (3 m from the
+    coast) when it is >= 2 m; an island with a node (road, airport,
+    patch) is left alone (a lone node in a levelled area would raise
+    it). Eval: 6/2/302/308 islets on +61+006/+62-075/+64-052/+69+018.
+    The rest of the land at 0 m with DEM > 5 m is coastal fringe
+    (triangles of three coast nodes, median 19 m2), not islets. 5 tests.
+    CHANGES OUTPUT.
+148. **FIXED** (`71b4c88`): smoothing left lakes far from flat along
+    steep shores (DEM of the bank: 44 m off at Nuuk, 29 m at
+    Hornindalsvatnet). Step 1 (`VECT.lake_levels`) takes the wide parts
+    of each water polygon (shrunk by 1.5 DEM cells, so a river leaving a
+    lake is not part of it), keeps those with a DEM spread (p5-p95) of
+    at most 1 m and a median not within 0.5 m of 0 (no-data filled with
+    zeros in Greenland, or sea-level water), and writes them to
+    Data<tile>.lakes; step 2 (`MESH.level_lakes`) sets the water
+    vertices in or on them to the level after the smoothing, never
+    raising one by more than 2 m (outflows keep their slope). Lakes and
+    rivers are told apart by the DEM: the cached water layers keep only
+    natural/waterway/name, not water=river. First version levelled whole
+    merged polygons (Hornindalsvatnet's 53 m over the river to the
+    fjord): fixed by the per-part rule. Eval, water vertices in levelled
+    lakes > 2 m off: 4,020 -> 0, 53 -> 29, 18,589 -> 534 (outflows), 167
+    -> 0. Remaining spikes in lake triangles are road levelling (type 9
+    triangles at the shore, pre-existing) and waterfalls between lakes.
+    9 tests. CHANGES OUTPUT.
+149. **FIXED** (`7917e67`): min_area (km2) was compared as min_area /
+    10000 square degrees: 1,240 m2 at the equator for 0.001 km2, 700 m2
+    at +55, 530 at +64, 310 at +75. `VMAP.km2_to_tile_area` converts at
+    the tile's latitude. 7 tests. CHANGES OUTPUT (+55+012 with #145-#149: 1,094,356 ->
+    1,056,452 triangles).
 - Dead code removed 2026-11-25 (`cab5ad1`): O4_Scenery_Utils.py,
     DEM.create_normal_map, IMG.build_combined_ortho/build_provider_texture,
     EXTRACT.tile_of, VECT.projcoords, FNAMES.input_ele_file/
