@@ -867,7 +867,8 @@ def _roads(level):
     return EXTRACT.flat_statements(VMAP.small_road_queries(level))
 
 
-LEVEL4 = ["tertiary", "unclassified", "residential", "service"]
+LEVEL4 = ["tertiary", "tertiary_link", "unclassified", "residential",
+          "living_street", "service"]
 
 
 def test_cache_stamp_written_and_read(gf):
@@ -931,7 +932,7 @@ def test_step1_warns_about_an_unrefreshed_mismatch(gf):
     assert OSM.OSM_queries_to_OSM_layer(
         VMAP.small_road_queries(5), layer, 55, 12, [],
         cached_suffix="small_roads")
-    assert len(layer.dicosmw) == 4
+    assert len(layer.dicosmw) == len(LEVEL4)
     assert any("cached OSM small_roads layer of +55+012 was made for other "
                "queries" in line for line in gf)
     assert open(cache, "rb").read() == before

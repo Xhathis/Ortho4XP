@@ -28,13 +28,20 @@ SEA_ONLY = 2
 # the server for exactly what a build downloads.
 COASTLINE_QUERIES = ('way["natural"="coastline"]',)
 AIRPORT_QUERIES = (('node["aeroway"]', 'way["aeroway"]', 'rel["aeroway"]'),)
+# A link road (ramp) goes with its road class: left out, the ramps of a
+# levelled road followed the raw DEM and tilted at interchanges (#152).
 BIG_ROAD_QUERIES = (
     'way["highway"="motorway"]',
+    'way["highway"="motorway_link"]',
     'way["highway"="trunk"]',
+    'way["highway"="trunk_link"]',
     'way["highway"="primary"]',
+    'way["highway"="primary_link"]',
     'way["highway"="secondary"]',
+    'way["highway"="secondary_link"]',
     'way["railway"="rail"]',
     'way["railway"="narrow_gauge"]',
+    'way["railway"="light_rail"]',
 )
 WATER_QUERIES = (
     'rel["natural"="water"]',
@@ -47,11 +54,12 @@ WATER_QUERIES = (
 
 def small_road_queries(road_level):
     """Queries of the small_roads layer for road_level >= 2."""
-    queries = ['way["highway"="tertiary"]']
+    queries = ['way["highway"="tertiary"]', 'way["highway"="tertiary_link"]']
     if road_level >= 3:
         queries += [
             'way["highway"="unclassified"]',
             'way["highway"="residential"]',
+            'way["highway"="living_street"]',
         ]
     if road_level >= 4:
         queries += ['way["highway"="service"]']
