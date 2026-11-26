@@ -375,27 +375,43 @@ def include_airports(vector_map, tile):
 
 
 ################################################################################
-def include_roads(vector_map, tile, apt_array, apt_area):
-    def road_is_too_much_banked(way, filtered_segs):
+class RoadBankingFilter:
+    """Whether a road way gets levelled (OSM_to_MultiLineString's filter).
+
+    Past tile.max_levelled_segs no more roads are checked (an airport road
+    still is); the ways left out that way are counted in skipped, so the
+    log can say the cap was reached (#150), which it never did.
+    """
+
+    def __init__(self, tile, apt_array):
+        self.tile = tile
+        self.apt_array = apt_array
+        self.skipped = 0
+
+    def _at_airport(self, point):
         (col, row) = numpy.minimum(
-            numpy.maximum(numpy.round(way[0] * 1000), 0), 1000
+            numpy.maximum(numpy.round(point * 1000), 0), 1000
         )
-        if apt_array[int(1000 - row), int(col)]:
+        return bool(self.apt_array[int(1000 - row), int(col)])
+
+    def __call__(self, way, filtered_segs):
+        if self._at_airport(way[0]) or self._at_airport(way[-1]):
             return True
-        (col, row) = numpy.minimum(
-            numpy.maximum(numpy.round(way[-1] * 1000), 0), 1000
-        )
-        if apt_array[int(1000 - row), int(col)]:
-            return True
+        tile = self.tile
         if filtered_segs >= tile.max_levelled_segs:
+            self.skipped += 1
             return False
-        return (
+        return bool((
             numpy.abs(
                 tile.dem.alt_vec(way)
                 - tile.dem.alt_vec(VECT.shift_way(way, tile.lane_width))
             )
             >= tile.road_banking_limit
-        ).any()
+        ).any())
+
+
+def include_roads(vector_map, tile, apt_array, apt_area):
+    road_is_too_much_banked = RoadBankingFilter(tile, apt_array)
 
     def alt_vec_shift(way):
         return tile.dem.alt_vec(VECT.shift_way(way, tile.lane_width))
@@ -455,6 +471,14 @@ def include_roads(vector_map, tile, apt_array, apt_area):
         UI.vprint(3, "Time for check :", time.time() - timer)
         road_network_banked = geometry.MultiLineString(
             list(road_network_banked.geoms) + list(road_network_banked_2.geoms)
+        )
+    if road_is_too_much_banked.skipped:
+        # Each of the two road layers has its own cap (the count restarts).
+        UI.lvprint(
+            1,
+            f"   NOTE: max_levelled_segs ({tile.max_levelled_segs}) reached,"
+            f" {road_is_too_much_banked.skipped} road(s) not checked for"
+            " levelling (they follow the terrain).",
         )
     if not road_network_banked.is_empty:
         UI.vprint(1, "    * Buffering banked road network as multipolygon.")
