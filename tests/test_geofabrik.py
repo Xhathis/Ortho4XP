@@ -216,7 +216,8 @@ def test_prepare_tile_writes_answers_step1_reads(fake_files, gf):
     # Step 1 then reads the water answer, no Overpass.
     layer = OSM.OSM_layer()
     assert OSM.OSM_queries_to_OSM_layer(
-        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+        VMAP.WATER_QUERIES, layer, 55, 12, GEOFABRIK.TAGS_OF_INTEREST["water"],
+        cached_suffix="water")
     assert len(layer.dicosmw) == 1
     assert os.path.isfile(FNAMES.osm_cached(55, 12, "water"))
     # The answer goes once its cache is written; the others wait.
@@ -694,10 +695,18 @@ DAY = 86400
 def _old_cache(lat, lon, layer, days, layer_obj=None):
     path = FNAMES.osm_cached(lat, lon, layer)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    assert (layer_obj or OSM.OSM_layer()).write_to_file(path)
+    # A water cache as written since #151 (stamped with its kept tags): an
+    # unstamped one is prepared again (test_water_cache_without_tags_...).
+    (st, tags) = _water_stamp() if layer == "water" else ((), ())
+    assert (layer_obj or OSM.OSM_layer()).write_to_file(path, st, tags)
     t = time.time() - days * DAY
     os.utime(path, (t, t))
     return path
+
+
+def _water_stamp():
+    return (EXTRACT.flat_statements(VMAP.WATER_QUERIES),
+            GEOFABRIK.TAGS_OF_INTEREST["water"])
 
 
 def test_cache_is_stale(gf, monkeypatch):
@@ -739,7 +748,8 @@ def test_stale_cache_is_refreshed(fake_files, gf, monkeypatch):
     # Step 1 prefers the newer answer to the old (empty) cache.
     layer = OSM.OSM_layer()
     assert OSM.OSM_queries_to_OSM_layer(
-        VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
+        VMAP.WATER_QUERIES, layer, 55, 12, GEOFABRIK.TAGS_OF_INTEREST["water"],
+        cached_suffix="water")
     assert len(layer.dicosmw) == 1
     assert not os.path.exists(EXTRACT.answer_path(55, 12, "water"))
     assert time.time() - os.path.getmtime(cache) < 600
@@ -814,14 +824,14 @@ def test_cache_write_is_atomic(gf, monkeypatch):
     before = open(cache, "rb").read()
     folder = os.path.dirname(cache)
 
-    def cut(self, fout, statements=()):
+    def cut(self, fout, statements=(), tags=()):
         fout.write("<?xml")
         raise RuntimeError("killed")
     monkeypatch.setattr(OSM.OSM_layer, "_write", cut)
     with pytest.raises(RuntimeError):
         OSM.OSM_layer().write_to_file(cache)
 
-    def full(self, fout, statements=()):
+    def full(self, fout, statements=(), tags=()):
         fout.write("<?xml")
         raise OSError(28, "No space left on device")
     monkeypatch.setattr(OSM.OSM_layer, "_write", full)
@@ -895,9 +905,12 @@ def test_unstamped_cache_judged_by_its_road_values(gf):
     assert EXTRACT.cache_fits(_road_cache(LEVEL4 + ["track", "path"]),
                               _roads(5)) is True          # path: not ours
     # Other layers' old caches pass as before; no file: unknown.
-    assert EXTRACT.cache_fits(_old_cache(55, 12, "water", 1),
-                              EXTRACT.flat_statements(VMAP.WATER_QUERIES)) \
-        is None
+    water = FNAMES.osm_cached(55, 12, "water")
+    assert OSM.OSM_layer().write_to_file(water)  # unstamped
+    (st, tags) = _water_stamp()
+    assert EXTRACT.cache_fits(water, st) is None
+    # ... unless they lack a tag kept since #151
+    assert EXTRACT.cache_fits(water, st, tags) is False
     assert EXTRACT.cache_fits(path + ".missing", _roads(4)) is None
 
 
@@ -945,8 +958,8 @@ def test_road_level_raise_refreshes_the_cache(fake_files, gf):
     assert os.path.isfile(EXTRACT.answer_path(55, 12, "small_roads"))
     layer = OSM.OSM_layer()
     assert OSM.OSM_queries_to_OSM_layer(
-        VMAP.small_road_queries(5), layer, 55, 12, [],
-        cached_suffix="small_roads")
+        VMAP.small_road_queries(5), layer, 55, 12,
+        GEOFABRIK.TAGS_OF_INTEREST["small_roads"], cached_suffix="small_roads")
     assert EXTRACT.cache_fits(cache, _roads(5)) is True
     assert any("small_roads layer of +55+012 was 1 days old, refreshed"
                in line for line in gf)
