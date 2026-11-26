@@ -85,14 +85,14 @@ something.
   `os.name`) or the bundled `.exe` tools, and "CHANGES OUTPUT" when a
   normal build's DSF or masks change (needs a new baseline).
 - Commit or push only when the user asks.
-- New issues are numbered on (next: #150). An open one is listed under
+- New issues are numbered on (next: #155). An open one is listed under
   "Open issues" here; once fixed, its entry and test results move to
   `docs/claude-history.md` (Known issues, Test results).
 
 ## Testing method
 
 1. **Unit tests:** `venv\Scripts\python.exe -m pytest` (repo root, ~30 s,
-   836 tests on test 4ada1bc). `tests/conftest.py` switches to an empty
+   867 tests on test f361e0c). `tests/conftest.py` switches to an empty
    temp folder before any O4 module is imported, so tests never touch the
    user's data. Run them before every commit; add a test before changing
    a pure function; new tests should fail on dev where testable.
@@ -104,16 +104,23 @@ something.
    <commit> [--label name] [--overlay <src_dir>]` — builds +55+012 (Arc
    ZL17) in the worktree `G:\Ortho4XP_tests\regression\ws` from frozen
    inputs and compares DSF, 17 masks and app log with the baseline
-   `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-4ada1bc_frozen\` (since
-   #149; mesh 1,056,452 triangles, no WARNING). `--overlay` builds a
-   commit with a fix worktree's uncommitted O4_*.py over it. Every input
+   `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-f361e0c_frozen\` (since
+   #151/#152; mesh 879,155 triangles, no WARNING; its OSM caches come
+   from Geofabrik extracts, see BASELINE.txt). `--overlay <wt>\src`
+   builds a commit with a fix worktree's uncommitted O4_*.py over it
+   (give the src folder: with the worktree root it copies nothing and
+   prints "overlay: no difference"). Every input
    is re-hashed afterwards (a download fails the run). Results in
    `G:\Ortho4XP_tests\+55+012_Arc_ZL17_<label>-<sha>\`. Explain every
    difference; an unexplained one is a failure. The order of "Created
    ...png" lines in console.log is not a difference. A new baseline needs
    a new folder (copy inputs\ of the current one, check SHA256SUMS, then
    `regression.py baseline`). The frozen inputs have no apt.dat, so the
-   flatten code (#115-#134) does not act there.
+   flatten code (#115-#134) does not act there. A change to the OSM
+   queries or the tags caches keep makes the frozen caches unfit: test
+   it with `osm_ab.py run <label> <commit> [--overlay <src>]` (A/B from
+   the same extract copies in `G:\Ortho4XP_tests\osm151`), then freeze
+   the new side's caches as the next baseline's inputs.
 4. **Sims:** `sims_in_ws.py <commit> [--overlay <src_dir>] all` (~20 min):
    10 CLI failure sims and 5 batch sims in the regression worktree; must
    end "FAILURES: 0". Never run the full-build sims (sim_osm_failure,
@@ -125,7 +132,7 @@ something.
    `sim_overlay.py` (8 cases), `sim_overpass_fallback.py`,
    `sim_dem_failure.py`, `sim_geofabrik_step1.py <commit> 28 -18 --overlay
    <src> --geofabrik-dir <scratch>` (never the user's Geofabrik folder),
-   `sim_custom_dem_gap.py`, `sim_batch_cleaning.py`, `check_overpass_slot.py`,
+   `osm_ab.py` (above), `sim_custom_dem_gap.py`, `sim_batch_cleaning.py`, `check_overpass_slot.py`,
    `check_step3_provider.py`, `probe_mesh.py`, `pe_stack.py`,
    `fetch_osm_api.py`, `fix_dem_folders.py`, `verify_copy.py`,
    `scan_dsf_pools.py <Tiles dir>` (#146 check, read only), the
@@ -192,11 +199,14 @@ something.
 
 ## Current state (2026-11-26)
 
-- `test` 4ada1bc, not on `dev` yet: #144-#149 from the evaluation of
-  how data are processed (836 unit tests, new baseline, regression
-  PASS, sims 15/15). #146 (DSF vertices of deep pools misplaced) hits
-  31 built tiles (`G:\Ortho4XP_tests\eval\scan146_tiles.txt`): they
-  need steps 1-3 once it is on `dev`.
+- `test` f361e0c, not on `dev` yet: #144-#149 from the evaluation of
+  how data are processed, #150-#154 (867 unit tests, regression PASS,
+  sims 15/15). #146 hit 31 built tiles
+  (`G:\Ortho4XP_tests\eval\scan146_tiles.txt`), rebuilt in batch r01
+  with #146 over dev: 25 built, 6 failed in step 3 (#153/#154; they keep their old DSF:
+  +39-108, +43-066, +50-120, +61+008, +60+006, +45-064) and need steps
+  1-3 once `test` is on `dev`. After #151/#152 every tile's water and
+  big_roads caches are made again from the store at its next step 1.
 
 - `dev` 08036b3, pushed: issues #1-#143 fixed, dead code and unused
   data removed, provider errors logged, step 1 ~17% faster (806 unit
@@ -211,7 +221,8 @@ something.
   `G:\Ortho4XP_tests\cleanup_2026-11-25.log`): 1,358.9 GB freed (JPGs of
   built tiles, all masks, .dsf.bak/.cfg.bak, old sims and baselines).
   All 1,598 tiles complete (one DSF, all textures). Baselines:
-  d74d672_frozen (old) and 4ada1bc_frozen (current).
+  d74d672_frozen, 4ada1bc_frozen, 000880d_frozen (old) and
+  f361e0c_frozen (current).
 
 ## Open issues
 
