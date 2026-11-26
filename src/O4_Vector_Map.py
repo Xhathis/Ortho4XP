@@ -654,6 +654,15 @@ def add_island_peaks(vector_map, sea_area, tile):
 
 
 ################################################################################
+def km2_to_tile_area(km2, lat):
+    """An area in km2 as the square tile-relative degrees polygons are in,
+    at the middle of tile lat. min_area (km2) used to be compared as
+    min_area / 10000 square degrees: 1,240 m2 at the equator for the
+    default 0.001 km2, 700 m2 at +55, 310 m2 at +75 (#149)."""
+    return km2 * 1e6 / (GEO.lat_to_m * GEO.lon_to_m(lat + 0.5))
+
+
+################################################################################
 def include_water(vector_map, tile):
     large_lake_threshold = (
         tile.max_area * 1e6 / (GEO.lat_to_m * GEO.lon_to_m(tile.lat + 0.5))
@@ -702,6 +711,8 @@ def include_water(vector_map, tile):
                 "km^2.",
             )
             return True
+
+    min_water_area = km2_to_tile_area(tile.min_area, tile.lat)
 
     UI.vprint(0, "-> Dealing with inland water")
     water_layer = OSM.OSM_layer()
@@ -761,7 +772,7 @@ def include_water(vector_map, tile):
             dico_water,
             tile.dem.alt_vec,
             "WATER",
-            area_limit=tile.min_area / 10000,
+            area_limit=min_water_area,
             simplify=tile.water_simplification * GEO.m_to_lat,
             check=True,
         )
@@ -790,7 +801,7 @@ def include_water(vector_map, tile):
             dico_water,
             tile.dem.alt_vec,
             "SEA_EQUIV",
-            area_limit=tile.min_area / 10000,
+            area_limit=min_water_area,
             simplify=tile.water_simplification * GEO.m_to_lat,
             check=True,
         )
@@ -799,7 +810,7 @@ def include_water(vector_map, tile):
     lakes = VECT.lake_levels(
         (VECT.cut_to_tile(pol) for pol in lake_candidates),
         tile.dem,
-        tile.min_area / 10000,
+        min_water_area,
     )
     UI.vprint(1, "      Lakes levelled flat:", len(lakes))
     try:
