@@ -558,6 +558,50 @@ def extract_elevation_and_bathymetry_data(lat, lon):
 
 
 ################################################################################
+# A DSF point pool is indexed by 16-bit point numbers. A quadtree bucket
+# holds up to quad_capacity mesh nodes, but its textured pool takes a node
+# once per terrain it touches, and the bucket stops splitting at depth 14
+# (QuadTree.insert): around a mesh defect (hundreds of thousands of nodes
+# in a few metres, #154) a pool got more points than that and step 3
+# stopped with an OverflowError (#153). Until #146 such pools hid it: their
+# vertices were snapped to a coarse grid, which merged most of them.
+POOL_MAX_POINTS = 1 << 16
+
+
+class PointPools:
+    """The DSF point pools of a tile. add() appends a point to a pool, or
+    to that pool's overflow pool once it is full: same planes and scale
+    (base), later in the file. Triangles with points in two pools are
+    cross-pool triangles, which the commands already handle."""
+
+    def __init__(self, planes):
+        self.planes = [int(p) for p in planes]
+        self.points = [array.array("H") for _ in self.planes]
+        self.length = [0] * len(self.planes)
+        self.base = list(range(len(self.planes)))
+        self._current = {}
+
+    def __len__(self):
+        return len(self.planes)
+
+    def add(self, idx, *values):
+        """Append one point (its plane values, in pieces) to pool idx:
+        (pool it went to, its position there)."""
+        k = self._current.get(idx, idx)
+        if self.length[k] >= POOL_MAX_POINTS:
+            k = len(self.planes)
+            self.planes.append(self.planes[idx])
+            self.points.append(array.array("H"))
+            self.length.append(0)
+            self.base.append(idx)
+            self._current[idx] = k
+        pos = self.length[k]
+        for v in values:
+            self.points[k].extend(v)
+        self.length[k] += 1
+        return (k, pos)
+
+
 # Bulk encoders for the DSF pool and command atoms (#93). They used to pack
 # each 16-bit value with its own struct.pack and f.write: 15.6 million
 # calls, ~10 s of build_dsf for +55+012. Same bytes.
@@ -764,13 +808,9 @@ def build_dsf(tile, download_queue):
     overlay_terrains = set()
     treated_textures = set()
     skipped_terrains_for_masking = set()
-    dsf_pools = {}
     # we need more pools for textured nodes than for nodes : land, UV masked
     # water, and XP water
     dsf_pool_nbr = 3 * pool_nbr
-    for idx_dsfpool in range(dsf_pool_nbr):
-        dsf_pools[idx_dsfpool] = array.array("H")
-    dsf_pool_length = numpy.zeros(dsf_pool_nbr, "int")
     if (tile.water_tech == "XP11 + bathy"):
         # Land with ortho
         dsf_pool_plane = 7 * numpy.ones(dsf_pool_nbr, "int")
@@ -787,6 +827,7 @@ def build_dsf(tile, download_queue):
         dsf_pool_plane[pool_nbr : 2 * pool_nbr] = 9
         # Regular XP water
         dsf_pool_plane[2 * pool_nbr : 3 * pool_nbr] = 7
+    pools = PointPools(dsf_pool_plane)
     textured_nodes = {}
     len_textured_nodes = 0
     textured_tris = {}
@@ -970,37 +1011,31 @@ def build_dsf(tile, download_queue):
                     )
                     # BEWARE : normal coordinates are pointing (EAST,SOUTH)
                     # in X-Plane, not (EAST,NORTH) ! (cfr DSF specs), so v -> -v
-                    if is_overlay: 
-                        idx_dsfpool = idx_pool + pool_nbr
+                    if is_overlay:
                         # border_tex masks with original normal
-                        dsf_pools[idx_dsfpool].extend(
-                            node_icoords[5 * n : 5 * n + 5]
-                        )
-                        dsf_pools[idx_dsfpool].extend(
+                        (idx_dsfpool, pos_in_pool) = pools.add(
+                            idx_pool + pool_nbr,
+                            node_icoords[5 * n : 5 * n + 5],
                             (
                                 int(round(s * 65535)),
                                 int(round(t * 65535)),
                                 int(round(s * 65535)),
                                 int(round(t * 65535)),
-                            )
+                            ),
                         )
                     else:  # dtx5 dds with mask included
-                        idx_dsfpool = idx_pool + pool_nbr
-                        dsf_pools[idx_dsfpool].extend(
-                            node_icoords[5 * n : 5 * n + 5]
-                        )
                         # TODO (improve fetch values)
                         ratio_bathy = BATHY.set_depth_ratio(n, node_is_coast,
                                                             node_bathy, tile)
                         ratio_fetch = 1
-                        dsf_pools[idx_dsfpool].extend(
-                            (int(65535 * ratio_fetch), int(65535 * ratio_bathy), 
-                             int(round(s * 65535)), int(round(t * 65535)))
+                        (idx_dsfpool, pos_in_pool) = pools.add(
+                            idx_pool + pool_nbr,
+                            node_icoords[5 * n : 5 * n + 5],
+                            (int(65535 * ratio_fetch), int(65535 * ratio_bathy),
+                             int(round(s * 65535)), int(round(t * 65535))),
                         )
                     len_textured_nodes += 1
-                    pos_in_pool = dsf_pool_length[idx_dsfpool]
                     textured_nodes[node_hash] = (idx_dsfpool, pos_in_pool)
-                    dsf_pool_length[idx_dsfpool] += 1
                 tri_p.extend((idx_dsfpool, pos_in_pool))
             # some triangles could be reduced to nothing by the pool snapping,
             # we skip thme (possible killer to X-Plane's drapping of roads ?)
@@ -1025,25 +1060,21 @@ def build_dsf(tile, download_queue):
                 if node_hash in textured_nodes:
                     (idx_dsfpool, pos_in_pool) = textured_nodes[node_hash]
                 else:
-                    idx_dsfpool = idx_node_to_idx_pool[n] + 2 * pool_nbr
                     len_textured_nodes += 1
-                    pos_in_pool = dsf_pool_length[idx_dsfpool]
-                    textured_nodes[node_hash] = [idx_dsfpool, pos_in_pool]
                     # in some cases we might prefer to use normal shading for
                     # some sea triangles too (albedo continuity with elevation
                     # derived masks)
-                    # dsf_pools[idx_dsfpool].extend(node_icoords[5*n:5*n+5])
-                    dsf_pools[idx_dsfpool].extend(
-                        node_icoords[5 * n : 5 * n + 3]
-                    )
-                    dsf_pools[idx_dsfpool].extend((32768, 32768))
                     ratio_bathy = BATHY.set_depth_ratio(n, node_is_coast,
                                                         node_bathy, tile)
                     # TODO improve bathy and fetch ratio variety
                     ratio_fetch = 1
-                    dsf_pools[idx_dsfpool].extend((int(65535 * ratio_fetch),
-                                                   int(65535 * ratio_bathy))) 
-                    dsf_pool_length[idx_dsfpool] += 1
+                    (idx_dsfpool, pos_in_pool) = pools.add(
+                        idx_node_to_idx_pool[n] + 2 * pool_nbr,
+                        node_icoords[5 * n : 5 * n + 3],
+                        (32768, 32768),
+                        (int(65535 * ratio_fetch), int(65535 * ratio_bathy)),
+                    )
+                    textured_nodes[node_hash] = [idx_dsfpool, pos_in_pool]
                 tri_p.extend((idx_dsfpool, pos_in_pool))
             if tri_p[0] == tri_p[2] == tri_p[4]:
                 textured_tris[0][tri_p[0]].extend(
@@ -1142,20 +1173,16 @@ def build_dsf(tile, download_queue):
                 # BEWARE : normal coordinates are pointing (EAST,SOUTH) in 
                 # X-Plane, not (EAST,NORTH) ! (cfr DSF specs), so v -> -v
                 if not tri_type:  # land
-                    idx_dsfpool = idx_pool
-                    dsf_pools[idx_dsfpool].extend(
-                        node_icoords[5 * n : 5 * n + 5]
-                    )
-                    dsf_pools[idx_dsfpool].extend(
-                        (int(round(s * 65535)), int(round(t * 65535)))
+                    (idx_dsfpool, pos_in_pool) = pools.add(
+                        idx_pool,
+                        node_icoords[5 * n : 5 * n + 5],
+                        (int(round(s * 65535)), int(round(t * 65535))),
                     )
                 else:  # inland water
-                    idx_dsfpool = idx_pool + pool_nbr
                     # constant alpha overlay with flat shading
-                    dsf_pools[idx_dsfpool].extend(
-                        node_icoords[5 * n : 5 * n + 3]
-                    )
-                    dsf_pools[idx_dsfpool].extend(
+                    (idx_dsfpool, pos_in_pool) = pools.add(
+                        idx_pool + pool_nbr,
+                        node_icoords[5 * n : 5 * n + 3],
                         (
                             32768,
                             32768,
@@ -1163,12 +1190,10 @@ def build_dsf(tile, download_queue):
                             int(round(t * 65535)),
                             0,
                             int(round(tile.ratio_water * 65535)),
-                        )
+                        ),
                     )
                 len_textured_nodes += 1
-                pos_in_pool = dsf_pool_length[idx_dsfpool]
                 textured_nodes[node_hash] = (idx_dsfpool, pos_in_pool)
-                dsf_pool_length[idx_dsfpool] += 1
             tri_p.extend((idx_dsfpool, pos_in_pool))
         # some triangles could be reduced to nothing by the pool snapping,
         # we skip them (possible killer to X-Plane's drapping of roads ?)
@@ -1194,24 +1219,20 @@ def build_dsf(tile, download_queue):
                 if node_hash in textured_nodes:
                     (idx_dsfpool, pos_in_pool) = textured_nodes[node_hash]
                 else:
-                    idx_dsfpool = idx_node_to_idx_pool[n] + 2 * pool_nbr
                     len_textured_nodes += 1
-                    pos_in_pool = dsf_pool_length[idx_dsfpool]
-                    textured_nodes[node_hash] = [idx_dsfpool, pos_in_pool]
                     # in some cases we might prefer to use normal shading for
                     # some sea triangles too (albedo continuity with elevation
                     # derived masks)
-                    # dsf_pools[idx_dsfpool].extend(node_icoords[5*n:5*n+5])
-                    dsf_pools[idx_dsfpool].extend(
-                        node_icoords[5 * n : 5 * n + 3]
-                    )
-                    dsf_pools[idx_dsfpool].extend((32768, 32768))
                     ratio_bathy = BATHY.set_depth_ratio(n, node_is_coast,
                                                         node_bathy, tile)
                     ratio_fetch = 1
-                    dsf_pools[idx_dsfpool].extend((int(65535 * ratio_fetch),
-                                                   int(65535 * ratio_bathy))) 
-                    dsf_pool_length[idx_dsfpool] += 1
+                    (idx_dsfpool, pos_in_pool) = pools.add(
+                        idx_node_to_idx_pool[n] + 2 * pool_nbr,
+                        node_icoords[5 * n : 5 * n + 3],
+                        (32768, 32768),
+                        (int(65535 * ratio_fetch), int(65535 * ratio_bathy)),
+                    )
+                    textured_nodes[node_hash] = [idx_dsfpool, pos_in_pool]
                 tri_p.extend((idx_dsfpool, pos_in_pool))
             if tri_p[0] == tri_p[2] == tri_p[4]:
                 textured_tris[0][tri_p[0]].extend(
@@ -1221,6 +1242,12 @@ def build_dsf(tile, download_queue):
                 total_cross_pool += 1
                 textured_tris[0]["cross-pool"].extend(tri_p)
     
+    (dsf_pools, dsf_pool_length, dsf_pool_plane) = (
+        pools.points, pools.length, pools.planes)
+    dsf_pool_nbr = len(pools)
+    if dsf_pool_nbr > 3 * pool_nbr:
+        UI.vprint(1, f"     {dsf_pool_nbr - 3 * pool_nbr} point pool(s) "
+                  "overflowed into an extra pool.")
     UI.vprint(1, "-> Encoding of the DSF file")
     UI.vprint(1, "     Final nbr of nodes: " + str(len_textured_nodes))
     UI.vprint(2, "     Final nbr of cross pool tris: " + str(total_cross_pool))
@@ -1338,7 +1365,8 @@ def build_dsf(tile, download_queue):
             f.write(b"LACS")
             f.write(struct.pack("<I", 8 + 8 * dsf_pool_plane[k]))
             for l in range(2 * dsf_pool_plane[k]):
-                f.write(struct.pack("<f", pool_param[k % pool_nbr][l]))
+                f.write(struct.pack(
+                    "<f", pool_param[pools.base[k] % pool_nbr][l]))
 
         UI.progress_bar(1, 95)
         if UI.red_flag:
