@@ -589,6 +589,77 @@ def include_sea(vector_map, tile):
                 vector_map.seeds["SEA"].append(seed)
             else:
                 vector_map.seeds["SEA"] = [seed]
+        added = add_island_peaks(vector_map, sea_area, tile)
+        if added:
+            UI.vprint(1, "      Added a top point to", added, "islet(s).")
+
+
+# Islets up to this size (km2) whose DEM top is at least ISLAND_PEAK_MIN_
+# HEIGHT (m) get a point at that top, kept ISLAND_PEAK_MARGIN (m) from the
+# coast (#147).
+ISLAND_PEAK_MAX_AREA = 1.0
+ISLAND_PEAK_MIN_HEIGHT = 2.0
+ISLAND_PEAK_MARGIN = 3.0
+
+
+def add_island_peaks(vector_map, sea_area, tile):
+    """Insert a node at the DEM top of each small island with no node
+    inside it yet; returns how many.
+
+    Such an islet is meshed from its coast nodes only, and step 2 sets
+    every node of a sea triangle to 0 m: the whole islet ended at sea level
+    (up to 0.06 km2 of land more than 5 m high per tile). Triangle4XP's
+    curvature test does not split its triangles, which are already short.
+    An island holding a node (a road, an airport, a patch) is left alone:
+    it has inner points already, and a lone node in a levelled area would
+    raise it (those areas take their altitude from the node attribute).
+    """
+    import shapely
+    m2_per_deg2 = GEO.lat_to_m * GEO.lon_to_m(tile.lat + 0.5)
+    margin = ISLAND_PEAK_MARGIN * GEO.m_to_lat
+    step = VECT.dem_step(tile.dem)
+    islands = [
+        geometry.Polygon(ring)
+        for polygon in sea_area.geoms
+        for ring in polygon.interiors
+    ]
+    islands = [
+        island for island in islands
+        if island.is_valid
+        and island.area * m2_per_deg2 <= ISLAND_PEAK_MAX_AREA * 1e6
+    ]
+    if not islands:
+        return 0
+    node_xy = numpy.array(list(vector_map.dico_nodes.keys()) or [(-9, -9)])
+    tree = shapely.STRtree(shapely.points(node_xy))
+    added = 0
+    for island in islands:
+        inner = island.buffer(-margin)
+        if inner.is_empty:
+            continue
+        if len(tree.query(island, predicate="contains")):
+            continue
+        points = VECT.grid_points_inside(inner, step)
+        if not len(points):
+            points = numpy.array([inner.representative_point().coords[0]])
+        z = numpy.asarray(tile.dem.alt_vec(points), dtype=numpy.float64)
+        top = int(numpy.argmax(z))
+        if z[top] < ISLAND_PEAK_MIN_HEIGHT:
+            continue
+        vector_map.insert_node(
+            float(points[top][0]), float(points[top][1]), float(z[top])
+        )
+        added += 1
+    return added
+
+
+################################################################################
+def km2_to_tile_area(km2, lat):
+    """An area in km2 as the square tile-relative degrees polygons are in,
+    at the middle of tile lat. min_area (km2) used to be compared as
+    min_area / 10000 square degrees: 1,240 m2 at the equator for the
+    default 0.001 km2, 700 m2 at +55, 310 m2 at +75 (#149)."""
+    return km2 * 1e6 / (GEO.lat_to_m * GEO.lon_to_m(lat + 0.5))
 
 
 ################################################################################
@@ -641,6 +712,8 @@ def include_water(vector_map, tile):
             )
             return True
 
+    min_water_area = km2_to_tile_area(tile.min_area, tile.lat)
+
     UI.vprint(0, "-> Dealing with inland water")
     water_layer = OSM.OSM_layer()
     custom_water = FNAMES.custom_water(tile.lat, tile.lon)
@@ -674,6 +747,7 @@ def include_water(vector_map, tile):
     (water_area, sea_equiv_area) = OSM.OSM_to_MultiPolygon(
         water_layer, tile.lat, tile.lon, filter_large_lakes
     )
+    lake_candidates = []
     if not water_area.is_empty:
         UI.vprint(1, "      Cleaning it.")
         try:
@@ -692,12 +766,13 @@ def include_water(vector_map, tile):
         UI.vprint(
             2, "      Number of water Multipolygons : " + str(len(dico_water))
         )
+        lake_candidates += list(dico_water.values())
         UI.vprint(1, "      Encoding it.")
         vector_map.encode_MultiPolygon(
             dico_water,
             tile.dem.alt_vec,
             "WATER",
-            area_limit=tile.min_area / 10000,
+            area_limit=min_water_area,
             simplify=tile.water_simplification * GEO.m_to_lat,
             check=True,
         )
@@ -720,15 +795,29 @@ def include_water(vector_map, tile):
         UI.vprint(
             2, "      Number of water Multipolygons : " + str(len(dico_water))
         )
+        lake_candidates += list(dico_water.values())
         UI.vprint(1, "      Encoding them.")
         vector_map.encode_MultiPolygon(
             dico_water,
             tile.dem.alt_vec,
             "SEA_EQUIV",
-            area_limit=tile.min_area / 10000,
+            area_limit=min_water_area,
             simplify=tile.water_simplification * GEO.m_to_lat,
             check=True,
         )
+    # Written also when empty, so that step 2 never reads the lakes of an
+    # earlier step 1 (#148).
+    lakes = VECT.lake_levels(
+        (VECT.cut_to_tile(pol) for pol in lake_candidates),
+        tile.dem,
+        min_water_area,
+    )
+    UI.vprint(1, "      Lakes levelled flat:", len(lakes))
+    try:
+        VECT.write_lake_levels(FNAMES.lake_file(tile), lakes)
+    except OSError as e:
+        UI.lvprint(1, "   WARNING: the lake levels were not written",
+                   f"({e}); step 2 smooths lakes as before.")
     return 1
 
 
