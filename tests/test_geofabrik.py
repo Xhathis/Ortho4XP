@@ -2,6 +2,7 @@
 import bz2
 import hashlib
 import os
+import sys
 import time
 
 import pytest
@@ -625,6 +626,8 @@ def test_stop_during_update_leaves_no_temp_file(gf, monkeypatch, tmp_path):
     with open(path, "wb") as fh:
         fh.write(b"pbf")
     monkeypatch.setattr(GEOFABRIK.subprocess, "Popen", FakeUpdate)
+    monkeypatch.setattr(GEOFABRIK, "_kill_tree", lambda proc: proc.kill(),
+                        raising=False)
     monkeypatch.setattr(GEOFABRIK.time, "sleep",
                         lambda s: setattr(UI, "stop_requested", True))
     with pytest.raises(GEOFABRIK.Stopped):
@@ -1409,3 +1412,75 @@ def test_answer_older_than_the_cache_does_not_block(gf, monkeypatch):
     assert OSM.OSM_queries_to_OSM_layer(
         VMAP.WATER_QUERIES, layer, 55, 12, ["name"], cached_suffix="water")
     assert not os.path.exists(path)
+
+
+# --- #156: a stopped or timed-out update leaves no temp file and never
+# turns into "extract missing" ---------------------------------------------
+def _extract(tmp_path):
+    path = str(tmp_path / "x-latest.osm.pbf")
+    with open(path, "wb") as fh:
+        fh.write(b"pbf")
+    return path
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows venv launcher")
+def test_stop_kills_the_real_update_process(gf, monkeypatch, tmp_path):
+    # A venv's python.exe starts the interpreter as its own child: killing
+    # only the launcher left the file open, os.remove raised
+    # PermissionError and that replaced Stopped (2026-11-27, isole).
+    path = _extract(tmp_path)
+    monkeypatch.setattr(GEOFABRIK, "_UPDATE_CODE",
+                        "import sys, time; "
+                        "f = open(sys.argv[sys.argv.index('-o') + 1], 'wb'); "
+                        "time.sleep(60)")
+    real_sleep = GEOFABRIK.time.sleep
+
+    def sleep(s):
+        if any(n.startswith(".tmp") for n in os.listdir(tmp_path)):
+            UI.stop_requested = True
+        real_sleep(0.05)
+    monkeypatch.setattr(GEOFABRIK.time, "sleep", sleep)
+    monkeypatch.setattr(UI, "stop_requested", False)
+    with pytest.raises(GEOFABRIK.Stopped):
+        GEOFABRIK._update(path)
+    assert sorted(os.listdir(tmp_path)) == ["x-latest.osm.pbf"]
+
+
+def _locked(monkeypatch):
+    real = os.remove
+
+    def remove(p):
+        if os.path.basename(p).startswith(".tmp"):
+            raise PermissionError(32, "in use", p)
+        real(p)
+    monkeypatch.setattr(GEOFABRIK.os, "remove", remove)
+
+
+def test_stop_with_a_locked_temp_file_still_stops(gf, monkeypatch, tmp_path):
+    path = _extract(tmp_path)
+    monkeypatch.setattr(GEOFABRIK.subprocess, "Popen", FakeUpdate)
+    monkeypatch.setattr(GEOFABRIK, "_kill_tree", lambda proc: proc.kill(),
+                        raising=False)
+    monkeypatch.setattr(GEOFABRIK.time, "sleep",
+                        lambda s: setattr(UI, "stop_requested", True))
+    _locked(monkeypatch)
+    with pytest.raises(GEOFABRIK.Stopped):
+        GEOFABRIK._update(path)
+    # left for _remove_leftover_temps; the extract is untouched
+    with open(path, "rb") as fh:
+        assert fh.read() == b"pbf"
+
+
+def test_timed_out_update_with_a_locked_temp_file_keeps_the_extract(
+        gf, monkeypatch, tmp_path):
+    # The update gives up: the old file stays in use (False), it must not
+    # become an OSError that prepare_tiles takes for a missing extract.
+    path = _extract(tmp_path)
+    monkeypatch.setattr(GEOFABRIK.subprocess, "Popen", FakeUpdate)
+    monkeypatch.setattr(GEOFABRIK, "_kill_tree", lambda proc: proc.kill(),
+                        raising=False)
+    monkeypatch.setattr(GEOFABRIK, "UPDATE_TIMEOUT", -1)
+    monkeypatch.setattr(UI, "stop_requested", False)
+    _locked(monkeypatch)
+    assert GEOFABRIK._update(path) is False
+    assert any("could not update" in line for line in gf)
