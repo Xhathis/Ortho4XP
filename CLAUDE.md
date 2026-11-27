@@ -227,14 +227,12 @@ something.
 
 ## Current state (2026-11-27)
 
-- `dev` 26aeb23 (2026-11-26), not pushed: issues #1-#154 fixed (867
-  unit tests, regression PASS, sims 15/15). After #151/#152 every
-  tile's water and big_roads caches are made again from the store at
-  its next step 1.
-- `test` a4257c4 (+ the docs merge after it) = dev + #155, #156, #157
-  (891 tests, regression PASS on 5a22a0f_frozen). The user viewed
-  +60+006 (15 M, #155) on 2026-11-27: lake clean, ~4 min load (6 before
-  #155); dev waits for the user's OK.
+- `dev` = `test` (2026-11-27), pushed: issues #1-#157 fixed (891 unit
+  tests, regression PASS on 5a22a0f_frozen, sims 15/15, GUI smoke 7/7).
+  After #151/#152 every tile's water and big_roads caches are made
+  again from the store at its next step 1; #155 changes every tile's
+  mesh at its next step 2. The user viewed +60+006 (15 M, #155) on
+  2026-11-27: lake clean, ~4 min load (6 before #155).
 - XP12 water switched on 2026-11-26 (the user viewed test tile
   +18-065): `imprint_masks_to_dds=True` in Ortho4XP.cfg and all 1,597
   tile configs (only that line; backup
@@ -294,90 +292,7 @@ something.
 
 ## Open issues
 
-- **#155 near-coincident vertices (CHANGES OUTPUT)**, branch
-  `fix/near-vertex-snap` (worktree `G:\Ortho4XP_wt\near-vertex-snap`,
-  from dev 26aeb23), commit a180391, merged into `test` 5a22a0f (not dev; 874 passed, regression PASS
-  on the new baseline 5a22a0f_frozen, sims 15/15). Seen by the user in test tile
-  +60+006 (15 M): black lake with white radial streaks at 60.6393 N,
-  6.6525 E, 6 min load. Cause: a lake way and a water multipolygon have
-  their own nodes 1e-7 deg apart (one OSM unit); both edges leave the
-  same vertex, a 52 m sliver with a 0.0001 deg angle, which Triangle4XP
-  filled with 265,000 points (one vertex shared by 65,000 water
-  triangles). In the 10 M DSF too, so in the user's own tile. #154
-  snaps a vertex near the middle of a segment but not one near an end.
-  Fix: `Vector_Map.insert_node` returns an existing vertex within
-  SNAP_TOL (2e-7 deg, a grid of that cell size, 3x3 lookup); points
-  within SNAP_TOL of the tile edge go onto it, and a border point never
-  merges with an inner one; the grid is rebuilt in `snap_to_grid`.
-  7 tests in `tests/test_near_vertex_snap.py` (5 fail on dev). Results:
-  874 passed, pyflakes 0; +60+006 at 15 M rebuilt in the xp12water ws:
-  53 vertices merged, water fan hubs (>= 40 triangles) 3,624 -> 3
-  (largest 87), DSF 244 -> 235 MB, 10 input angles < 0.5 deg left in the
-  tile, no edge > 2 km, UVs fine. Regression: 9 vertices merged,
-  879,155 -> 879,142 triangles, masks and log identical (a new baseline
-  after the commit). Every tile changes at its next step 2.
-- **#156 extract update killed: temp file locked (Windows only)**, branch
-  `fix/update-temp-file` (worktree `G:\Ortho4XP_wt\update-temp-file`,
-  from dev 26aeb23), commit 3b0b848, merged into `test` 97e4229 (not
-  dev). Found from the user's 3 stop tests
-  (2026-11-27 05:11-05:13): a 0-byte `.tmp..._isole.osm.pbf` stayed in
-  the extract store. `GEOFABRIK._update` ran pyosmium with
-  sys.executable = the venv's python.exe, a launcher that runs the
-  interpreter as its own child; on Stop or UPDATE_TIMEOUT proc.kill()
-  ended the launcher, the interpreter released the -o file a moment
-  later, so os.remove raised PermissionError (WinError 32, 30 of 30
-  tries) and replaced Stopped; on a timeout prepare_tiles took the
-  usable extract for missing (its tiles to Overpass). Fix: `_kill_tree`
-  (taskkill /T /F, then the file is free at once, 30 of 30) and
-  `_remove_temp` (never raises; a file that cannot go is removed by the
-  next ensure_extract), also in `_download`'s cleanup. 3 tests (fail on
-  dev with the PermissionError), 870 passed, pyflakes 0. Output
-  unchanged. Regression on test + overlay PASS (DSF, masks, log
-  identical), sim_geofabrik_step1 +28-018 (scratch store with a copy of
-  canary-islands) 0 failures. Other two leftovers: `.tmp…_bourgogne` (4 MB) from closing
-  Ortho4XP mid-download; both go at the next use of the region.
-- **#157 tile check built into step 3**, branch `fix/tile-check`
-  (worktree `G:\Ortho4XP_wt\tile-check`, from dev 26aeb23), commit
-  a634d72, merged into `test` 97e4229 (not dev). The user: Ortho4XP should be a one-stop shop, other users
-  have no Claude Code during batches. New `src/O4_Tile_Check.py` (the
-  checks of `tools/tile_lint.py` minus slivers and pool stats): after
-  the DSF is activated and the cleaning, step 3 reads it back and logs
-  `WARNING: tile check <tile>: ...` with the place for hubs > 400,
-  > 12000 triangles per 0.001 deg cell, texture/mask
-  UV > 4 texels off or outside 0-1, missing .ter/textures, NaN, or an
-  unreadable DSF; the tile stays built. Never raises. Result file
-  `Ortho4XP_<tile>_check.txt` in the tile folder ("ok" or the warnings,
-  temp + os.replace); `_batch_summary` lists "Tile check warnings: N
-  tile(s)" / "CHECK: <tile>: ..." for this batch's results (mtime >=
-  batch start; workers' too). App setting `tile_check` (UI, default
-  True). Clean tile: console "Tile check: ok (x s)", app log unchanged.
-  12 tests (`tests/test_tile_check.py`, synthetic DSF writer; fail on
-  dev), 879 passed, pyflakes 0. Same numbers as tile_lint on +60+006
-  (both 15 M and 10 M flagged: hub 64,930), +18-065, +46-054, +82-039
-  (hub 7,040 flagged); 12 s and 1.8 GB peak on the 15 M tile, 1 s and
-  140 MB on 1.3 M. Regression on test 7453c3d + overlay (scratch src =
-  this worktree + test's O4_Vector_Utils): PASS, DSF byte-identical,
-  log identical, check 1.8 s; sims 15/15. `test` 97e4229: 889 passed,
-  pyflakes 0, regression PASS. `batches/run_chunks.ps1` also stops on
-  the batch log's "Tile check warnings" line. Long-edge check removed
-  (commit 0c3110b, on test b2d228c: 890 passed, regression PASS): the
-  census's 20 "long" tiles were all flat ground (Cairo and Fuerteventura
-  airports built flat, Grays/Mud Lake, Potholes, sea-level deltas and
-  flats at 0.0 m) where Triangle4XP, refining by curvature only, makes
-  texture-square triangles (2.0-2.8 km); a triangle past its texture
-  shows as uv_range anyway. tile_lint reports `long` as information only.
-  Census of all 1,597 tiles (2026-11-27,
-  `G:\Ortho4XP_tests\lint_census_2026-11-27.jsonl`): no UV, mask, file,
-  NaN or pool fault;
-  64 tiles with hubs > 400 (#155 class, worst +61+008 250,304); 6 over
-  6,000 per cell without a hub: +66+018, +69-051, +52+005 are mm-wide
-  slivers #154 closes (built before it; their real OSM segments checked
-  in a Vector_Map with and without #154), +56+009 (Klejtrup So), +58-007
-  (Lewis lochs), +48-118 are OSM lakes with many islands and nodes
-  10-50 cm apart, 7,500-9,400 sound triangles per cell. Density limit
-  raised to 12,000 (commit dc8cf0c, test a4257c4: 891 passed): every
-  faulty tile between 6,000 and 12,000 also had a hub > 400. tile_lint
-  uses 12,000 too.
+None.
 
 ## Coding style
 
