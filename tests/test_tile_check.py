@@ -27,12 +27,13 @@ def _quantize(vals, scale, off):
     return raw, raw / 65535.0 * scale + off
 
 
-def write_dsf(path, terrains, pool, patches):
+def write_dsf(path, terrains, pool, patches, xy_scal=((1.0, LON), (1.0, LAT))):
     """pool: (n, 9) float rows lon, lat, elev, nx, ny, u, v, u2, v2;
-    patches: list of (terrain index, flag, triangles as index triples)."""
+    patches: list of (terrain index, flag, triangles as index triples);
+    xy_scal: (scale, offset) of the lon and lat planes."""
     pool = numpy.asarray(pool, float)
     (n, planes) = pool.shape
-    scal = [(1.0, LON), (1.0, LAT), (0.0, 0.0), (2.0, -1.0), (2.0, -1.0)]
+    scal = list(xy_scal) + [(0.0, 0.0), (2.0, -1.0), (2.0, -1.0)]
     scal += [(1.0, 0.0)] * (planes - 5)
     body = struct.pack("<IB", n, planes)
     for p in range(planes):
@@ -120,6 +121,41 @@ def grid_tile(build_dir, nx=6, ny=6, uv_shift=0.0, sea=False, mask=False,
     return ter
 
 
+def dense_cell_tile(build_dir, n=60):
+    """An n x n grid inside one 0.001 degree cell, two triangles per grid
+    cell: a lake mapped in great detail (well-shaped ~1 m triangles, no
+    hub). The pool is scaled to the cell so 16 bits keep the spacing."""
+    (ty, tx) = texture_of(LAT + 0.5, LON + 0.5)
+    ter = f"terrain/{ty}_{tx}_BI{ZL}.ter"
+    lon_tex = (tx * 256 + 2000) / (2 ** ZL * 256) * 360 - 180
+    (cx, cy) = (numpy.floor(lon_tex * 1000) / 1000,
+                numpy.floor((LAT + 0.5) * 1000) / 1000)
+    scal = ((0.001, cx), (0.001, cy))
+    lons = numpy.linspace(cx + 0.00005, cx + 0.00095, n)
+    lats = numpy.linspace(cy + 0.00005, cy + 0.00095, n)
+    pts = numpy.array([(x, y) for y in lats for x in lons])
+    pts[:, 0] = _quantize(pts[:, 0], *scal[0])[1]
+    pts[:, 1] = _quantize(pts[:, 1], *scal[1])[1]
+    (gx, gy) = TCHECK._merc_texels(pts[:, 0], pts[:, 1], ZL)
+    pool = numpy.zeros((len(pts), 9))
+    pool[:, 0:2] = pts
+    pool[:, 5] = pool[:, 7] = (gx - tx * 256) / 4096
+    pool[:, 6] = pool[:, 8] = 1 - (gy - ty * 256) / 4096
+    tris = []
+    for j in range(n - 1):
+        for i in range(n - 1):
+            a = j * n + i
+            tris += [(a, a + 1, a + n + 1), (a, a + n + 1, a + n)]
+    write_dsf(FNAMES.dsf_file(build_dir, LAT, LON), [ter], pool,
+              [(0, 1, tris)], scal)
+    for sub in ("terrain", "textures"):
+        os.makedirs(os.path.join(build_dir, sub), exist_ok=True)
+    dds = f"{ty}_{tx}_BI{ZL}.dds"
+    with open(os.path.join(build_dir, ter), "w") as f:
+        f.write(f"A\n800\nTERRAIN\n\nBASE_TEX_NOWRAP ../textures/{dds}\n")
+    open(os.path.join(build_dir, "textures", dds), "wb").close()
+
+
 @pytest.fixture
 def build_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(UI, "log", False)
@@ -144,6 +180,17 @@ def test_large_flat_triangles_are_not_flagged(build_dir):
     grid_tile(build_dir, nx=2, ny=2)
     res = TCHECK.check_dsf(FNAMES.dsf_file(build_dir, LAT, LON), build_dir)
     assert res["triangles"] == 2
+    assert TCHECK.warnings_of(res) == []
+
+
+def test_detailed_lake_density_is_not_flagged(build_dir):
+    # Klejtrup So (+56+009) and the lochs of Lewis (+58-007): OSM lakes
+    # with many islands, nodes 10-50 cm apart, ~9,400 sound triangles in a
+    # 0.001 degree cell; the census flagged them with a 6,000 limit.
+    dense_cell_tile(build_dir)
+    res = TCHECK.check_dsf(FNAMES.dsf_file(build_dir, LAT, LON), build_dir)
+    assert 6000 < res["density_max"] <= TCHECK.LIMITS["density_max"]
+    assert res["hub_max"] <= 6 and res["uv_bad"] == 0
     assert TCHECK.warnings_of(res) == []
 
 
