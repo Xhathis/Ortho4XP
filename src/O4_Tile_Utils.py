@@ -21,6 +21,7 @@ import O4_Mask_Utils as MASK
 import O4_DSF_Utils as DSF
 import O4_Overlay_Utils as OVL
 import O4_XP_Airports as XPAPT
+import O4_Tile_Check as TCHECK
 from O4_Parallel_Utils import parallel_launch, parallel_join
 
 max_download_slots = 1
@@ -448,6 +449,9 @@ def build_tile(tile, white_retry_follows=False):
         _remove_mesh_files(tile.build_dir, tile.lat, tile.lon)
     if UI.cleaning_level > 1 and not tile.grouped:
         remove_unwanted_textures(tile)
+    if UI.tile_check:
+        # After the cleaning: a texture it removed by mistake is missing.
+        TCHECK.check_tile(tile.build_dir, tile.lat, tile.lon)
     if not keep_mesh_after_step3:
         # A batch does it once at its end (its workers never).
         update_airport_override()
@@ -786,7 +790,7 @@ def _build_tile_list_sequential(tile, list_lat_lon, flags):
         todo = [(lat, lon) for (lat, lon) in todo
                 if FNAMES.short_latlon(lat, lon) not in failed]
     _remove_meshes_after_batch(tile, built, failed_tiles, flags[3])
-    _batch_summary(timer, len(list_lat_lon), failed_tiles)
+    _batch_summary(timer, len(list_lat_lon), failed_tiles, tile, built)
     if IMG.incomplete_imgs:
         UI.lvprint(
             0,
@@ -1380,7 +1384,7 @@ def _remove_from_todo_map(lat, lon):
         pass
 
 
-def _batch_summary(timer, nbr_tiles, not_built):
+def _batch_summary(timer, nbr_tiles, not_built, tile=None, built=()):
     UI.lvprint(
         0, "Batch process completed in", UI.nicer_timer(time.time() - timer)
     )
@@ -1395,6 +1399,30 @@ def _batch_summary(timer, nbr_tiles, not_built):
         UI.lvprint(0, "   Open sea, nothing built:", " ".join(sea))
     for (coords, step) in failed_tiles:
         UI.lvprint(0, f"   FAILED: {coords} in step {step}")
+    if tile is not None:
+        _tile_check_summary(tile, built, timer)
+
+
+def _tile_check_summary(tile, built, since):
+    """The tile check warnings of this batch's step 3 (#157), also of
+    those made by worker processes: each wrote its tile's result file."""
+    flagged = []
+    for (lat, lon) in built:
+        warnings = TCHECK.read_result(
+            FNAMES.build_dir(lat, lon, tile.custom_build_dir), lat, lon,
+            since,
+        )
+        if warnings:
+            flagged.append((FNAMES.short_latlon(lat, lon), warnings))
+    if not flagged:
+        return
+    UI.lvprint(
+        0, f"Tile check warnings: {len(flagged)} tile(s), built but with "
+        "places to look at:"
+    )
+    for (coords, warnings) in flagged:
+        for w in warnings:
+            UI.lvprint(0, f"   CHECK: {coords}: {w}")
 
 
 def batch_worker(tile, flags):
@@ -1514,7 +1542,7 @@ def _build_tile_list_parallel(tile, list_lat_lon, flags):
         except OSError:
             pass
     _remove_meshes_after_batch(tile, built, failed_tiles, flags[3])
-    _batch_summary(timer, len(list_lat_lon), failed_tiles)
+    _batch_summary(timer, len(list_lat_lon), failed_tiles, tile, built)
     return 0 if _real_failures(failed_tiles) else 1
 
 

@@ -15,6 +15,8 @@ is_working = False
 cleaning_level = 1
 # Step 3 keeps the previous DSF of a tile as .dsf.bak (upstream behaviour).
 keep_dsf_backup = True
+# Step 3 checks the DSF it built (#157).
+tile_check = True
 gui = None
 log = True
 
