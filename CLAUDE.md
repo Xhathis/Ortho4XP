@@ -85,14 +85,14 @@ something.
   `os.name`) or the bundled `.exe` tools, and "CHANGES OUTPUT" when a
   normal build's DSF or masks change (needs a new baseline).
 - Commit or push only when the user asks.
-- New issues are numbered on (next: #156). An open one is listed under
+- New issues are numbered on (next: #158). An open one is listed under
   "Open issues" here; once fixed, its entry and test results move to
   `docs/claude-history.md` (Known issues, Test results).
 
 ## Testing method
 
 1. **Unit tests:** `venv\Scripts\python.exe -m pytest` (repo root, ~30 s,
-   874 tests on test 5a22a0f). `tests/conftest.py` switches to an empty
+   889 tests on test 97e4229). `tests/conftest.py` switches to an empty
    temp folder before any O4 module is imported, so tests never touch the
    user's data. Run them before every commit; add a test before changing
    a pure function; new tests should fail on dev where testable.
@@ -224,12 +224,15 @@ something.
 - `keep_dsf_backup` is on (default); the old `.dsf.bak` files were
   deleted in the 2026-11-25 cleanup.
 
-## Current state (2026-11-26)
+## Current state (2026-11-27)
 
-- `dev` = `test` 26aeb23 (2026-11-26), not pushed: issues #1-#154
-  fixed (867 unit tests, regression PASS, sims 15/15). After #151/#152
-  every tile's water and big_roads caches are made again from the store
-  at its next step 1.
+- `dev` 26aeb23 (2026-11-26), not pushed: issues #1-#154 fixed (867
+  unit tests, regression PASS, sims 15/15). After #151/#152 every
+  tile's water and big_roads caches are made again from the store at
+  its next step 1.
+- `test` 97e4229 (+ the docs merge after it) = dev + #155, #156, #157
+  (889 tests, regression PASS on 5a22a0f_frozen). dev waits for the
+  user's X-Plane look at +60+006 and the limit_tris 10/15 decision.
 - XP12 water switched on 2026-11-26 (the user viewed test tile
   +18-065): `imprint_masks_to_dds=True` in Ortho4XP.cfg and all 1,597
   tile configs (only that line; backup
@@ -306,6 +309,50 @@ something.
   tile, no edge > 2 km, UVs fine. Regression: 9 vertices merged,
   879,155 -> 879,142 triangles, masks and log identical (a new baseline
   after the commit). Every tile changes at its next step 2.
+- **#156 extract update killed: temp file locked (Windows only)**, branch
+  `fix/update-temp-file` (worktree `G:\Ortho4XP_wt\update-temp-file`,
+  from dev 26aeb23), commit 3b0b848, merged into `test` 97e4229 (not
+  dev). Found from the user's 3 stop tests
+  (2026-11-27 05:11-05:13): a 0-byte `.tmp..._isole.osm.pbf` stayed in
+  the extract store. `GEOFABRIK._update` ran pyosmium with
+  sys.executable = the venv's python.exe, a launcher that runs the
+  interpreter as its own child; on Stop or UPDATE_TIMEOUT proc.kill()
+  ended the launcher, the interpreter released the -o file a moment
+  later, so os.remove raised PermissionError (WinError 32, 30 of 30
+  tries) and replaced Stopped; on a timeout prepare_tiles took the
+  usable extract for missing (its tiles to Overpass). Fix: `_kill_tree`
+  (taskkill /T /F, then the file is free at once, 30 of 30) and
+  `_remove_temp` (never raises; a file that cannot go is removed by the
+  next ensure_extract), also in `_download`'s cleanup. 3 tests (fail on
+  dev with the PermissionError), 870 passed, pyflakes 0. Output
+  unchanged. Regression on test + overlay PASS (DSF, masks, log
+  identical), sim_geofabrik_step1 +28-018 (scratch store with a copy of
+  canary-islands) 0 failures. Other two leftovers: `.tmp…_bourgogne` (4 MB) from closing
+  Ortho4XP mid-download; both go at the next use of the region.
+- **#157 tile check built into step 3**, branch `fix/tile-check`
+  (worktree `G:\Ortho4XP_wt\tile-check`, from dev 26aeb23), commit
+  a634d72, merged into `test` 97e4229 (not dev). The user: Ortho4XP should be a one-stop shop, other users
+  have no Claude Code during batches. New `src/O4_Tile_Check.py` (the
+  checks of `tools/tile_lint.py` minus slivers and pool stats): after
+  the DSF is activated and the cleaning, step 3 reads it back and logs
+  `WARNING: tile check <tile>: ...` with the place for hubs > 400,
+  > 6000 triangles per 0.001 deg cell, land edges > 2 km, texture/mask
+  UV > 4 texels off or outside 0-1, missing .ter/textures, NaN, or an
+  unreadable DSF; the tile stays built. Never raises. Result file
+  `Ortho4XP_<tile>_check.txt` in the tile folder ("ok" or the warnings,
+  temp + os.replace); `_batch_summary` lists "Tile check warnings: N
+  tile(s)" / "CHECK: <tile>: ..." for this batch's results (mtime >=
+  batch start; workers' too). App setting `tile_check` (UI, default
+  True). Clean tile: console "Tile check: ok (x s)", app log unchanged.
+  12 tests (`tests/test_tile_check.py`, synthetic DSF writer; fail on
+  dev), 879 passed, pyflakes 0. Same numbers as tile_lint on +60+006
+  (both 15 M and 10 M flagged: hub 64,930), +18-065, +46-054, +82-039
+  (hub 7,040 flagged); 12 s and 1.8 GB peak on the 15 M tile, 1 s and
+  140 MB on 1.3 M. Regression on test 7453c3d + overlay (scratch src =
+  this worktree + test's O4_Vector_Utils): PASS, DSF byte-identical,
+  log identical, check 1.8 s; sims 15/15. `test` 97e4229: 889 passed,
+  pyflakes 0, regression PASS. `batches/run_chunks.ps1` also stops on
+  the batch log's "Tile check warnings" line.
 
 ## Coding style
 
