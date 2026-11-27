@@ -92,7 +92,7 @@ something.
 ## Testing method
 
 1. **Unit tests:** `venv\Scripts\python.exe -m pytest` (repo root, ~30 s,
-   889 tests on test 97e4229). `tests/conftest.py` switches to an empty
+   891 tests on test a4257c4). `tests/conftest.py` switches to an empty
    temp folder before any O4 module is imported, so tests never touch the
    user's data. Run them before every commit; add a test before changing
    a pure function; new tests should fail on dev where testable.
@@ -230,8 +230,8 @@ something.
   unit tests, regression PASS, sims 15/15). After #151/#152 every
   tile's water and big_roads caches are made again from the store at
   its next step 1.
-- `test` 97e4229 (+ the docs merge after it) = dev + #155, #156, #157
-  (889 tests, regression PASS on 5a22a0f_frozen). dev waits for the
+- `test` a4257c4 (+ the docs merge after it) = dev + #155, #156, #157
+  (891 tests, regression PASS on 5a22a0f_frozen). dev waits for the
   user's X-Plane look at +60+006 and the limit_tris 10/15 decision.
 - XP12 water switched on 2026-11-26 (the user viewed test tile
   +18-065): `imprint_masks_to_dds=True` in Ortho4XP.cfg and all 1,597
@@ -336,7 +336,7 @@ something.
   checks of `tools/tile_lint.py` minus slivers and pool stats): after
   the DSF is activated and the cleaning, step 3 reads it back and logs
   `WARNING: tile check <tile>: ...` with the place for hubs > 400,
-  > 6000 triangles per 0.001 deg cell, texture/mask
+  > 12000 triangles per 0.001 deg cell, texture/mask
   UV > 4 texels off or outside 0-1, missing .ter/textures, NaN, or an
   unreadable DSF; the tile stays built. Never raises. Result file
   `Ortho4XP_<tile>_check.txt` in the tile folder ("ok" or the warnings,
@@ -359,6 +359,18 @@ something.
   flats at 0.0 m) where Triangle4XP, refining by curvature only, makes
   texture-square triangles (2.0-2.8 km); a triangle past its texture
   shows as uv_range anyway. tile_lint reports `long` as information only.
+  Census of all 1,597 tiles (2026-11-27,
+  `G:\Ortho4XP_tests\lint_census_2026-11-27.jsonl`): no UV, mask, file,
+  NaN or pool fault;
+  64 tiles with hubs > 400 (#155 class, worst +61+008 250,304); 6 over
+  6,000 per cell without a hub: +66+018, +69-051, +52+005 are mm-wide
+  slivers #154 closes (built before it; their real OSM segments checked
+  in a Vector_Map with and without #154), +56+009 (Klejtrup So), +58-007
+  (Lewis lochs), +48-118 are OSM lakes with many islands and nodes
+  10-50 cm apart, 7,500-9,400 sound triangles per cell. Density limit
+  raised to 12,000 (commit dc8cf0c, test a4257c4: 891 passed): every
+  faulty tile between 6,000 and 12,000 also had a hub > 400. tile_lint
+  uses 12,000 too.
 
 ## Coding style
 
