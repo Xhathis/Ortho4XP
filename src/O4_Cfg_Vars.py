@@ -38,6 +38,12 @@ cfg_app_vars = {
         "default": True,
         "hint": "When step 3 rebuilds a tile, its previous DSF is kept as <tile>.dsf.bak (a large file per tile). When unset, no backup is made: the previous DSF stays in use until the new one is complete and replaces it (so a failed rebuild leaves the old tile in place), and a .bak left by an earlier build of that tile is removed.",
     },
+    "tile_check": {
+        "module": "UI",
+        "type": bool,
+        "default": True,
+        "hint": "After step 3, read the new DSF back and check it for the faults earlier versions left in built tiles without any error: many triangles at one point or in one small area, long land triangles, misplaced texture or mask coordinates, missing terrain or texture files. A fault is logged as a WARNING with its place and listed at the end of a batch; the tile is built either way. Takes a few seconds per tile.",
+    },
     "overpass_server_choice": {
         "module": "OSM",
         "type": str,
@@ -416,6 +422,7 @@ list_app_vars = [
     "verbosity",
     "cleaning_level",
     "keep_dsf_backup",
+    "tile_check",
     "overpass_server_choice",
     "osm_source",
     "geofabrik_max_age",

@@ -279,6 +279,13 @@ def dsf_file(build_dir, lat, lon):
     )
 
 
+def tile_check_file(build_dir, lat, lon):
+    """The result of step 3's tile check (#157): "ok" or its warnings."""
+    return os.path.join(
+        build_dir, "Ortho4XP_" + short_latlon(lat, lon) + "_check.txt"
+    )
+
+
 def obj_file(til_x_left, til_y_top, zoomlevel, provider_code):
     return os.path.join(
         Geotiff_dir,
