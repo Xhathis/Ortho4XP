@@ -34,7 +34,11 @@ import O4_UI_Utils as UI
 
 LIMITS = {
     "hub_max": 400,      # triangles at one point (lake fans reach ~100)
-    "density_max": 6000,  # triangles in a 0.001 degree cell
+    # Triangles in a 0.001 degree cell. Lakes mapped in great detail (many
+    # islands, nodes 10-50 cm apart: Klejtrup So, the lochs of Lewis) give
+    # up to ~9,400 well-shaped triangles there; a #155 fan is far above
+    # that and is caught by hub_max anyway.
+    "density_max": 12000,
     "uv_bad": 0,
     "mask_uv_bad": 0,
     "uv_range": 0,
