@@ -92,7 +92,7 @@ something.
 ## Testing method
 
 1. **Unit tests:** `venv\Scripts\python.exe -m pytest` (repo root, ~30 s,
-   867 tests on test f361e0c). `tests/conftest.py` switches to an empty
+   874 tests on test 5a22a0f). `tests/conftest.py` switches to an empty
    temp folder before any O4 module is imported, so tests never touch the
    user's data. Run them before every commit; add a test before changing
    a pure function; new tests should fail on dev where testable.
@@ -104,8 +104,8 @@ something.
    <commit> [--label name] [--overlay <src_dir>]` — builds +55+012 (Arc
    ZL17) in the worktree `G:\Ortho4XP_tests\regression\ws` from frozen
    inputs and compares DSF, 17 masks and app log with the baseline
-   `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-f361e0c_frozen\` (since
-   #151/#152; mesh 879,155 triangles, no WARNING; its OSM caches come
+   `G:\Ortho4XP_baseline\+55+012_Arc_ZL17_test-5a22a0f_frozen\` (since
+   #155; mesh 879,142 triangles, no WARNING; its OSM caches come
    from Geofabrik extracts, see BASELINE.txt). `--overlay <wt>\src`
    builds a commit with a fix worktree's uncommitted O4_*.py over it
    (give the src folder: with the worktree root it copies nothing and
@@ -248,14 +248,15 @@ something.
   `G:\Ortho4XP_tests\cleanup_2026-11-25.log`): 1,358.9 GB freed (JPGs of
   built tiles, all masks, .dsf.bak/.cfg.bak, old sims and baselines).
   All 1,598 tiles complete (one DSF, all textures). Baselines:
-  d74d672_frozen, 4ada1bc_frozen, 000880d_frozen (old) and
-  f361e0c_frozen (current).
+  d74d672_frozen, 4ada1bc_frozen, 000880d_frozen, f361e0c_frozen
+  (old) and 5a22a0f_frozen (current, #155).
 
 ## Open issues
 
 - **#155 near-coincident vertices (CHANGES OUTPUT)**, branch
   `fix/near-vertex-snap` (worktree `G:\Ortho4XP_wt\near-vertex-snap`,
-  from dev 26aeb23), commit a180391, merged into `test` (not dev). Seen by the user in test tile
+  from dev 26aeb23), commit a180391, merged into `test` 5a22a0f (not dev; 874 passed, regression PASS
+  on the new baseline 5a22a0f_frozen, sims 15/15). Seen by the user in test tile
   +60+006 (15 M): black lake with white radial streaks at 60.6393 N,
   6.6525 E, 6 min load. Cause: a lake way and a water multipolygon have
   their own nodes 1e-7 deg apart (one OSM unit); both edges leave the
