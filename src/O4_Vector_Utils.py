@@ -157,16 +157,63 @@ class Vector_Map:
         self.next_edge_id = 1
         self.holes = []
         self.seeds = {}
+        # node ids by SNAP_TOL cell, to find a node within SNAP_TOL (#155)
+        self.node_grid = {}
+
+    @staticmethod
+    def _onto_border(v):
+        """A tile coordinate within SNAP_TOL of the tile edge (0 or 1) is
+        put on it (#155): the border's own nodes (gluing network, inserted
+        last) then find it, and a border node never moves inwards."""
+        if abs(v) <= SNAP_TOL:
+            return 0.0
+        if abs(v - 1) <= SNAP_TOL:
+            return 1.0
+        return v
+
+    def _near_node(self, x, y):
+        """The id of an existing node within SNAP_TOL of (x, y), the
+        closest one, or None. A node on the tile edge is only matched by a
+        node on that same edge line, so the border stays where it is."""
+        (cx, cy) = (int(x // SNAP_TOL), int(y // SNAP_TOL))
+        best = None
+        for i in (cx - 1, cx, cx + 1):
+            for j in (cy - 1, cy, cy + 1):
+                for node_id in self.node_grid.get((i, j), ()):
+                    (px, py) = self.nodes_dico[node_id]
+                    d2 = (px - x) ** 2 + (py - y) ** 2
+                    if d2 > SNAP_TOL * SNAP_TOL:
+                        continue
+                    if ((x in (0.0, 1.0) and px != x)
+                            or (y in (0.0, 1.0) and py != y)):
+                        continue
+                    if best is None or d2 < best[0]:
+                        best = (d2, node_id)
+        return best[1] if best else None
+
+    def _grid_add(self, node_id, x, y):
+        self.node_grid.setdefault(
+            (int(x // SNAP_TOL), int(y // SNAP_TOL)), []).append(node_id)
 
     def insert_node(self, x, y, z):
+        # Two OSM nodes one unit (1e-7 degree) apart, e.g. a lake way and a
+        # water multipolygon each with its own node on the same shore, made
+        # a sliver with an almost zero angle between the boundaries leaving
+        # them; Triangle4XP filled it with 265,000 points in 90 x 45 m
+        # (+60+006, #155). A node within SNAP_TOL of an existing one is
+        # that node (which keeps its coordinates and altitude).
+        (x, y) = (self._onto_border(x), self._onto_border(y))
         if (x, y) in self.dico_nodes:
-            node_id = self.dico_nodes[(x, y)]
-        else:
-            node_id = self.next_node_id
-            self.dico_nodes[(x, y)] = node_id
-            self.nodes_dico[node_id] = (x, y)
-            self.data_nodes[node_id] = z
-            self.next_node_id += 1
+            return self.dico_nodes[(x, y)]
+        node_id = self._near_node(x, y)
+        if node_id is not None:
+            return node_id
+        node_id = self.next_node_id
+        self.dico_nodes[(x, y)] = node_id
+        self.nodes_dico[node_id] = (x, y)
+        self.data_nodes[node_id] = z
+        self._grid_add(node_id, x, y)
+        self.next_node_id += 1
         return node_id
 
     def update_edge(self, nodeid0, nodeid1, marker):
@@ -612,6 +659,10 @@ class Vector_Map:
             data_nodes_new,
             data_edges_new,
         )
+        # the ids changed (#155)
+        self.node_grid = {}
+        for (node_id, (x, y)) in self.nodes_dico.items():
+            self._grid_add(node_id, x, y)
 
     def write_node_file(self, node_file_name):
         # note that Triangle4XP too is writing a(nother) node file, which as
