@@ -336,7 +336,7 @@ something.
   checks of `tools/tile_lint.py` minus slivers and pool stats): after
   the DSF is activated and the cleaning, step 3 reads it back and logs
   `WARNING: tile check <tile>: ...` with the place for hubs > 400,
-  > 6000 triangles per 0.001 deg cell, land edges > 2 km, texture/mask
+  > 6000 triangles per 0.001 deg cell, texture/mask
   UV > 4 texels off or outside 0-1, missing .ter/textures, NaN, or an
   unreadable DSF; the tile stays built. Never raises. Result file
   `Ortho4XP_<tile>_check.txt` in the tile folder ("ok" or the warnings,
@@ -352,7 +352,13 @@ something.
   this worktree + test's O4_Vector_Utils): PASS, DSF byte-identical,
   log identical, check 1.8 s; sims 15/15. `test` 97e4229: 889 passed,
   pyflakes 0, regression PASS. `batches/run_chunks.ps1` also stops on
-  the batch log's "Tile check warnings" line.
+  the batch log's "Tile check warnings" line. Long-edge check removed
+  (uncommitted in the worktree, 880 passed, regression PASS): the
+  census's 20 "long" tiles were all flat ground (Cairo and Fuerteventura
+  airports built flat, Grays/Mud Lake, Potholes, sea-level deltas and
+  flats at 0.0 m) where Triangle4XP, refining by curvature only, makes
+  texture-square triangles (2.0-2.8 km); a triangle past its texture
+  shows as uv_range anyway. tile_lint reports `long` as information only.
 
 ## Coding style
 
