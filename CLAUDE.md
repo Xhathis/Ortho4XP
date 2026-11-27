@@ -353,7 +353,7 @@ something.
   log identical, check 1.8 s; sims 15/15. `test` 97e4229: 889 passed,
   pyflakes 0, regression PASS. `batches/run_chunks.ps1` also stops on
   the batch log's "Tile check warnings" line. Long-edge check removed
-  (uncommitted in the worktree, 880 passed, regression PASS): the
+  (commit 0c3110b, on test b2d228c: 890 passed, regression PASS): the
   census's 20 "long" tiles were all flat ground (Cairo and Fuerteventura
   airports built flat, Grays/Mud Lake, Potholes, sea-level deltas and
   flats at 0.0 m) where Triangle4XP, refining by curvature only, makes
