@@ -524,8 +524,38 @@ def _download(url, path, md5=True, check=None):
     except requests.RequestException as e:
         raise GeofabrikError(f"{url}: {type(e).__name__}: {e}")
     finally:
+        _remove_temp(tmp)
+
+
+def _remove_temp(tmp):
+    """Remove a temp file of ours if it is there. Never raises: an error
+    here used to replace the one being handled (Stopped, a download
+    error) and the extract was then taken for missing (#156). A file that
+    cannot go now is removed by the next ensure_extract
+    (_remove_leftover_temps)."""
+    try:
         if os.path.exists(tmp):
             os.remove(tmp)
+    except OSError as e:
+        UI.vprint(1, f"    Could not remove {os.path.basename(tmp)} now ({e}); "
+                  "it goes the next time this extract is used.")
+
+
+def _kill_tree(proc):
+    """Stop the update process and its children, and wait for them.
+
+    On Windows a venv's python.exe (sys.executable) is a launcher that
+    runs the interpreter as its own child: proc.kill() ends the launcher,
+    and the interpreter lets go of the -o temp file only a moment later,
+    so removing it at once failed (WinError 32, #156). taskkill /T ends
+    the whole tree before it returns. Windows only.
+    """
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                       capture_output=True)
+    else:
+        proc.kill()
+    proc.wait()
 
 
 def data_time(path):
@@ -574,12 +604,10 @@ def _update(path):
                 start = time.monotonic()
                 while proc.poll() is None:
                     if UI.stop_requested:
-                        proc.kill()
-                        proc.wait()
+                        _kill_tree(proc)
                         raise Stopped()
                     if time.monotonic() - start > UPDATE_TIMEOUT:
-                        proc.kill()
-                        proc.wait()
+                        _kill_tree(proc)
                         timed_out = True
                         break
                     time.sleep(0.5)
@@ -588,8 +616,8 @@ def _update(path):
                 # Not on the exit code alone: on Windows a killed process
                 # exits 1, the code for "more changes to come" (Stop used
                 # to leave a temp file as big as the extract).
-                if not complete and os.path.exists(tmp):
-                    os.remove(tmp)
+                if not complete:
+                    _remove_temp(tmp)
             log.seek(0)
             out = log.read().decode("utf-8", "replace")
         if not complete:
