@@ -85,7 +85,7 @@ something.
   `os.name`) or the bundled `.exe` tools, and "CHANGES OUTPUT" when a
   normal build's DSF or masks change (needs a new baseline).
 - Commit or push only when the user asks.
-- New issues are numbered on (next: #155). An open one is listed under
+- New issues are numbered on (next: #156). An open one is listed under
   "Open issues" here; once fixed, its entry and test results move to
   `docs/claude-history.md` (Known issues, Test results).
 
@@ -132,7 +132,8 @@ something.
    `sim_overlay.py` (8 cases), `sim_overpass_fallback.py`,
    `sim_dem_failure.py`, `sim_geofabrik_step1.py <commit> 28 -18 --overlay
    <src> --geofabrik-dir <scratch>` (never the user's Geofabrik folder),
-   `osm_ab.py` (above), `sim_custom_dem_gap.py`, `sim_batch_cleaning.py`, `check_overpass_slot.py`,
+   `osm_ab.py` (above), `refresh_pre117_imagery.py` (below),
+   `sim_custom_dem_gap.py`, `sim_batch_cleaning.py`, `check_overpass_slot.py`,
    `check_step3_provider.py`, `probe_mesh.py`, `pe_stack.py`,
    `fetch_osm_api.py`, `fix_dem_folders.py`, `verify_copy.py`,
    `scan_dsf_pools.py <Tiles dir>` (#146 check, read only), the
@@ -200,7 +201,7 @@ something.
 
 ## Current state (2026-11-26)
 
-- `dev` = `test` fdf7628 (2026-11-26), not pushed: issues #1-#154
+- `dev` = `test` 26aeb23 (2026-11-26), not pushed: issues #1-#154
   fixed (867 unit tests, regression PASS, sims 15/15). After #151/#152
   every tile's water and big_roads caches are made again from the store
   at its next step 1.
@@ -216,8 +217,27 @@ something.
   (`batches\rebuild_2026-11-26_r01b.txt`) on dev fdf7628 with XP12
   water: 6 built, 0 failed, 19 min; largest pool 37,817 (+39-108) and
   46,030 (+43-066), no overflow pool needed; 54-89 DXT5 textures on
-  the 4 coastal tiles. The 25 tiles r01 built are still on overlay
-  water (step 3 again). Lists r02-r09 (1,567 tiles) not started.
+  the 4 coastal tiles. The 25 tiles r01 built (before #151-#154 and XP12
+  water) are list r10. Lists r02-r10 (1,591 tiles) not started; with
+  r01/r01b they cover all 1,597 tiles once.
+- Readiness review 2026-11-26 for the full rebuild: no code change left
+  open; every tile setting equals the global cfg except provider/ZL
+  (GO2 ZL16, GO2 ZL15 on 362 tiles with mask_zl 15, DFA on 23).
+  **Imagery:** 798 tiles have GO2 textures (ZL >= 16) from before #117,
+  whose GO2 404s were filled with GO2's own lower levels (blurry
+  patches, seen in +66+015; after #117, 8% of ZL16 textures needed
+  Arc/BI). The user chose to fetch them all again: before each chunk
+  run `G:\Ortho4XP_tests\tools\refresh_pre117_imagery.py <list>
+  --apply` (cwd G:\Ortho4XP; deletes those DDS made before 2026-11-20
+  and their JPGs; dry run without --apply): 195,531 DDS, ~2.2 TB to
+  download again. **Mesh:** 874 tiles used the whole limit_tris budget
+  (10 M). Test +60+006 at 15 M (`G:\Ortho4XP_tests\xp12water\ws`,
+  dev 26aeb23, textures copied from the user's tile): still capped at
+  15.1 M, DSF 177 -> 244 MB, land RMSE vs DEM 1.56 -> 1.15 m, p99 5.31
+  -> 3.90 m. The user's first X-Plane check (6 min load, streaked lake)
+  found #155; that tile is rebuilt with #155 (235 MB) for a second
+  check before any limit_tris change. Also seen there: max_levelled_segs (200000)
+  reached, 1,048 roads not levelled (#150 NOTE).
 - Last batches: E (121 wilderness tiles, ZL16) and 4 ZL15 holes, 124
   built, 0 failed (2026-11-25); then +69-052 for the Qeqertaq zone (#140):
   both zones on GO218, so every zone tile is on its zone's imagery.
@@ -233,7 +253,27 @@ something.
 
 ## Open issues
 
-None.
+- **#155 near-coincident vertices (CHANGES OUTPUT)**, branch
+  `fix/near-vertex-snap` (worktree `G:\Ortho4XP_wt\near-vertex-snap`,
+  from dev 26aeb23), commit a180391, merged into `test` (not dev). Seen by the user in test tile
+  +60+006 (15 M): black lake with white radial streaks at 60.6393 N,
+  6.6525 E, 6 min load. Cause: a lake way and a water multipolygon have
+  their own nodes 1e-7 deg apart (one OSM unit); both edges leave the
+  same vertex, a 52 m sliver with a 0.0001 deg angle, which Triangle4XP
+  filled with 265,000 points (one vertex shared by 65,000 water
+  triangles). In the 10 M DSF too, so in the user's own tile. #154
+  snaps a vertex near the middle of a segment but not one near an end.
+  Fix: `Vector_Map.insert_node` returns an existing vertex within
+  SNAP_TOL (2e-7 deg, a grid of that cell size, 3x3 lookup); points
+  within SNAP_TOL of the tile edge go onto it, and a border point never
+  merges with an inner one; the grid is rebuilt in `snap_to_grid`.
+  7 tests in `tests/test_near_vertex_snap.py` (5 fail on dev). Results:
+  874 passed, pyflakes 0; +60+006 at 15 M rebuilt in the xp12water ws:
+  53 vertices merged, water fan hubs (>= 40 triangles) 3,624 -> 3
+  (largest 87), DSF 244 -> 235 MB, 10 input angles < 0.5 deg left in the
+  tile, no edge > 2 km, UVs fine. Regression: 9 vertices merged,
+  879,155 -> 879,142 triangles, masks and log identical (a new baseline
+  after the commit). Every tile changes at its next step 2.
 
 ## Coding style
 
