@@ -166,7 +166,8 @@ something.
   NVMe (`F:\Ortho4XP_data`: OSM_data, Orthophotos, Elevation_data via the
   junctions). X-Plane 12 at `E:\X-Plane 12`.
 - `Ortho4XP.cfg` (gitignored, the user's): curvature_tol 0.25,
-  limit_tris 10 (40 made X-Plane hang loading 650 MB DSFs), mesh_zl 18,
+  limit_tris 15 (since 2026-11-27; 40 made X-Plane hang loading 650 MB
+  DSFs), max_levelled_segs 300000 (since 2026-11-27), mesh_zl 18,
   min_angle 10, mask_zl 16, road_level 5, airport cover ZL18 for all
   airports (3 km, apt_smoothing_pix 8), XP12 water with
   imprint_masks_to_dds (since 2026-11-26), use_decal_on_terrain,
@@ -231,8 +232,9 @@ something.
   tile's water and big_roads caches are made again from the store at
   its next step 1.
 - `test` a4257c4 (+ the docs merge after it) = dev + #155, #156, #157
-  (891 tests, regression PASS on 5a22a0f_frozen). dev waits for the
-  user's X-Plane look at +60+006 and the limit_tris 10/15 decision.
+  (891 tests, regression PASS on 5a22a0f_frozen). The user viewed
+  +60+006 (15 M, #155) on 2026-11-27: lake clean, ~4 min load (6 before
+  #155); dev waits for the user's OK.
 - XP12 water switched on 2026-11-26 (the user viewed test tile
   +18-065): `imprint_masks_to_dds=True` in Ortho4XP.cfg and all 1,597
   tile configs (only that line; backup
@@ -271,7 +273,12 @@ something.
   -> 3.90 m. The user's first X-Plane check (6 min load, streaked lake)
   found #155; that tile is rebuilt with #155 (235 MB) for a second
   check before any limit_tris change. Also seen there: max_levelled_segs (200000)
-  reached, 1,048 roads not levelled (#150 NOTE).
+  reached, 1,048 roads not levelled (#150 NOTE). Decided 2026-11-27
+  (the user: lake clean, ~4 min load): limit_tris 15 and
+  max_levelled_segs 300000 (scaled with it) in Ortho4XP.cfg and all
+  1,597 tile configs (only those two lines; backup
+  `cfg_backups\2026-11-27_limit_tris15`, SHA256SUMS). A tile gets them
+  at its next steps 1-2.
 - Last batches: E (121 wilderness tiles, ZL16) and 4 ZL15 holes, 124
   built, 0 failed (2026-11-25); then +69-052 for the Qeqertaq zone (#140):
   both zones on GO218, so every zone tile is on its zone's imagery.
