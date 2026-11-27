@@ -5,12 +5,15 @@ any error: they were found only by measuring the output.
   hubs      one point shared by many triangles (#155: a 65,000-triangle
             fan around one vertex)
   density   triangles in one 0.001 x 0.001 degree cell (#154/#155)
-  long      land triangles with an edge over 2 km (a lost constraint)
   uv        a texture UV that is not where its point lies in the tile's
             Web Mercator texture (#146), the same for the mask UVs, and
             UVs outside [0, 1]
   files     terrain files and the textures they name, missing in the tile
   nan       NaN or infinity in a pool
+No check of triangle size: Triangle4XP refines by terrain curvature only,
+so flat ground (airports built flat, lakes, sea-level flats) rightly gets
+triangles as large as a texture square, and a triangle past its texture's
+edge already shows as a UV outside [0, 1].
 A problem is logged as a WARNING naming the place; the tile is still
 built (the DSF is fine to load, only parts of it may look wrong). The
 result is also written to the tile's check file, so a batch can list the
@@ -32,14 +35,12 @@ import O4_UI_Utils as UI
 LIMITS = {
     "hub_max": 400,      # triangles at one point (lake fans reach ~100)
     "density_max": 6000,  # triangles in a 0.001 degree cell
-    "long": 0,           # land edges over LONG_EDGE_M
     "uv_bad": 0,
     "mask_uv_bad": 0,
     "uv_range": 0,
     "missing_files": 0,
     "nan": 0,
 }
-LONG_EDGE_M = 2000
 # 16-bit DSF positions are coarser than a ZL18 texel at high latitudes
 # (82 N: up to ~2 texels, 17 cm); #146 was hundreds of texels off.
 UV_TEXELS = 4
@@ -277,7 +278,7 @@ def check_dsf(path, tile_dir=None):
     (lon, lat) = (lonlat[:, 0], lonlat[:, 1])
     res = {"nan": int((~numpy.isfinite(lonlat)).sum()
                       + (~numpy.isfinite(uvs)).sum())}
-    (phys, land) = ([], [])
+    phys = []
     (uv_bad, mask_bad, uv_range) = (0, 0, 0)
     worst = (0.0, None)
     for ((ter, flag), g) in patches.items():
@@ -285,9 +286,6 @@ def check_dsf(path, tile_dir=None):
         sea = name.endswith("_sea.ter")
         if flag == 1:
             phys.append(g)
-            # open sea triangles are rightly large
-            land.append(numpy.full(len(g), name.startswith("terrain/")
-                                   and not sea))
         m = TER_NAME.match(name)
         if not m:
             continue
@@ -342,20 +340,6 @@ def check_dsf(path, tile_dir=None):
         res["density_at"] = _at((uc[k] % 1_000_000) / 1000 + 0.0005,
                                 (uc[k] // 1_000_000) / 1000 + 0.0005)
         del cell, uc, cc
-        is_land = numpy.concatenate(land)
-        TL = T[is_land]
-        kx = 111320 * numpy.cos(numpy.radians(cy[is_land]))
-        longest = numpy.zeros(len(TL))
-        for i in range(3):
-            (a, b) = (TL[:, i], TL[:, (i + 1) % 3])
-            d = numpy.hypot((lon[b] - lon[a]) * kx, (lat[b] - lat[a]) * 111320)
-            numpy.maximum(longest, d, out=longest)
-        over = numpy.nonzero(longest > LONG_EDGE_M)[0]
-        res["long"] = len(over)
-        if len(over):
-            j = over[longest[over].argmax()]
-            res["long_at"] = _at(cy[is_land][j], cx[is_land][j])
-            res["long_m"] = int(longest[j])
     if tile_dir:
         missing = _missing_files(terrains, tile_dir)
         res["missing_files"] = len(missing)
@@ -395,10 +379,6 @@ def warnings_of(res):
     if res.get("density_max", 0) > LIMITS["density_max"]:
         out.append(f"{res['density_max']} triangles in one 0.001 degree "
                    f"cell ({res['density_at']})")
-    if res.get("long", 0) > LIMITS["long"]:
-        out.append(f"{res['long']} land triangle(s) with an edge over "
-                   f"{LONG_EDGE_M} m, longest {res['long_m']} m "
-                   f"({res['long_at']})")
     if res.get("uv_bad", 0) > LIMITS["uv_bad"]:
         (err, (name, at)) = res["uv_worst"]
         out.append(f"{res['uv_bad']} texture coordinate(s) off by more than "
