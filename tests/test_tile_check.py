@@ -137,6 +137,16 @@ def test_clean_tile_has_no_warning(build_dir):
     assert TCHECK.read_result(build_dir, LAT, LON) == []
 
 
+def test_large_flat_triangles_are_not_flagged(build_dir):
+    # One texture square in two triangles, ~4.9 km across: what Triangle4XP
+    # makes on flat ground (airports, lakes, deltas); the census flagged 20
+    # such tiles with a 2 km edge limit.
+    grid_tile(build_dir, nx=2, ny=2)
+    res = TCHECK.check_dsf(FNAMES.dsf_file(build_dir, LAT, LON), build_dir)
+    assert res["triangles"] == 2
+    assert TCHECK.warnings_of(res) == []
+
+
 def test_hub_is_flagged_with_its_place(build_dir):
     # #155: tens of thousands of triangles around one vertex
     grid_tile(build_dir, hub=500)
