@@ -141,6 +141,16 @@ something.
    `probe_point.py` (ws `G:\Ortho4XP_tests\eval\ws`, see the history),
    `profile_steps.py 1|2.5 [src] [--verify-encroach]` (cProfile of
    step 1 or 2.5 in the regression ws, after a regression run).
+   `tile_lint.py <Tiles dir> [tiles] [--list F] [--json OUT]` (read
+   only, reads DSF binaries, ~10 s per 10 M tile; `--dsf F`, `--mesh
+   Data<tile>.mesh`): fan hubs (#155), triangle density per 0.001 deg
+   cell (#154/#155), slivers, land edges > 2 km, texture UV vs Web
+   Mercator (#146; XP12 `_sea` terrains have the UV in planes 7-8; masks
+   repeat the texture UV), pools (#153), missing .ter/textures, NaN.
+   Run it on every chunk of a batch. Pilot of 2026-11-27 on the built
+   DSFs: 4 tiles with #155-class hotspots (+60+006 hub 64,930, +47+011
+   3,360, +64-052 728, +82-039 7,040), all clean when meshed with test
+   5a22a0f (hubs 86/61/29/156); everything else within the limits.
 6. **In `G:\Ortho4XP`** (the user's folder, other tiles): `gui_smoke.py
    [src_dir]` (7 checks; hash-check `.last_gui_params.txt`, `Ortho4XP.cfg`
    and `Ortho4XP.log` before and after, the GUI must be closed),
@@ -176,8 +186,17 @@ something.
   Canada, Alaska, Patagonia, islands worldwide). The 9 Danish tiles
   +54..+56 / +010..+012 (GO2 ZL16) are the user's own; the regression
   never touches them.
-- Imagery: GO2 by default (ZL16, ZL15 in the Arctic), Arc/BI fill GO2's
-  404s (#117). Denmark: DFA (Dataforsyningen over GO2) in 23 tile configs.
+- Imagery: GO2 by default at ZL16 (1,464 tile configs; 110 mostly ice
+  or water tiles stay ZL15), Arc/BI fill GO2's 404s (#117). ZL check
+  2026-11-27 (`G:\Ortho4XP_tests\zl_eval_2026-11-27.jsonl`, 12 points
+  per tile, z16 against its z15 parent stretched, FFT, cut-off 3;
+  stretched+JPEG controls 0.6-1.9): GO2's z16 is real detail wherever it
+  exists (8,664 of 8,671 samples on ZL16 tiles, Alaska included; 1,987
+  of 1,993 on ZL15 tiles). 252 ZL15 tiles with >= 3 detailed points were
+  raised to default_zl/mask_zl 16 in their tile configs (user's OK;
+  backup `cfg_backups\2026-11-27_zl16_raise`, list
+  `batches\zl16_candidates_2026-11-27.txt`); they get ZL16 when step 3
+  runs, and their old *_GO215.dds (~315 GB) then become unused. Denmark: DFA (Dataforsyningen over GO2) in 23 tile configs.
   Faroes: +62-008 GO2 with a FOA ZL18 zone at Vágar. Greenland: 81 ZL18
   zones in 43 tile configs (+ the Nuuk BI zone).
 - OSM: Geofabrik extracts in `OSM_data\Geofabrik\extracts\<region
@@ -196,6 +215,12 @@ something.
   for fresh tiles), `then_run.ps1` chains one after another; lists, logs
   and pre-check reports in that folder. `.last_batch_tiles.txt` holds a
   running batch's unfinished tiles (the GUI's tile window selects them).
+  Full rebuild: `batches\run_chunks.ps1 -Lists <p00>,<f01>,...` runs per
+  chunk refresh_pre117_imagery.py --apply, batch_run.py, tile_lint.py
+  and `tools\unused_textures.py` (dry run: textures and .ter files the
+  tile's current DSF no longer uses; --apply only with the user's OK);
+  it stops before the next chunk on a failed tile, a flagged tile or an
+  abnormal end. Summary: `batches\run_chunks.summary.log`.
 - `keep_dsf_backup` is on (default); the old `.dsf.bak` files were
   deleted in the 2026-11-25 cleanup.
 
@@ -218,11 +243,17 @@ something.
   water: 6 built, 0 failed, 19 min; largest pool 37,817 (+39-108) and
   46,030 (+43-066), no overflow pool needed; 54-89 DXT5 textures on
   the 4 coastal tiles. The 25 tiles r01 built (before #151-#154 and XP12
-  water) are list r10. Lists r02-r10 (1,591 tiles) not started; with
-  r01/r01b they cover all 1,597 tiles once.
+  water) are list r10. Lists r02-r10 are superseded (2026-11-27): #155
+  changes every tile, so `batches\full_2026-11-27_p00.txt` (28 pilot
+  tiles chosen for diversity, the reason on each line) and f01-f08 (200
+  each, by 10x10 block) cover all 1,597 tiles once. Not started: the
+  user wants the full run only when confident; proposed a pilot plus an
+  automated output check (fan hubs, UVs, pools, sea/lake levels,
+  density) on every chunk.
 - Readiness review 2026-11-26 for the full rebuild: no code change left
   open; every tile setting equals the global cfg except provider/ZL
-  (GO2 ZL16, GO2 ZL15 on 362 tiles with mask_zl 15, DFA on 23).
+  (GO2 ZL16, GO2 ZL15 on 362 tiles with mask_zl 15 - 252 raised to
+  ZL16 on 2026-11-27 - DFA on 23).
   **Imagery:** 798 tiles have GO2 textures (ZL >= 16) from before #117,
   whose GO2 404s were filled with GO2's own lower levels (blurry
   patches, seen in +66+015; after #117, 8% of ZL16 textures needed
